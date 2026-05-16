@@ -5,6 +5,7 @@
 
     struct PlayerWindowView_macOS: View {
         private let logger = Logger(label: "PlayerWindowView_macOS")
+        private static let defaultWindowTitle = "プレイヤー"
         let appModel: AppModel
         let initialPlayable: Playable?
         @Environment(\.dismiss) private var dismiss
@@ -46,6 +47,7 @@
             .overlay {
                 WindowConfigurator_macOS { window in
                     playerWindow = window
+                    applyWindowTitle(window: window)
                     window.titleVisibility = .hidden
                     window.titlebarAppearsTransparent = true
                     window.titlebarSeparatorStyle = .automatic
@@ -62,6 +64,9 @@
             }
             .onChange(of: isAlwaysOnTop) { _, newValue in
                 playerWindow?.level = newValue ? .floating : .normal
+            }
+            .onChange(of: playerState.currentPlayable?.title) { _, _ in
+                applyWindowTitle(window: playerWindow)
             }
             .onChange(of: isOverlayVisible) { _, _ in
                 if let playerWindow {
@@ -138,6 +143,17 @@
                 if let button = window.standardWindowButton(buttonType) {
                     button.isHidden = !visible
                 }
+            }
+        }
+
+        private func applyWindowTitle(window: NSWindow?) {
+            guard let window else { return }
+            let currentTitle =
+                playerState.currentPlayable?.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let currentTitle, !currentTitle.isEmpty {
+                window.title = currentTitle
+            } else {
+                window.title = Self.defaultWindowTitle
             }
         }
 
