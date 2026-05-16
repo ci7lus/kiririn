@@ -103,6 +103,7 @@
 
         private var showsOrientationLockButton: Bool {
             guard playerState.mode != .mini else { return false }
+            guard UIDevice.current.userInterfaceIdiom != .pad else { return false }
             if usesFullscreenPlayerLayout {
                 return playerState.showControls
             }
@@ -1909,6 +1910,9 @@
         private func toggleLandscapeOrientationLock() {
             orientationToggleTask?.cancel()
             let shouldUnlock = isLandscapeOrientationLocked
+            if !shouldUnlock && !PlayerOrientationController.shared.canRotateCurrentWindow {
+                return
+            }
             withAnimation(.easeInOut(duration: 0.28)) {
                 orientationButtonRotation += 180
             }
@@ -1918,8 +1922,9 @@
                 if shouldUnlock {
                     unlockLandscapeOrientation()
                 } else {
-                    PlayerOrientationController.shared.lockLandscape()
+                    if PlayerOrientationController.shared.lockLandscape() {
                     isLandscapeOrientationLocked = true
+                    }
                 }
                 orientationToggleTask = nil
             }

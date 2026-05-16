@@ -22,20 +22,69 @@ extension Notification.Name {
             supportedOrientations == .landscape
         }
 
-        func lockLandscape() {
+        var canRotateCurrentWindow: Bool {
+            guard UIDevice.current.userInterfaceIdiom == .pad else { return true }
+            guard let scene = activeWindowScene(), let keyWindow = scene.keyWindow else {
+                return false
+            }
+
+            let tolerance: CGFloat = 2
+            let windowSides = [keyWindow.bounds.width, keyWindow.bounds.height].sorted()
+            let screenSides = [scene.screen.bounds.width, scene.screen.bounds.height].sorted()
+
+            return abs(windowSides[0] - screenSides[0]) <= tolerance
+                && abs(windowSides[1] - screenSides[1]) <= tolerance
+        }
+
+        @discardableResult
+        func lockLandscape() -> Bool {
+            guard canRotateCurrentWindow else { return false }
             supportedOrientations = .landscape
+            refreshSupportedOrientations()
             requestOrientation(.landscape)
+            return true
         }
 
         func unlockAndReturnToPortrait() {
             supportedOrientations = Self.defaultSupportedOrientations
-            requestOrientation(.portrait)
+            refreshSupportedOrientations()
+            if canRotateCurrentWindow || UIDevice.current.userInterfaceIdiom != .pad {
+                requestOrientation(.portrait)
+            }
         }
 
         private func requestOrientation(_ orientations: UIInterfaceOrientationMask) {
             guard let scene = activeWindowScene() else { return }
-            scene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
-            scene.requestGeometryUpdate(.iOS(interfaceOrientations: orientations))
+            refreshSupportedOrientations(in: scene)
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: orientations)) { error in
+                #if DEBUG
+                    debugPrint(
+                        "PlayerOrientationController requestGeometryUpdate failed:",
+                        error.localizedDescription
+                    )
+                #endif
+            }
+        }
+
+        private func refreshSupportedOrientations() {
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                refreshSupportedOrientations(in: scene)
+            }
+        }
+
+        private func refreshSupportedOrientations(in scene: UIWindowScene) {
+            for window in scene.windows {
+                refreshSupportedOrientations(in: window.rootViewController)
+            }
+        }
+
+        private func refreshSupportedOrientations(in viewController: UIViewController?) {
+            guard let viewController else { return }
+            viewController.setNeedsUpdateOfSupportedInterfaceOrientations()
+            for child in viewController.children {
+                refreshSupportedOrientations(in: child)
+            }
+            refreshSupportedOrientations(in: viewController.presentedViewController)
         }
 
         private func activeWindowScene() -> UIWindowScene? {
