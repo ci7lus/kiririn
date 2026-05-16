@@ -1,6 +1,7 @@
 #if !os(macOS)
     import SwiftUI
     import Combine
+    import UIKit
     import VLCKit
     import OrderedCollections
 
@@ -54,6 +55,9 @@
         @State private var captureFeedbackSystemImage = ""
         @State private var isCaptureFeedbackVisible = false
         @State private var captureFeedbackHideTask: DispatchWorkItem?
+        @State private var isLandscapeOrientationLocked = false
+        @State private var orientationButtonRotation: Double = 0
+        @State private var orientationToggleTask: Task<Void, Never>?
 
         init(
             playerState: PlayerState,
@@ -97,6 +101,14 @@
             return Double(playerState.playbackStatus.position)
         }
 
+        private var showsOrientationLockButton: Bool {
+            guard playerState.mode != .mini else { return false }
+            if usesFullscreenPlayerLayout {
+                return playerState.showControls
+            }
+            return playerState.showControls && dragOffset == 0
+        }
+
         private var usesFullscreenPlayerLayout: Bool {
             switch playerState.mode {
             case .fullscreen:
@@ -129,9 +141,15 @@
                     case .fullscreen:
                         fullscreenView(geo: geo)
                     }
+
+                    floatingOrientationLockButton(geo: geo)
                 }
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.86), value: playerState.mode)
+            .onAppear {
+                isLandscapeOrientationLocked = PlayerOrientationController.shared.isLandscapeLocked
+                orientationButtonRotation = isLandscapeOrientationLocked ? 180 : 0
+            }
             #if os(macOS)
                 .buttonStyle(.plain)
             #endif
@@ -150,9 +168,17 @@
                 isInfoSheetVisible = true
                 if newMode == .mini {
                     miniEntrySourceMode = oldMode
+                    if isLandscapeOrientationLocked {
+                        unlockLandscapeOrientation()
+                    }
                 }
             }
             .onDisappear {
+                orientationToggleTask?.cancel()
+                orientationToggleTask = nil
+                if isLandscapeOrientationLocked {
+                    unlockLandscapeOrientation()
+                }
                 tapWindowResetTask?.cancel()
                 tapWindowResetTask = nil
                 tapWindowInitialControlsState = nil
@@ -427,6 +453,27 @@
         }
 
         @ViewBuilder
+        private func floatingOrientationLockButton(geo: GeometryProxy) -> some View {
+            if showsOrientationLockButton {
+                let frame = playerSurfaceFrame(in: geo)
+                let bottomInset =
+                    usesFullscreenPlayerLayout
+                    ? max(geo.safeAreaInsets.bottom + 2, 2)
+                    : 2
+                orientationLockButton
+                    .position(
+                        x: frame.maxX - 30,
+                        y: frame.maxY - bottomInset - 22
+                    )
+                    .transition(.opacity)
+                    .zIndex(10)
+                    .animation(.easeInOut(duration: 0.28), value: geo.size)
+                    .animation(.easeInOut(duration: 0.28), value: verticalSizeClass)
+                    .animation(.easeInOut(duration: 0.2), value: playerState.showControls)
+            }
+        }
+
+        @ViewBuilder
         private func videoControlsOverlay(width: CGFloat, height: CGFloat) -> some View {
             ZStack {
                 Color.clear
@@ -499,6 +546,7 @@
 
                     seekBarOverlay(horizontalPadding: 0, bottomPadding: 0)
                 }
+
             }
             .frame(width: width, height: height)
         }
@@ -1342,7 +1390,27 @@
                         bottomPadding: 16
                     )
                 }
+
             }
+        }
+
+        private var orientationLockButton: some View {
+            Button {
+                toggleLandscapeOrientationLock()
+            } label: {
+                Image(systemName: "arrow.trianglehead.2.clockwise")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .padding(6)
+                    .rotationEffect(.degrees(orientationButtonRotation))
+            }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+            .accessibilityLabel(
+                isLandscapeOrientationLocked
+                    ? "横画面固定を解除して縦画面に戻す" : "横画面に固定"
+            )
         }
 
         @ViewBuilder
@@ -1494,17 +1562,21 @@
                     GeometryReader { geo in
                         let trackHeight: CGFloat = 4
                         let thumbSize: CGFloat = 16
+                        let interactionHeight: CGFloat = 24
                         let progress = CGFloat(displayProgress)
                         let availableWidth = geo.size.width - horizontalPadding * 2
 
                         ZStack(alignment: .leading) {
                             Rectangle()
                                 .fill(Color.clear)
-                                .frame(height: 5)
-                                .offset(y: 50)
+                                .frame(width: availableWidth, height: interactionHeight)
+                                .position(
+                                    x: horizontalPadding + availableWidth / 2,
+                                    y: geo.size.height / 2 + 8
+                                )
                                 .contentShape(Rectangle())
                                 .gesture(
-                                    DragGesture(minimumDistance: 0)
+                                    DragGesture(minimumDistance: 8)
                                         .onChanged { value in
                                             if !playerState.isSeeking {
                                                 initialScrubPosition =
@@ -1512,7 +1584,7 @@
                                                 initialScrubTime = playerState.playbackStatus.time
                                             }
                                             playerState.isSeeking = true
-                                            let relativeX = value.location.x - horizontalPadding
+                                            let relativeX = value.location.x
                                             let newProgress = min(
                                                 max(0, relativeX / availableWidth), 1)
                                             scrubPosition = Float(newProgress)
@@ -1566,6 +1638,7 @@
                 if isSeekActionAvailable {
                     GeometryReader { geo in
                         let trackHeight: CGFloat = playerState.isSeeking ? 10 : 5
+                        let interactionHeight: CGFloat = 24
                         let progress = CGFloat(displayProgress)
                         let availableWidth = geo.size.width - horizontalPadding * 2
 
@@ -1585,11 +1658,14 @@
 
                             Rectangle()
                                 .fill(Color.clear)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 44)
+                                .frame(width: availableWidth, height: interactionHeight)
+                                .position(
+                                    x: horizontalPadding + availableWidth / 2,
+                                    y: geo.size.height / 2
+                                )
                                 .contentShape(Rectangle())
                                 .gesture(
-                                    DragGesture(minimumDistance: 0)
+                                    DragGesture(minimumDistance: 8)
                                         .onChanged { value in
                                             if !playerState.isSeeking {
                                                 initialScrubPosition =
@@ -1597,7 +1673,7 @@
                                                 initialScrubTime = playerState.playbackStatus.time
                                             }
                                             playerState.isSeeking = true
-                                            let relativeX = value.location.x - horizontalPadding
+                                            let relativeX = value.location.x
                                             let newProgress = min(
                                                 max(0, relativeX / availableWidth), 1)
                                             scrubPosition = Float(newProgress)
@@ -1636,12 +1712,15 @@
                             .bold()
                             .monospacedDigit()
                             .foregroundStyle(.white.opacity(0.8))
+                            .padding(.trailing, showsOrientationLockButton ? 60 : 0)
                     } else if isSeekActionAvailable && displayTime > 0 {
                         Text(displayTime.playerTimeString)
                             .font(.caption)
                             .bold()
                             .monospacedDigit()
                             .foregroundStyle(.white.opacity(0.8))
+                        Spacer()
+                    } else {
                         Spacer()
                     }
                 }
@@ -1825,6 +1904,31 @@
             }
             seekFeedbackHideTask = task
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: task)
+        }
+
+        private func toggleLandscapeOrientationLock() {
+            orientationToggleTask?.cancel()
+            let shouldUnlock = isLandscapeOrientationLocked
+            withAnimation(.easeInOut(duration: 0.28)) {
+                orientationButtonRotation += 180
+            }
+            let task = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(120))
+                guard !Task.isCancelled else { return }
+                if shouldUnlock {
+                    unlockLandscapeOrientation()
+                } else {
+                    PlayerOrientationController.shared.lockLandscape()
+                    isLandscapeOrientationLocked = true
+                }
+                orientationToggleTask = nil
+            }
+            orientationToggleTask = task
+        }
+
+        private func unlockLandscapeOrientation() {
+            PlayerOrientationController.shared.unlockAndReturnToPortrait()
+            isLandscapeOrientationLocked = false
         }
     }
 

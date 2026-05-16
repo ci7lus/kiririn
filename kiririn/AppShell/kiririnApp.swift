@@ -10,7 +10,65 @@ extension Notification.Name {
 #if canImport(UIKit) && !os(macOS)
     import UIKit
 
+    @MainActor
+    final class PlayerOrientationController {
+        static let shared = PlayerOrientationController()
+
+        private(set) var supportedOrientations: UIInterfaceOrientationMask =
+            PlayerOrientationController.defaultSupportedOrientations
+
+        var isLandscapeLocked: Bool {
+            supportedOrientations == .landscape
+        }
+
+        func lockLandscape() {
+            supportedOrientations = .landscape
+            requestOrientation(.landscape)
+        }
+
+        func unlockAndReturnToPortrait() {
+            supportedOrientations = Self.defaultSupportedOrientations
+            requestOrientation(.portrait)
+        }
+
+        private func requestOrientation(_ orientations: UIInterfaceOrientationMask) {
+            guard let scene = activeWindowScene() else { return }
+            scene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: orientations))
+        }
+
+        private func activeWindowScene() -> UIWindowScene? {
+            let windowScenes = UIApplication.shared.connectedScenes.compactMap {
+                $0 as? UIWindowScene
+            }
+            if let keyWindowScene = windowScenes.first(where: { scene in
+                scene.activationState == .foregroundActive
+                    && scene.windows.contains(where: { $0.isKeyWindow })
+            }) {
+                return keyWindowScene
+            }
+            return windowScenes.first(where: { $0.activationState == .foregroundActive })
+        }
+
+        private static var defaultSupportedOrientations: UIInterfaceOrientationMask {
+            UIDevice.current.userInterfaceIdiom == .pad ? .all : .portrait
+        }
+    }
+
+    extension UIWindowScene {
+        fileprivate var keyWindow: UIWindow? {
+            windows.first(where: \.isKeyWindow)
+        }
+    }
+
     class AppDelegate: NSObject, UIApplicationDelegate {
+        func application(
+            _: UIApplication,
+            supportedInterfaceOrientationsFor _: UIWindow?
+        ) -> UIInterfaceOrientationMask {
+            PlayerOrientationController.shared.supportedOrientations
+        }
+
         func application(
             _ application: UIApplication, didDiscardSceneSessions sceneSessions: Set<UISceneSession>
         ) {
