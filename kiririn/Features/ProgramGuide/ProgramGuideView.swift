@@ -139,6 +139,13 @@ struct ProgramGuideView: View {
                     updateDisplayChannels()
                 }
                 .onChange(of: channels) { _, _ in updateDisplayChannels() }
+                .onChange(of: manager.isCacheReady) { _, isReady in
+                    guard isReady else { return }
+                    Task {
+                        await reloadPrograms()
+                        updateDisplayChannels()
+                    }
+                }
                 .onChange(of: manager.services) { _, _ in
                     if selectedBroadcastType == favoriteBroadcastType
                         && !manager.hasFavoriteServices

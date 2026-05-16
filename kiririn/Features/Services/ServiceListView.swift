@@ -91,6 +91,10 @@ struct ServiceListView: View {
         .onChange(of: viewModel.searchText) {
             triggerRebuild()
         }
+        .onChange(of: manager.isCacheReady) { _, isReady in
+            guard isReady else { return }
+            triggerRebuild()
+        }
         .onChange(of: manager.services) {
             triggerRebuild()
         }
