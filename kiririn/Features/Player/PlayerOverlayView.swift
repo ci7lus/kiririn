@@ -28,6 +28,7 @@
         @State private var miniPlayerCenter: CGPoint = .zero
         @State private var miniPlayerDragOffset: CGSize = .zero
         @State private var miniPlayerBaseWidth: CGFloat = 280
+        @State private var hasCustomMiniPlayerSize = false
         @State private var miniPlayerPinchStartWidth: CGFloat?
         @State private var miniPlayerPinchStartCenter: CGPoint?
         @State private var miniPlayerPinchStartHeight: CGFloat?
@@ -119,6 +120,30 @@
             case .mini:
                 return false
             }
+        }
+
+        private var showsFullscreenToggleButton: Bool {
+            guard showsLowerContext else { return false }
+            return !(UIDevice.current.userInterfaceIdiom == .phone && verticalSizeClass == .compact)
+        }
+
+        private func miniPlayerWidthBounds(in geo: GeometryProxy) -> (
+            margin: CGFloat,
+            minWidth: CGFloat,
+            maxWidth: CGFloat
+        ) {
+            let margin: CGFloat = 12
+            let availableWidth = max(120, geo.size.width - margin * 2)
+            let minWidth = min(180, availableWidth)
+            let maxWidth = min(availableWidth, max(380, geo.size.width / 2))
+            return (margin, minWidth, maxWidth)
+        }
+
+        private func effectiveMiniPlayerWidth(in geo: GeometryProxy) -> CGFloat {
+            let bounds = miniPlayerWidthBounds(in: geo)
+            let preferredWidth = max(geo.size.width, geo.size.height) / 3
+            let baseWidth = hasCustomMiniPlayerSize ? miniPlayerBaseWidth : preferredWidth
+            return min(max(baseWidth, bounds.minWidth), bounds.maxWidth)
         }
 
         var body: some View {
@@ -261,11 +286,7 @@
                 let height = geo.size.width * 9 / 16
                 return CGRect(x: 0, y: 0, width: geo.size.width, height: height)
             case .mini:
-                let miniMargin: CGFloat = 12
-                let availableWidth = max(120, geo.size.width - miniMargin * 2)
-                let minMiniWidth = min(180, availableWidth)
-                let maxMiniWidth = min(380, availableWidth)
-                let miniWidth = min(max(miniPlayerBaseWidth, minMiniWidth), maxMiniWidth)
+                let miniWidth = effectiveMiniPlayerWidth(in: geo)
                 let miniHeight = miniWidth * 9 / 16
                 let center: CGPoint
                 if hasInitializedMiniPlayerPosition {
@@ -538,7 +559,10 @@
 
                         Spacer()
 
-                        topRightControlButtons(isFullscreen: false)
+                        topRightControlButtons(
+                            isFullscreen: false,
+                            showsFullscreenToggle: showsFullscreenToggleButton
+                        )
                     }
                     .padding(.top, 4)
                     .padding(.trailing, 8)
@@ -833,11 +857,11 @@
 
         @ViewBuilder
         private func miniPlayerView(geo: GeometryProxy) -> some View {
-            let miniMargin: CGFloat = 12
-            let availableWidth = max(120, geo.size.width - miniMargin * 2)
-            let minMiniWidth = min(180, availableWidth)
-            let maxMiniWidth = min(380, availableWidth)
-            let miniWidth = min(max(miniPlayerBaseWidth, minMiniWidth), maxMiniWidth)
+            let bounds = miniPlayerWidthBounds(in: geo)
+            let miniMargin = bounds.margin
+            let minMiniWidth = bounds.minWidth
+            let maxMiniWidth = bounds.maxWidth
+            let miniWidth = effectiveMiniPlayerWidth(in: geo)
             let miniHeight = miniWidth * 9 / 16
             let miniSize = CGSize(width: miniWidth, height: miniHeight)
 
@@ -958,8 +982,10 @@
                         .onChanged { value in
                             markMiniPlayerInteraction()
                             if miniPlayerPinchStartWidth == nil {
-                                miniPlayerPinchStartWidth = miniPlayerBaseWidth
-                                miniPlayerPinchStartHeight = miniPlayerBaseWidth * 9 / 16
+                                let startWidth = effectiveMiniPlayerWidth(in: geo)
+                                hasCustomMiniPlayerSize = true
+                                miniPlayerPinchStartWidth = startWidth
+                                miniPlayerPinchStartHeight = startWidth * 9 / 16
                                 miniPlayerPinchStartCenter = CGPoint(
                                     x: miniPlayerCenter.x + miniPlayerDragOffset.width,
                                     y: miniPlayerCenter.y + miniPlayerDragOffset.height
@@ -988,8 +1014,7 @@
                                     x: anchorPosition.x + clampedWidth * (0.5 - anchorX),
                                     y: anchorPosition.y + clampedHeight * (0.5 - anchorY)
                                 )
-                                miniPlayerBaseWidth = min(
-                                    max(resizedWidth, minMiniWidth), maxMiniWidth)
+                                miniPlayerBaseWidth = clampedWidth
                                 miniPlayerCenter = clampedMiniPlayerCenter(
                                     resizedCenter,
                                     in: geo,
@@ -1043,9 +1068,8 @@
                     }
                 }
                 .onAppear {
+                    miniPlayerBaseWidth = effectiveMiniPlayerWidth(in: geo)
                     if !hasInitializedMiniPlayerPosition {
-                        miniPlayerBaseWidth = min(
-                            max(miniPlayerBaseWidth, minMiniWidth), maxMiniWidth)
                         let targetCenter = centerForMiniPlayerCorner(
                             miniPlayerCorner, in: geo, miniSize: miniSize, margin: miniMargin)
                         miniPlayerCenter = sourcePlayerCenterForMiniTransition(in: geo)
@@ -1054,8 +1078,6 @@
                             miniPlayerCenter = targetCenter
                         }
                     } else {
-                        miniPlayerBaseWidth = min(
-                            max(miniPlayerBaseWidth, minMiniWidth), maxMiniWidth)
                         miniPlayerCenter = centerForMiniPlayerCorner(
                             miniPlayerCorner, in: geo, miniSize: miniSize, margin: miniMargin)
                     }
@@ -1066,7 +1088,7 @@
                     miniOverlayHideTask = nil
                 }
                 .onChange(of: geo.size) {
-                    miniPlayerBaseWidth = min(max(miniPlayerBaseWidth, minMiniWidth), maxMiniWidth)
+                    miniPlayerBaseWidth = effectiveMiniPlayerWidth(in: geo)
                     miniPlayerCenter = centerForMiniPlayerCorner(
                         miniPlayerCorner, in: geo, miniSize: miniSize, margin: miniMargin)
                 }
@@ -1347,7 +1369,7 @@
                                 Spacer()
                                 topRightControlButtons(
                                     isFullscreen: true,
-                                    showsFullscreenToggle: isPortraitFullscreen
+                                    showsFullscreenToggle: showsFullscreenToggleButton
                                 )
                             }
                         }
@@ -1377,7 +1399,7 @@
 
                             topRightControlButtons(
                                 isFullscreen: true,
-                                showsFullscreenToggle: isPortraitFullscreen
+                                showsFullscreenToggle: showsFullscreenToggleButton
                             )
                             .padding(.trailing, 8)
                         }
@@ -1919,11 +1941,13 @@
             let task = Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(120))
                 guard !Task.isCancelled else { return }
-                if shouldUnlock {
-                    unlockLandscapeOrientation()
-                } else {
-                    if PlayerOrientationController.shared.lockLandscape() {
-                    isLandscapeOrientationLocked = true
+                withAnimation {
+                    if shouldUnlock {
+                        unlockLandscapeOrientation()
+                    } else {
+                        if PlayerOrientationController.shared.lockLandscape() {
+                            isLandscapeOrientationLocked = true
+                        }
                     }
                 }
                 orientationToggleTask = nil
