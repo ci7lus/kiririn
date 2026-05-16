@@ -320,10 +320,10 @@ struct BackendRowView: View {
                             }
                         }
 
-                        if let error = state.lastError, state.status == .error {
+                        if let error = state.lastError {
                             Text(error)
                                 .font(.caption2)
-                                .foregroundStyle(.red)
+                                .foregroundStyle(state.status == .error ? .red : .orange)
                                 .lineLimit(2)
                         }
                     }

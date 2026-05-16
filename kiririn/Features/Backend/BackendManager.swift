@@ -201,6 +201,15 @@ class BackendManager {
         }
     }
 
+    private func backendLogDescription(for backendId: String) -> String {
+        if let config = providerConfigurations[backendId]
+            ?? configStore.configurations.first(where: { $0.id == backendId })
+        {
+            return "backend \(config.name) (\(config.type.displayName), id: \(config.id))"
+        }
+        return "backend id \(backendId)"
+    }
+
     func connectAll() async {
         setupProviders()
         rebuildAggregatedData()
@@ -280,13 +289,16 @@ class BackendManager {
                 do {
                     let fetchedPrograms = try await provider.fetchPrograms()
                     await cacheStore.cachePrograms(fetchedPrograms, backendId: backendId)
+                    state.lastError = nil
                     lastProgramFullFetchDatesByBackend[backendId] = Date()
                     pendingProgramFullFetchBackendIDs.remove(backendId)
                     rebuildAggregatedData()
                     return .refreshed
                 } catch {
+                    state.lastError = error.localizedDescription
                     logger.error(
-                        "Failed to refresh program catalog for backend \(backendId): \(error)")
+                        "Failed to refresh program catalog for \(backendLogDescription(for: backendId)): \(error)"
+                    )
                     rebuildAggregatedData()
                     return .failed(error.localizedDescription)
                 }
