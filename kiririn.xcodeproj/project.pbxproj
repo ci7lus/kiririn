@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		CE171EEE2F61AE4D008DEA05 /* OrderedCollections in Frameworks */ = {isa = PBXBuildFile; productRef = CE171EED2F61AE4D008DEA05 /* OrderedCollections */; };
 		CE4442812FB87FAD0092C2BF /* VLCKit in Frameworks */ = {isa = PBXBuildFile; productRef = CE4442802FB87FAD0092C2BF /* VLCKit */; };
+		CE44428E2FB8B9050092C2BF /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = CE44428D2FB8B9050092C2BF /* Sentry */; };
 		CE47B1A72F4DC5AA00680B2E /* Logging in Frameworks */ = {isa = PBXBuildFile; productRef = CE47B1A62F4DC5AA00680B2E /* Logging */; };
 		CE47B1AA2F4DC65200680B2E /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CE47B1A92F4DC65200680B2E /* GRDB */; };
 		CE54EBE92FB834D4009AFCBC /* LicenseList in Frameworks */ = {isa = PBXBuildFile; productRef = CE54EBE82FB834D4009AFCBC /* LicenseList */; };
@@ -91,6 +92,7 @@
 				CE171EEE2F61AE4D008DEA05 /* OrderedCollections in Frameworks */,
 				CE4442812FB87FAD0092C2BF /* VLCKit in Frameworks */,
 				CE47B1A72F4DC5AA00680B2E /* Logging in Frameworks */,
+				CE44428E2FB8B9050092C2BF /* Sentry in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -166,6 +168,7 @@
 				CE171EED2F61AE4D008DEA05 /* OrderedCollections */,
 				CE54EBE82FB834D4009AFCBC /* LicenseList */,
 				CE4442802FB87FAD0092C2BF /* VLCKit */,
+				CE44428D2FB8B9050092C2BF /* Sentry */,
 			);
 			productName = kiririn;
 			productReference = 105FC57A2E9EAD3100EA8BCF /* kiririn.app */;
@@ -255,6 +258,7 @@
 				CE171EEC2F61AE4D008DEA05 /* XCRemoteSwiftPackageReference "swift-collections" */,
 				CE54EBE72FB834D4009AFCBC /* XCRemoteSwiftPackageReference "LicenseList" */,
 				CE44427F2FB87FAD0092C2BF /* XCLocalSwiftPackageReference "Packages/VLCKit" */,
+				CE44428C2FB8B9050092C2BF /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 105FC57B2E9EAD3100EA8BCF /* Products */;
@@ -721,6 +725,14 @@
 				minimumVersion = 1.4.0;
 			};
 		};
+		CE44428C2FB8B9050092C2BF /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/getsentry/sentry-cocoa.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.13.0;
+			};
+		};
 		CE47B1A32F4DC5AA00680B2E /* XCRemoteSwiftPackageReference "swift-log" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/apple/swift-log";
@@ -756,6 +768,11 @@
 		CE4442802FB87FAD0092C2BF /* VLCKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = VLCKit;
+		};
+		CE44428D2FB8B9050092C2BF /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CE44428C2FB8B9050092C2BF /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = Sentry;
 		};
 		CE47B1A62F4DC5AA00680B2E /* Logging */ = {
 			isa = XCSwiftPackageProductDependency;

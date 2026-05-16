@@ -1,3 +1,4 @@
+import Sentry
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -45,6 +46,16 @@ struct SettingsView: View {
                     Label("このアプリについて", systemImage: "info.circle")
                 }
             }
+
+            #if DEBUG
+                Section("デバッグ") {
+                    Button {
+                        sendSentryTestError()
+                    } label: {
+                        Label("Sentryテスト送信", systemImage: "exclamationmark.bubble")
+                    }
+                }
+            #endif
         }
         .formStyle(.grouped)
         .navigationTitle("設定")
@@ -66,5 +77,21 @@ struct SettingsView: View {
                 print("Folder selection failed: \(error)")
             }
         }
+    }
+
+    private enum SentryManualTestError: Error {
+        case triggeredFromSettings
+    }
+
+    private func sendSentryTestError() {
+        do {
+            try throwSentryTestError()
+        } catch {
+            SentrySDK.capture(error: error)
+        }
+    }
+
+    private func throwSentryTestError() throws {
+        throw SentryManualTestError.triggeredFromSettings
     }
 }

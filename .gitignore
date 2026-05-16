@@ -65,3 +65,5 @@ fastlane/test_output
 
 /Vendor/
 /tmp.dmg
+
+.sentryclirc

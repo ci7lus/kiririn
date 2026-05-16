@@ -1,3 +1,4 @@
+import Sentry
 import SwiftUI
 
 extension Notification.Name {
@@ -83,6 +84,10 @@ extension Notification.Name {
 struct kiririnApp: App {
     @State private var appModel = AppModel.shared
 
+    init() {
+        SentryBootstrap.initializeIfAvailable()
+    }
+
     #if canImport(UIKit) && !os(macOS)
         @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     #endif
@@ -131,6 +136,24 @@ struct kiririnApp: App {
             }
             .defaultSize(width: 480, height: 560)
         #endif
+    }
+}
+
+private enum SentryBootstrap {
+    static let dsn =
+        "https://f85557a0b48501e363aa402ebf5e2c74@o481625.ingest.us.sentry.io/4511399987183616"
+
+    static func initializeIfAvailable() {
+        SentrySDK.start { options in
+            options.dsn = dsn
+            #if DEBUG
+                options.tracesSampleRate = 1.0
+                options.configureProfiling = {
+                    $0.sessionSampleRate = 1.0
+                    $0.lifecycle = .trace
+                }
+            #endif
+        }
     }
 }
 
