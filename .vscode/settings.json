@@ -1,0 +1,6 @@
+{
+    "sweetpad.build.xcodeWorkspacePath": "kiririn.xcodeproj/project.xcworkspace",
+    "chat.tools.terminal.autoApprove": {
+        "osascript": true
+    }
+}

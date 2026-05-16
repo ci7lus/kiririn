@@ -1,0 +1,327 @@
+import Foundation
+
+final class EPGStationProvider: LiveBackendProvider, RecordingBackendProvider {
+    let configuration: BackendConfiguration
+    private let client: APIClient
+    private var channels: [Int64: EPGStationChannel] = [:]
+    private var recordedItems: [Int64: EPGStationRecordedItem] = [:]
+
+    private var isLiveEnabled: Bool {
+        configuration.features.contains(.live)
+    }
+
+    private var isRecordingEnabled: Bool {
+        configuration.features.contains(.recording)
+    }
+
+    init(configuration: BackendConfiguration) {
+        self.configuration = configuration
+        self.client = APIClient(configuration: configuration)
+    }
+
+    func checkConnection() async throws {
+        let _: EPGStationConfig = try await client.request(path: "api/config")
+    }
+
+    func fetchHeaders() async throws -> [String: String] {
+        client.defaultHeaders
+    }
+
+    private func fetchEPGStationServices(isCacheAllowed: Bool = false) async throws -> [Int64:
+        EPGStationChannel]
+    {
+        if isCacheAllowed && !channels.isEmpty {
+            return channels
+        }
+        let response: [EPGStationChannel] = try await client.request(path: "api/channels")
+        channels = Dictionary(uniqueKeysWithValues: response.map { ($0.id, $0) })
+        return channels
+    }
+
+    func fetchServices() async throws -> [TVService] {
+        guard isLiveEnabled else { return [] }
+        return (try await fetchEPGStationServices()).values.map {
+            $0.toTVService(backendId: configuration.id)
+        }
+    }
+
+    func fetchPrograms() async throws -> [Program] {
+        guard isLiveEnabled else { return [] }
+        let response: [EPGStationScheduleChannel] = try await client.request(
+            path: "api/schedules",
+            queryItems: [
+                URLQueryItem(name: "isHalfWidth", value: "true")
+            ]
+        )
+        return response.flatMap { channel in
+            channel.programs.map { $0.toProgram(backendId: configuration.id) }
+        }
+    }
+
+    func buildLiveStreamPlayable(service: TVService, currentProgram: Program?) throws -> Playable {
+        guard let providerIdentifier = service.providerIdentifier,
+            let streamURL = client.buildStreamURL(
+                path: "api/streams/live/\(providerIdentifier)/m2ts",
+                queryItems: [URLQueryItem(name: "mode", value: "0")]
+            )
+        else {
+            throw APIError.invalidURL
+        }
+        return Playable(
+            streamURL: streamURL,
+            headers: client.defaultHeaders,
+            backendId: configuration.id,
+            source: .liveService(serviceUniqueId: service.id),
+            program: currentProgram,
+            service: service
+        )
+    }
+
+    func fetchRecords(pageToken: String?, limit: Int, keyword: String?) async throws
+        -> RecordsResult
+    {
+        guard isRecordingEnabled else { return RecordsResult(records: [], nextPageToken: nil) }
+        let offset = Int(pageToken ?? "0") ?? 0
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "offset", value: "\(offset)"),
+            URLQueryItem(name: "limit", value: "\(limit)"),
+            URLQueryItem(name: "isHalfWidth", value: "true"),
+        ]
+        if let keyword, !keyword.isEmpty {
+            queryItems.append(URLQueryItem(name: "keyword", value: keyword))
+        }
+        let response: EPGStationRecordsResponse = try await client.request(
+            path: "api/recorded",
+            queryItems: queryItems
+        )
+        let chs = try await fetchEPGStationServices(isCacheAllowed: true)
+        let records = response.records.map {
+            $0.toRecord(backendId: configuration.id, channel: chs[$0.channelId ?? 0] ?? nil)
+        }
+        for record in response.records {
+            recordedItems[record.id] = record
+        }
+
+        let nextOffset = offset + records.count
+        let nextPageToken = nextOffset < response.total ? "\(nextOffset)" : nil
+
+        return RecordsResult(records: records, nextPageToken: nextPageToken)
+    }
+
+    func fetchRecord(id: String) async throws -> Recorded {
+        guard isRecordingEnabled else {
+            throw URLError(.dataNotAllowed)
+        }
+        let raw: EPGStationRecordedItem = try await client.request(
+            path: "api/recorded/\(id)",
+            queryItems: [URLQueryItem(name: "isHalfWidth", value: "true")]
+        )
+        recordedItems[raw.id] = raw
+        let chs = try await fetchEPGStationServices(isCacheAllowed: true)
+        return raw.toRecord(backendId: configuration.id, channel: chs[raw.channelId ?? 0] ?? nil)
+    }
+
+    func fetchServiceLogoData(for service: TVService) async throws -> Data? {
+        if !service.hasLogoData {
+            return nil
+        }
+        guard let providerIdentifier = service.providerIdentifier else { return nil }
+        return try await client.requestData(path: "api/channels/\(providerIdentifier)/logo")
+    }
+
+    func fetchRecordThumbnail(id: String) async throws -> Data? {
+        let item: EPGStationRecordedItem
+        if let cached = recordedItems[Int64(id) ?? 0] {
+            item = cached
+        } else {
+            item = try await client.request(
+                path: "api/recorded/\(id)",
+                queryItems: [URLQueryItem(name: "isHalfWidth", value: "true")]
+            )
+            recordedItems[item.id] = item
+        }
+        guard let thumbnailId = item.thumbnails?.first else { return nil }
+        return try await client.requestData(path: "api/thumbnails/\(thumbnailId)")
+    }
+
+    func buildRecordedPlayable(record: Recorded, variant: RecordedVariant) throws -> Playable {
+        guard let streamURL = client.buildStreamURL(path: "api/videos/\(variant.id)") else {
+            throw APIError.invalidURL
+        }
+        return Playable(
+            streamURL: streamURL,
+            headers: client.defaultHeaders,
+            backendId: configuration.id,
+            source: .recordedFile(
+                recordId: record.id, variantId: variant.id, backendId: record.backendId),
+            program: buildRecordedProgram(record: record),
+            service: nil
+        )
+    }
+
+    private func buildRecordedProgram(record: Recorded) -> Program? {
+        guard let startAt = record.startAt,
+            let duration = record.duration,
+            let endAt = record.endAt
+        else {
+            return nil
+        }
+
+        return Program(
+            id: "record-\(record.backendId)-\(record.id)",
+            backendId: record.backendId,
+            eventId: nil,
+            serviceId: record.serviceId ?? 0,
+            networkId: record.networkId ?? 0,
+            startAt: startAt,
+            endAt: endAt,
+            duration: duration,
+            name: record.name,
+            desc: record.desc,
+            extended: record.extended,
+            genres: record.genres,
+            updatedAt: nil
+        )
+    }
+}
+
+private nonisolated struct EPGStationConfig: Codable, Sendable {
+    let socketIOPort: Int?
+}
+
+private nonisolated struct EPGStationChannel: Codable, Sendable {
+    let id: Int64
+    let serviceId: Int
+    let networkId: Int
+    let name: String
+    let halfWidthName: String?
+    let hasLogoData: Bool
+    let channelType: String?
+    let type: Int?
+    let remoteControlKeyId: Int?
+
+    func toTVService(backendId: String) -> TVService {
+        TVService(
+            id: "\(backendId)-\(id)",
+            providerIdentifier: "\(id)",
+            serviceId: serviceId,
+            networkId: networkId,
+            transportStreamId: nil,
+            name: halfWidthName ?? name,
+            type: TVService.ServiceType(rawValue: type ?? 0)
+                ?? TVService.ServiceType.digitalTelevision,
+            remoteControlKeyId: remoteControlKeyId,
+            hasLogoData: hasLogoData,
+            channel: channelType != nil
+                ? TVService.Channel(id: channelType!, type: channelType!) : nil,
+            backendId: backendId
+        )
+    }
+}
+
+private nonisolated struct EPGStationSchedules: Codable, Sendable {
+    let programs: [EPGStationProgram]
+}
+
+private nonisolated struct EPGStationScheduleChannel: Codable, Sendable {
+    let channel: EPGStationChannel
+    let programs: [EPGStationProgram]
+}
+
+private nonisolated struct EPGStationProgram: Codable, Sendable {
+    let id: Int64
+    let channelId: Int64
+    let startAt: Int64
+    let endAt: Int64
+    let duration: Int
+    let isFree: Bool?
+    let name: String?
+    let halfWidthName: String?
+    let description: String?
+    let halfWidthDescription: String?
+    let extended: String?
+    let halfWidthExtended: String?
+    let genres: [EPGStationGenre]?
+
+    func toProgram(backendId: String) -> Program {
+        Program(
+            id: "\(id)",
+            backendId: backendId,
+            eventId: nil,
+            serviceId: Int(channelId),
+            networkId: 0,
+            startAt: Date(timeIntervalSince1970: TimeInterval(startAt) / 1000.0),
+            endAt: Date(timeIntervalSince1970: TimeInterval(endAt) / 1000.0),
+            duration: TimeInterval(duration) / 1000.0,
+            name: halfWidthName ?? name ?? "",
+            desc: halfWidthDescription ?? description,
+            // extended: halfWidthExtended ?? extended,
+            genres: genres?.map { ProgramGenre(lv1: $0.lv1, lv2: $0.lv2) } ?? [],
+            updatedAt: nil
+        )
+    }
+}
+
+private nonisolated struct EPGStationGenre: Codable, Sendable {
+    let lv1: Int
+    let lv2: Int?
+}
+
+private nonisolated struct EPGStationRecordsResponse: Codable, Sendable {
+    let records: [EPGStationRecordedItem]
+    let total: Int
+}
+
+private nonisolated struct EPGStationRecordedItem: Codable, Sendable {
+    let id: Int64
+    let channelId: Int64?
+    let startAt: Int64
+    let endAt: Int64
+    let name: String?
+    let halfWidthName: String?
+    let description: String?
+    let halfWidthDescription: String?
+    let extended: String?
+    let halfWidthExtended: String?
+    let genres: [EPGStationGenre]?
+    let videoFiles: [EPGStationVideoFile]?
+    let isRecording: Bool?
+    let isProtected: Bool?
+    let thumbnails: [Int64]?
+
+    func toRecord(backendId: String, channel: EPGStationChannel?) -> Recorded {
+        let start = Date(timeIntervalSince1970: TimeInterval(startAt) / 1000.0)
+        let end = Date(timeIntervalSince1970: TimeInterval(endAt) / 1000.0)
+        return Recorded(
+            id: "\(id)",
+            name: halfWidthName ?? name ?? "",
+            desc: halfWidthDescription ?? description,
+            extended: nil,
+            serviceName: channel?.halfWidthName ?? channel?.name,
+            serviceId: channel?.serviceId,
+            networkId: channel?.networkId,
+            startAt: start,
+            duration: end.timeIntervalSince(start),
+            genres: genres?.map { ProgramGenre(lv1: $0.lv1, lv2: $0.lv2) } ?? [],
+            variants: videoFiles?.map { $0.toRecordedVariant() } ?? [],
+            isRecording: isRecording ?? false,
+            hasThumbnail: (thumbnails?.count ?? 0) > 0,
+            backendId: backendId
+        )
+    }
+}
+
+private nonisolated struct EPGStationVideoFile: Codable, Sendable {
+    let id: Int64
+    let name: String
+    let filename: String?
+    let type: String
+    let size: Int64?
+
+    func toRecordedVariant() -> RecordedVariant {
+        RecordedVariant(
+            id: "\(id)",
+            name: name
+        )
+    }
+}
