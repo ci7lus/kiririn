@@ -36,11 +36,7 @@ struct VLCKitAboutView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("ソースコード")
                         .font(.headline)
-                    Link("VLCKitリポジトリを開く", destination: sourceCodeURL)
-                    Text(sourceCodeURL.absoluteString)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                    Link(sourceCodeURL.absoluteString, destination: sourceCodeURL)
                 }
             }
         }

@@ -1,5 +1,9 @@
 import SwiftUI
 
+#if canImport(PronamaAssets)
+    import PronamaAssets
+#endif
+
 private struct AboutAppHeaderView: View {
     let appVersion: String
     let buildNumber: String
@@ -10,9 +14,7 @@ private struct AboutAppHeaderView: View {
             Image("AppIconImage")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 96, height: 96)
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .shadow(radius: 8)
+                .frame(width: 100, height: 100)
 
             VStack(spacing: 6) {
                 Text("kiririn")
@@ -78,6 +80,22 @@ struct AboutAppView: View {
                 }
 
                 NavigationLink {
+                    PronamaAboutView()
+                } label: {
+                    Label {
+                        Text("プロ生ちゃん アプリ開発支援プログラムについて")
+                    } icon: {
+                        #if canImport(PronamaAssets)
+                            PronamaAssets.keiIcon
+                                .resizable()
+                                .scaledToFit()
+                        #else
+                            Image(systemName: "heart.text.square")
+                        #endif
+                    }
+                }
+
+                NavigationLink {
                     LicenseListView()
                 } label: {
                     Label("ライセンス表示", systemImage: "doc.text")
@@ -89,5 +107,11 @@ struct AboutAppView: View {
         #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
         #endif
+    }
+}
+
+#Preview("このアプリについて") {
+    NavigationStack {
+        AboutAppView()
     }
 }

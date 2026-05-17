@@ -13,6 +13,7 @@
 		CE47B1A72F4DC5AA00680B2E /* Logging in Frameworks */ = {isa = PBXBuildFile; productRef = CE47B1A62F4DC5AA00680B2E /* Logging */; };
 		CE47B1AA2F4DC65200680B2E /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CE47B1A92F4DC65200680B2E /* GRDB */; };
 		CE54EBE92FB834D4009AFCBC /* LicenseList in Frameworks */ = {isa = PBXBuildFile; productRef = CE54EBE82FB834D4009AFCBC /* LicenseList */; };
+		CE21E9412FF10C020007B5F6 /* PronamaAssets in Frameworks */ = {isa = PBXBuildFile; productRef = CE21E9402FF10C020007B5F6 /* PronamaAssets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -93,6 +94,7 @@
 				CE4442812FB87FAD0092C2BF /* VLCKit in Frameworks */,
 				CE47B1A72F4DC5AA00680B2E /* Logging in Frameworks */,
 				CE44428E2FB8B9050092C2BF /* Sentry in Frameworks */,
+				CE21E9412FF10C020007B5F6 /* PronamaAssets in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -169,6 +171,7 @@
 				CE54EBE82FB834D4009AFCBC /* LicenseList */,
 				CE4442802FB87FAD0092C2BF /* VLCKit */,
 				CE44428D2FB8B9050092C2BF /* Sentry */,
+				CE21E9402FF10C020007B5F6 /* PronamaAssets */,
 			);
 			productName = kiririn;
 			productReference = 105FC57A2E9EAD3100EA8BCF /* kiririn.app */;
@@ -259,6 +262,7 @@
 				CE54EBE72FB834D4009AFCBC /* XCRemoteSwiftPackageReference "LicenseList" */,
 				CE44427F2FB87FAD0092C2BF /* XCLocalSwiftPackageReference "Packages/VLCKit" */,
 				CE44428C2FB8B9050092C2BF /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
+				CE21E93F2FF10C020007B5F6 /* XCRemoteSwiftPackageReference "931f454f81e605d08440df93f341a841" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 105FC57B2E9EAD3100EA8BCF /* Products */;
@@ -731,6 +735,14 @@
 				minimumVersion = 1.4.0;
 			};
 		};
+		CE21E93F2FF10C020007B5F6 /* XCRemoteSwiftPackageReference "931f454f81e605d08440df93f341a841" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://gist.github.com/931f454f81e605d08440df93f341a841.git";
+			requirement = {
+				branch = master;
+				kind = branch;
+			};
+		};
 		CE44428C2FB8B9050092C2BF /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/getsentry/sentry-cocoa.git";
@@ -794,6 +806,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CE54EBE72FB834D4009AFCBC /* XCRemoteSwiftPackageReference "LicenseList" */;
 			productName = LicenseList;
+		};
+		CE21E9402FF10C020007B5F6 /* PronamaAssets */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CE21E93F2FF10C020007B5F6 /* XCRemoteSwiftPackageReference "931f454f81e605d08440df93f341a841" */;
+			productName = PronamaAssets;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

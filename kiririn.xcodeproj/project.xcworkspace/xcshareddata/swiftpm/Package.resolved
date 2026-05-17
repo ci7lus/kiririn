@@ -1,6 +1,15 @@
 {
-  "originHash" : "95f29fca7247c74d7f9649818d32df251db44d3a4e4ce3b332483ac0469379f7",
+  "originHash" : "01c36b643c182c6a82f5baf6ef14dd65fd518602e7691cf8d0bb08d44261f6f2",
   "pins" : [
+    {
+      "identity" : "931f454f81e605d08440df93f341a841",
+      "kind" : "remoteSourceControl",
+      "location" : "https://gist.github.com/931f454f81e605d08440df93f341a841.git",
+      "state" : {
+        "branch" : "master",
+        "revision" : "840c969ca89d72aa6e98837e8024f25cde5594eb"
+      }
+    },
     {
       "identity" : "grdb.swift",
       "kind" : "remoteSourceControl",
