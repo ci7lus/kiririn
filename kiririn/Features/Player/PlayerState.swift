@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import OrderedCollections
+import Sentry
 import SwiftUI
 import VLCKit
 
@@ -46,6 +47,119 @@ nonisolated private enum ArtworkPayload: Sendable {
         case .data(_, let description):
             return description
         }
+    }
+}
+
+private final class VLCLogForwarder: NSObject, VLCLogging {
+    var level: VLCLogLevel = .debug
+
+    private let logger: Logger
+
+    override init() {
+        self.logger = Logger(label: "PlayerState.VLC")
+        super.init()
+    }
+
+    func handleMessage(
+        _ message: String,
+        logLevel: VLCLogLevel,
+        context: VLCLogContext?
+    ) {
+        let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedMessage.isEmpty else { return }
+
+        let metadata = metadata(context: context)
+        let fullMessage = formattedMessage(message: trimmedMessage, context: context)
+        let sentryMetadata = sentryAttributes(metadata)
+
+        logToSwiftLog(message: fullMessage, level: logLevel, metadata: metadata)
+        logToSentry(message: fullMessage, level: logLevel, attributes: sentryMetadata)
+    }
+
+    private func logToSwiftLog(message: String, level: VLCLogLevel, metadata: Logger.Metadata) {
+        switch level {
+        case .error:
+            logger.error("\(message)", metadata: metadata)
+        case .warning:
+            logger.warning("\(message)", metadata: metadata)
+        case .info:
+            logger.info("\(message)", metadata: metadata)
+        default:
+            #if false
+                logger.debug("\(message)", metadata: metadata)
+            #endif
+        }
+    }
+
+    private func logToSentry(
+        message: String, level: VLCLogLevel, attributes: [String: any Sendable]
+    ) {
+        switch level {
+        case .error:
+            SentrySDK.logger.error(message, attributes: attributes)
+        case .warning:
+            SentrySDK.logger.warn(message, attributes: attributes)
+        case .info:
+            SentrySDK.logger.info(message, attributes: attributes)
+        default:
+            #if false
+                SentrySDK.logger.debug(message, attributes: attributes)
+            #endif
+        }
+    }
+
+    private func formattedMessage(message: String, context: VLCLogContext?) -> String {
+        guard let context else { return message }
+
+        var components: [String] = []
+        if !context.module.isEmpty {
+            components.append(context.module)
+        }
+        if !context.objectType.isEmpty {
+            components.append(context.objectType)
+        }
+
+        if components.isEmpty {
+            return message
+        }
+        return "[\(components.joined(separator: "/"))] \(message)"
+    }
+
+    private func metadata(context: VLCLogContext?) -> Logger.Metadata {
+        guard let context else { return [:] }
+
+        var metadata: Logger.Metadata = [
+            "vlc.object_id": .stringConvertible(context.objectId),
+            "vlc.thread_id": .stringConvertible(context.threadId),
+        ]
+        if !context.module.isEmpty {
+            metadata["vlc.module"] = .string(context.module)
+        }
+        if !context.objectType.isEmpty {
+            metadata["vlc.object_type"] = .string(context.objectType)
+        }
+        if let header = context.header, !header.isEmpty {
+            metadata["vlc.header"] = .string(header)
+        }
+        if let file = context.file, !file.isEmpty {
+            metadata["vlc.file"] = .string(file)
+        }
+        if context.line >= 0 {
+            metadata["vlc.line"] = .stringConvertible(context.line)
+        }
+        if let function = context.function, !function.isEmpty {
+            metadata["vlc.function"] = .string(function)
+        }
+        return metadata
+    }
+
+    private func sentryAttributes(_ metadata: Logger.Metadata) -> [String: any Sendable] {
+        var attributes: [String: any Sendable] = [:]
+        attributes.reserveCapacity(metadata.count)
+        for (key, value) in metadata {
+            attributes[key] = value.description
+        }
+        return attributes
     }
 }
 
@@ -137,6 +251,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     private var pendingCapturePath: URL?
     private var pendingPluginOverlayTask: Task<CGImage?, Never>?
     private var pendingOverlayManifestIDs: [String] = []
+    private let vlcLogForwarder = VLCLogForwarder()
 
     var displayProgram: Program? {
         currentPlayable?.displayProgram
@@ -1159,6 +1274,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         player.delegate = self
         player.audio?.volume = Int32(volume.rounded())
         player.audio?.isMuted = isMuted
+        player.libraryInstance.loggers = [vlcLogForwarder]
         return player
     }
 
@@ -1339,12 +1455,12 @@ extension PlayerState {
         }()
         let sortedMetadata = metadata.keys.sorted().map { "\($0)=\(metadata[$0] ?? "")" }.joined(
             separator: ", ")
-        logger.debug("media metadata changed: [\(sortedMetadata)]")
+        logger.trace("media metadata changed: [\(sortedMetadata)]")
 
         Task { @MainActor [weak self] in
             guard let self else { return }
             guard let currentMedia = self.player?.media, currentMedia === aMedia else {
-                self.logger.debug("ignored metadata update for stale media")
+                self.logger.trace("ignored metadata update for stale media")
                 return
             }
             let artwork = Self.resolvedArtworkPayload(from: aMedia.metaData.artwork)
@@ -1353,11 +1469,11 @@ extension PlayerState {
             updateArtworkLogoIfNeeded(artwork: artwork, metadata: metadata, media: aMedia)
             updateInitialNetworkTime(from: metadata)
             if let program = self.currentPlayable?.displayProgram {
-                self.logger.debug(
+                self.logger.trace(
                     "overridden program updated: title=\(program.name), startAt=\(program.startAt.timeIntervalSince1970), duration=\(program.duration)"
                 )
             } else {
-                self.logger.debug("overridden program was not updated from metadata")
+                self.logger.trace("overridden program was not updated from metadata")
             }
         }
     }

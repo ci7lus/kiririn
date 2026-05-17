@@ -201,6 +201,7 @@ private enum SentryBootstrap {
                     $0.sessionSampleRate = 1.0
                     $0.lifecycle = .trace
                 }
+                options.enableLogs = true
             #endif
         }
     }
