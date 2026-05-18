@@ -34,7 +34,7 @@ struct ProgramGuideView: View {
     @FocusState private var isSearchFieldFocused: Bool
 
     private let channelColumnWidth: CGFloat = 220
-    private let timeRulerWidth: CGFloat = 64
+    private let timeRulerWidth: CGFloat = 45
     private let minuteHeight: CGFloat = 2.5
     private let timelineHours = 24
     private let minimumPastDays = -1
@@ -286,7 +286,6 @@ struct ProgramGuideView: View {
                 .overlay {
                     Text("時刻").font(.caption).foregroundStyle(.secondary)
                 }
-                .overlay(alignment: .bottom) { Divider() }
                 .overlay(alignment: .trailing) {
                     Rectangle().fill(Color.kiririnSeparator.opacity(0.6)).frame(width: 1)
                 }
@@ -452,7 +451,7 @@ struct ProgramGuideView: View {
         case 1: return "明日 \(Self.monthDayFormatter.string(from: date))"
         default:
             return
-                "\(Self.shortWeekdayFormatter.string(from: date)) \(Self.monthDayFormatter.string(from: date))"
+                "\(Self.monthDayFormatter.string(from: date))"
         }
     }
 
@@ -629,7 +628,7 @@ struct ProgramGuideView: View {
                         .frame(height: 1)
 
                     if isHour {
-                        VStack(alignment: .leading, spacing: 0) {
+                        VStack(alignment: .center, spacing: 0) {
                             Text(Self.hourFormatter.string(from: mark))
                                 .font(.title3)
                                 .fontWeight(.bold)
@@ -877,15 +876,7 @@ struct ProgramGuideView: View {
     private static let monthDayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ja_JP")
-        formatter.dateFormat = "M/d"
+        formatter.dateFormat = "M/d (EEE)"
         return formatter
     }()
-
-    private static let shortWeekdayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ja_JP")
-        formatter.dateFormat = "EEE"
-        return formatter
-    }()
-
 }
