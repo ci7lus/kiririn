@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # https://github.com/vivid-lapin/vlckit/releases
-REVISION="202605162022"
+REVISION="202605172235"
 VLCKIT_URL="https://github.com/vivid-lapin/vlckit/releases/download/$REVISION/VLCKit-iOS-REPLACEWITHVERSION.dmg"
 VLCKIT_DEST="./Packages/VLCKit"
 FRAMEWORK_DEST="${VLCKIT_DEST}/VLCKit.xcframework"
