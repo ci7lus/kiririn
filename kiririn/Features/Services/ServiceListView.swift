@@ -21,6 +21,7 @@ struct ServiceListView: View {
         @Environment(\.openWindow) private var openWindow
     #endif
     @State private var serviceSelectionForPlayback: TVService?
+    @State private var showingFavoriteOrderingSheet = false
     @State private var viewModel = ServiceListViewModel()
     @State private var minuteRefreshTick = Date()
     @State private var groupedServices: [(String, [ServiceListItem])] = []
@@ -32,6 +33,11 @@ struct ServiceListView: View {
         let id: String
         let primary: TVService
         let secondary: [TVService]
+        let displayOrder: Int?
+
+        var services: [TVService] {
+            [primary] + secondary
+        }
     }
 
     private struct ServiceListItem: Identifiable {
@@ -41,6 +47,20 @@ struct ServiceListView: View {
         let nextProgram: Program?
         let hasDifferentChildProgram: Bool
         let children: [ServiceListItem]?
+    }
+
+    fileprivate struct FavoriteOrderingGroup: Identifiable, Equatable {
+        let id: String
+        let primary: TVService
+        let services: [TVService]
+
+        var serviceKeys: [String] {
+            services.map(\.unifiedServiceKey)
+        }
+
+        var subtitle: String? {
+            services.first?.channel?.type
+        }
     }
 
     private var serviceTypeFilteredServices: [TVService] {
@@ -116,6 +136,28 @@ struct ServiceListView: View {
             }
             Button("キャンセル", role: .cancel) {}
         }
+        .sheet(isPresented: $showingFavoriteOrderingSheet) {
+            FavoriteServiceOrderingSheet(
+                groups: favoriteOrderingGroups,
+                onReorder: { groups in
+                    Task {
+                        await manager.setFavoriteDisplayOrders(groups.map(\.serviceKeys))
+                    }
+                },
+                onRemoveGroup: { group, remainingGroups in
+                    Task {
+                        for service in group.services {
+                            await manager.setFavorite(service, isFavorite: false)
+                        }
+                        if !remainingGroups.isEmpty {
+                            await manager.setFavoriteDisplayOrders(
+                                remainingGroups.map(\.serviceKeys)
+                            )
+                        }
+                    }
+                }
+            )
+        }
     }
 
     init(
@@ -151,7 +193,7 @@ struct ServiceListView: View {
     private var listView: some View {
         List {
             ForEach(groupedServices, id: \.0) { channelType, serviceItems in
-                Section(channelType) {
+                Section {
                     OutlineGroup(serviceItems, children: \.children) { item in
                         ServiceRowView(
                             service: item.service,
@@ -166,8 +208,34 @@ struct ServiceListView: View {
                             Task { await manager.toggleFavorite(item.service) }
                         }
                     }
+                } header: {
+                    sectionHeader(for: channelType)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func sectionHeader(for channelType: String) -> some View {
+        if channelType == "お気に入り" {
+            HStack(spacing: 12) {
+                Text(channelType)
+
+                Spacer(minLength: 0)
+
+                Button {
+                    showingFavoriteOrderingSheet = true
+                } label: {
+                    Label("並び替え", systemImage: "arrow.up.arrow.down")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .disabled(favoriteOrderingGroups.count < 2)
+                .help("お気に入りサービスの並び順を変更")
+            }
+            .textCase(nil)
+        } else {
+            Text(channelType)
         }
     }
 
@@ -198,7 +266,24 @@ struct ServiceListView: View {
         serviceSelectionForPlayback = nil
     }
 
-    private func buildServiceDisplayGroups(from services: [TVService]) -> [ServiceDisplayGroup] {
+    private var favoriteOrderingGroups: [FavoriteOrderingGroup] {
+        buildServiceDisplayGroups(
+            from: serviceTypeFilteredServices.filter { manager.isFavorite($0) },
+            usesFavoriteDisplayOrder: true
+        )
+        .map { group in
+            FavoriteOrderingGroup(
+                id: group.id,
+                primary: group.primary,
+                services: group.services
+            )
+        }
+    }
+
+    private func buildServiceDisplayGroups(
+        from services: [TVService],
+        usesFavoriteDisplayOrder: Bool = false
+    ) -> [ServiceDisplayGroup] {
         let grouped = Dictionary(grouping: services, by: displayGroupKey(for:))
         return grouped.compactMap { groupKey, groupedServices in
             let sorted = groupedServices.sorted { lhs, rhs in
@@ -211,10 +296,23 @@ struct ServiceListView: View {
             return ServiceDisplayGroup(
                 id: groupKey,
                 primary: primary,
-                secondary: Array(sorted.dropFirst())
+                secondary: Array(sorted.dropFirst()),
+                displayOrder: usesFavoriteDisplayOrder
+                    ? groupedServices.compactMap { manager.favoriteDisplayOrder(for: $0) }.min()
+                    : nil
             )
         }
         .sorted { lhs, rhs in
+            switch (lhs.displayOrder, rhs.displayOrder) {
+            case (let lhsOrder?, let rhsOrder?) where lhsOrder != rhsOrder:
+                return lhsOrder < rhsOrder
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                break
+            }
             if (lhs.primary.remoteControlKeyId ?? Int.max)
                 != (rhs.primary.remoteControlKeyId ?? Int.max)
             {
@@ -334,8 +432,14 @@ struct ServiceListView: View {
         // ServiceListItemの生成時に引き当てるためのキーをサービス側でも用意する
         func serviceKey(_ s: TVService) -> String { "\(s.networkId)-\(s.serviceId)" }
 
-        func buildItems(from services: [TVService]) -> [ServiceListItem] {
-            let displayGroups = buildServiceDisplayGroups(from: services)
+        func buildItems(
+            from services: [TVService],
+            usesFavoriteDisplayOrder: Bool = false
+        ) -> [ServiceListItem] {
+            let displayGroups = buildServiceDisplayGroups(
+                from: services,
+                usesFavoriteDisplayOrder: usesFavoriteDisplayOrder
+            )
 
             var items: [ServiceListItem] = []
             for group in displayGroups {
@@ -400,7 +504,7 @@ struct ServiceListView: View {
         }
 
         if !favoriteServices.isEmpty {
-            let favoriteItems = buildItems(from: favoriteServices)
+            let favoriteItems = buildItems(from: favoriteServices, usesFavoriteDisplayOrder: true)
             if !favoriteItems.isEmpty {
                 newGroups.append(("お気に入り", favoriteItems))
             }
@@ -449,6 +553,214 @@ struct ServiceListView: View {
             minuteRefreshTick = Date()
             triggerRebuild()
         }
+    }
+}
+
+private struct FavoriteServiceOrderingSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onReorder: ([ServiceListView.FavoriteOrderingGroup]) -> Void
+    let onRemoveGroup:
+        (ServiceListView.FavoriteOrderingGroup, [ServiceListView.FavoriteOrderingGroup]) -> Void
+    @State private var draftGroups: [ServiceListView.FavoriteOrderingGroup]
+    @State private var selectedGroupID: ServiceListView.FavoriteOrderingGroup.ID?
+
+    init(
+        groups: [ServiceListView.FavoriteOrderingGroup],
+        onReorder: @escaping ([ServiceListView.FavoriteOrderingGroup]) -> Void,
+        onRemoveGroup:
+            @escaping (
+                ServiceListView.FavoriteOrderingGroup,
+                [ServiceListView.FavoriteOrderingGroup]
+            ) -> Void
+    ) {
+        self.onReorder = onReorder
+        self.onRemoveGroup = onRemoveGroup
+        _draftGroups = State(initialValue: groups)
+        _selectedGroupID = State(initialValue: groups.first?.id)
+    }
+
+    var body: some View {
+        NavigationStack {
+            groupList
+                .navigationTitle("お気に入り")
+                .toolbar {
+                    ToolbarItem(placement: closeButtonPlacement) {
+                        Button("閉じる") {
+                            dismiss()
+                        }
+                    }
+
+                    #if os(macOS)
+                        ToolbarItem(placement: .primaryAction) {
+                            Button(role: .destructive) {
+                                if let selectedGroupID,
+                                    let group = draftGroups.first(where: {
+                                        $0.id == selectedGroupID
+                                    })
+                                {
+                                    remove(group)
+                                }
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .help("選択したお気に入りを解除")
+                            .disabled(selectedGroupID == nil)
+                        }
+                    #endif
+                }
+        }
+        #if os(macOS)
+            .frame(minWidth: 420, minHeight: 320)
+        #endif
+    }
+
+    @ViewBuilder
+    private var groupList: some View {
+        #if os(macOS)
+            List(selection: $selectedGroupID) {
+                groupRows
+            }
+        #else
+            List {
+                groupRows
+            }
+            .environment(\.editMode, .constant(.active))
+        #endif
+    }
+
+    @ViewBuilder
+    private var groupRows: some View {
+        ForEach(draftGroups) { group in
+            FavoriteServiceOrderingRow(group: group)
+                #if os(macOS)
+                    .tag(group.id)
+                #endif
+                .contextMenu {
+                    Button("上へ移動") {
+                        move(group.id, delta: -1)
+                    }
+                    .disabled(!canMove(group.id, delta: -1))
+
+                    Button("下へ移動") {
+                        move(group.id, delta: 1)
+                    }
+                    .disabled(!canMove(group.id, delta: 1))
+
+                    Divider()
+
+                    Button("お気に入り解除", role: .destructive) {
+                        remove(group)
+                    }
+                }
+        }
+        .onDelete(perform: remove)
+        .onMove(perform: move)
+    }
+
+    private var closeButtonPlacement: ToolbarItemPlacement {
+        #if os(macOS)
+            .cancellationAction
+        #else
+            .topBarLeading
+        #endif
+    }
+
+    private func canMove(_ id: String, delta: Int) -> Bool {
+        guard let index = draftGroups.firstIndex(where: { $0.id == id }) else { return false }
+        let destination = index + delta
+        return draftGroups.indices.contains(destination)
+    }
+
+    private func move(from offsets: IndexSet, to destination: Int) {
+        guard draftGroups.count > 1 else { return }
+        draftGroups.move(fromOffsets: offsets, toOffset: destination)
+        if let firstMovedIndex = offsets.first {
+            let adjustedDestination = destination > firstMovedIndex ? destination - 1 : destination
+            if draftGroups.indices.contains(adjustedDestination) {
+                selectedGroupID = draftGroups[adjustedDestination].id
+            }
+        }
+        onReorder(draftGroups)
+    }
+
+    private func move(_ id: String, delta: Int) {
+        guard let index = draftGroups.firstIndex(where: { $0.id == id }) else { return }
+        let destination = index + delta
+        guard draftGroups.indices.contains(destination) else { return }
+
+        let group = draftGroups.remove(at: index)
+        draftGroups.insert(group, at: destination)
+        selectedGroupID = group.id
+        onReorder(draftGroups)
+    }
+
+    private func remove(at offsets: IndexSet) {
+        let groupsToRemove = offsets.compactMap { index in
+            draftGroups.indices.contains(index) ? draftGroups[index] : nil
+        }
+        draftGroups.remove(atOffsets: offsets)
+
+        for group in groupsToRemove {
+            onRemoveGroup(group, draftGroups)
+        }
+
+        selectedGroupID = draftGroups.first?.id
+        if draftGroups.isEmpty {
+            dismiss()
+        }
+    }
+
+    private func remove(_ group: ServiceListView.FavoriteOrderingGroup) {
+        guard let index = draftGroups.firstIndex(where: { $0.id == group.id }) else { return }
+
+        draftGroups.remove(at: index)
+        if selectedGroupID == group.id {
+            if draftGroups.indices.contains(index) {
+                selectedGroupID = draftGroups[index].id
+            } else {
+                selectedGroupID = draftGroups.last?.id
+            }
+        }
+
+        onRemoveGroup(group, draftGroups)
+
+        if draftGroups.isEmpty {
+            dismiss()
+        }
+    }
+}
+
+private struct FavoriteServiceOrderingRow: View {
+    let group: ServiceListView.FavoriteOrderingGroup
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(group.primary.name)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                if group.services.count > 1 {
+                    Text("\(group.services.count)サービス")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.16), in: Capsule())
+                }
+            }
+
+            if let subtitle = group.subtitle {
+                Text(subtitle)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(.rect)
     }
 }
 

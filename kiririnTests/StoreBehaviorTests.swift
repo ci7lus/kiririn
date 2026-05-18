@@ -79,6 +79,61 @@ struct StoreBehaviorTests {
         #expect(dates["backend-2"] == Date(timeIntervalSince1970: 5_678))
     }
 
+    @MainActor @Test func cacheStorePersistsFavoriteServiceDisplayOrder() async throws {
+        let dbQueue = try DatabaseQueue()
+        let store = CacheStore(databaseQueue: dbQueue)
+
+        let first = TVService(
+            id: "service-1",
+            providerIdentifier: nil,
+            serviceId: 101,
+            networkId: 1,
+            transportStreamId: nil,
+            name: "NHK総合",
+            type: .digitalTelevision,
+            remoteControlKeyId: 1,
+            hasLogoData: false,
+            channel: .init(id: "gr011", type: "GR"),
+            backendId: "backend-1"
+        )
+        let second = TVService(
+            id: "service-2",
+            providerIdentifier: nil,
+            serviceId: 102,
+            networkId: 1,
+            transportStreamId: nil,
+            name: "Eテレ",
+            type: .digitalTelevision,
+            remoteControlKeyId: 2,
+            hasLogoData: false,
+            channel: .init(id: "gr021", type: "GR"),
+            backendId: "backend-1"
+        )
+        await store.saveFavoriteService(first)
+        await store.saveFavoriteService(second)
+        await store.saveFavoriteServices([
+            FavoriteServiceRecord(
+                networkId: 1,
+                serviceId: 101,
+                displayOrder: 1
+            ),
+            FavoriteServiceRecord(
+                networkId: 1,
+                serviceId: 102,
+                displayOrder: 0
+            ),
+        ])
+
+        let reloaded = CacheStore(databaseQueue: dbQueue)
+        let favorites = await reloaded.loadFavoriteServices()
+        let favoriteByKey = Dictionary(
+            uniqueKeysWithValues: favorites.map { ($0.unifiedServiceKey, $0) }
+        )
+
+        #expect(favoriteByKey["1-101"]?.displayOrder == 1)
+        #expect(favoriteByKey["1-102"]?.displayOrder == 0)
+    }
+
     @Test func pluginStoreParsesManifest() throws {
         let html = validPluginHTML(
             name: "Sample Plugin",

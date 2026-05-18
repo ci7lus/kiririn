@@ -60,6 +60,10 @@ nonisolated enum ProgramCatalogRefreshExecutionResult: Sendable, Equatable {
 
 @Observable
 class BackendManager {
+    private struct FavoriteServiceState: Sendable {
+        var displayOrder: Int?
+    }
+
     private let logger = Logging.Logger(label: "BackendManager")
     private let programFullFetchInterval: TimeInterval = 12 * 60 * 60
     private let periodicProgramRefreshCheckInterval: Duration = .seconds(60 * 60)
@@ -72,7 +76,7 @@ class BackendManager {
     private var serviceVariantsByAggregatedServiceId: [String: [TVService]] = [:]
     private var servicesByUniqueId: [String: TVService] = [:]
     private var cachedServicesByBackend: [String: [TVService]] = [:]
-    private var favoriteServiceDatesByUnifiedKey: [String: Date] = [:]
+    private var favoriteStatesByUnifiedKey: [String: FavoriteServiceState] = [:]
     @ObservationIgnored
     private var lastProgramFullFetchDatesByBackend: [String: Date] = [:]
     @ObservationIgnored
@@ -134,7 +138,16 @@ class BackendManager {
             servicesByBackend[config.id] = await cacheStore.loadCachedServices(backendId: config.id)
         }
         cachedServicesByBackend = servicesByBackend
-        favoriteServiceDatesByUnifiedKey = await cacheStore.loadFavoriteServiceDates()
+        favoriteStatesByUnifiedKey = Dictionary(
+            uniqueKeysWithValues: await cacheStore.loadFavoriteServices().map { favorite in
+                (
+                    favorite.unifiedServiceKey,
+                    FavoriteServiceState(
+                        displayOrder: favorite.displayOrder
+                    )
+                )
+            }
+        )
         lastProgramFullFetchDatesByBackend = await cacheStore.loadLastProgramFullFetchDates()
 
         rebuildAggregatedData()
@@ -583,7 +596,8 @@ class BackendManager {
             for service in cachedServices {
                 let mergedKey = service.unifiedServiceKey
                 var resolvedService = service
-                resolvedService.favoritedAt = favoriteServiceDatesByUnifiedKey[mergedKey]
+                resolvedService.favoritedAt =
+                    favoriteStatesByUnifiedKey[mergedKey] != nil ? .distantPast : nil
                 variantsByMergedKey[mergedKey, default: []].append(resolvedService)
                 resolvedServicesByUniqueId[resolvedService.id] = resolvedService
             }
@@ -723,15 +737,15 @@ class BackendManager {
     }
 
     func isFavorite(_ service: TVService) -> Bool {
-        favoriteServiceDatesByUnifiedKey[service.unifiedServiceKey] != nil
+        favoriteStatesByUnifiedKey[service.unifiedServiceKey] != nil
     }
 
-    func favoriteDate(for service: TVService) -> Date? {
-        favoriteServiceDatesByUnifiedKey[service.unifiedServiceKey]
+    func favoriteDisplayOrder(for service: TVService) -> Int? {
+        favoriteStatesByUnifiedKey[service.unifiedServiceKey]?.displayOrder
     }
 
     var hasFavoriteServices: Bool {
-        !favoriteServiceDatesByUnifiedKey.isEmpty
+        !favoriteStatesByUnifiedKey.isEmpty
     }
 
     func toggleFavorite(_ service: TVService) async {
@@ -742,15 +756,50 @@ class BackendManager {
         let key = service.unifiedServiceKey
 
         if isFavorite {
-            let favoritedAt = favoriteServiceDatesByUnifiedKey[key] ?? Date()
-            await cacheStore.saveFavoriteService(service, favoritedAt: favoritedAt)
-            favoriteServiceDatesByUnifiedKey[key] = favoritedAt
+            let currentState = favoriteStatesByUnifiedKey[key]
+            let nextState = FavoriteServiceState(
+                displayOrder: currentState?.displayOrder ?? nextFavoriteDisplayOrder()
+            )
+            await cacheStore.saveFavoriteService(
+                service,
+                displayOrder: nextState.displayOrder
+            )
+            favoriteStatesByUnifiedKey[key] = nextState
         } else {
             await cacheStore.deleteFavoriteService(service)
-            favoriteServiceDatesByUnifiedKey.removeValue(forKey: key)
+            favoriteStatesByUnifiedKey.removeValue(forKey: key)
         }
 
         rebuildAggregatedData()
+    }
+
+    func setFavoriteDisplayOrders(_ serviceKeysByGroup: [[String]]) async {
+        var updatedRecords: [FavoriteServiceRecord] = []
+
+        for (displayOrder, serviceKeys) in serviceKeysByGroup.enumerated() {
+            for serviceKey in serviceKeys {
+                guard favoriteStatesByUnifiedKey[serviceKey] != nil else { continue }
+                favoriteStatesByUnifiedKey[serviceKey] = FavoriteServiceState(
+                    displayOrder: displayOrder
+                )
+
+                if let record = FavoriteServiceRecord(
+                    unifiedServiceKey: serviceKey,
+                    displayOrder: displayOrder
+                ) {
+                    updatedRecords.append(record)
+                }
+            }
+        }
+
+        await cacheStore.saveFavoriteServices(updatedRecords)
+        rebuildAggregatedData()
+    }
+
+    private func nextFavoriteDisplayOrder() -> Int? {
+        let currentOrders = favoriteStatesByUnifiedKey.values.compactMap(\.displayOrder)
+        guard let maxOrder = currentOrders.max() else { return nil }
+        return maxOrder + 1
     }
 
     func playbackCandidates(for service: TVService) -> [TVService] {

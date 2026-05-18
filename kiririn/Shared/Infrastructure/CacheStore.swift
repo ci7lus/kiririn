@@ -61,43 +61,66 @@ class CacheStore {
         return cached
     }
 
-    func loadFavoriteServiceDates() async -> [String: Date] {
+    func loadFavoriteServices() async -> [FavoriteServiceRecord] {
         guard
             let favorites = try? await dbQueue.read({ db in
                 let rows = try Row.fetchAll(
                     db,
-                    sql: "SELECT networkId, serviceId, favoritedAt FROM favorite_service"
+                    sql: "SELECT networkId, serviceId, displayOrder FROM favorite_service"
                 )
-                return Dictionary(
-                    uniqueKeysWithValues: rows.map { row in
-                        let networkId: Int = row["networkId"]
-                        let serviceId: Int = row["serviceId"]
-                        let favoritedAt: Date = row["favoritedAt"]
-                        return (
-                            Self.favoriteServiceKey(networkId: networkId, serviceId: serviceId),
-                            favoritedAt
-                        )
-                    })
+                return rows.map { row in
+                    FavoriteServiceRecord(
+                        networkId: row["networkId"],
+                        serviceId: row["serviceId"],
+                        displayOrder: row["displayOrder"]
+                    )
+                }
             })
-        else { return [:] }
+        else { return [] }
         return favorites
     }
 
-    func saveFavoriteService(_ service: TVService, favoritedAt: Date = Date()) async {
+    func saveFavoriteService(_ service: TVService, displayOrder: Int? = nil) async {
         do {
             try await dbQueue.write { db in
                 try db.execute(
                     sql: """
-                        INSERT INTO favorite_service (networkId, serviceId, favoritedAt)
+                        INSERT INTO favorite_service (networkId, serviceId, displayOrder)
                         VALUES (?, ?, ?)
                         ON CONFLICT(networkId, serviceId)
-                        DO UPDATE SET favoritedAt = excluded.favoritedAt
+                        DO UPDATE SET
+                            displayOrder = COALESCE(excluded.displayOrder, favorite_service.displayOrder)
                         """,
-                    arguments: [service.networkId, service.serviceId, favoritedAt]
+                    arguments: [service.networkId, service.serviceId, displayOrder]
                 )
             }
         } catch {
             logger.error("Failed to save favorite service: \(error)")
+        }
+    }
+
+    func saveFavoriteServices(_ favorites: [FavoriteServiceRecord]) async {
+        guard !favorites.isEmpty else { return }
+
+        do {
+            try await dbQueue.write { db in
+                for favorite in favorites {
+                    try db.execute(
+                        sql: """
+                            UPDATE favorite_service
+                            SET displayOrder = ?
+                            WHERE networkId = ? AND serviceId = ?
+                            """,
+                        arguments: [
+                            favorite.displayOrder,
+                            favorite.networkId,
+                            favorite.serviceId,
+                        ]
+                    )
+                }
+            }
+        } catch {
+            logger.error("Failed to save favorite service orders: \(error)")
         }
     }
 
@@ -684,11 +707,6 @@ extension CacheStore {
         return mutableData as Data
     }
 
-    nonisolated fileprivate static func favoriteServiceKey(networkId: Int, serviceId: Int) -> String
-    {
-        "\(networkId)-\(serviceId)"
-    }
-
     nonisolated fileprivate static func upsertLastProgramFullFetchDate(
         _ date: Date,
         backendId: String,
@@ -811,6 +829,31 @@ extension CacheStore {
             try db.create(
                 index: "index_program_on_serviceId_networkId_startAt", on: "program",
                 columns: ["serviceId", "networkId", "startAt"])
+        }
+
+        migrator.registerMigration("favorite-service-display-order-20260519") { db in
+            try db.alter(table: "favorite_service") { t in
+                t.add(column: "displayOrder", .integer)
+            }
+        }
+
+        migrator.registerMigration("favorite-service-drop-favorited-at-20260519") { db in
+            try db.create(table: "favorite_service_new") { t in
+                t.column("networkId", .integer).notNull()
+                t.column("serviceId", .integer).notNull()
+                t.column("displayOrder", .integer)
+                t.primaryKey(["networkId", "serviceId"])
+            }
+
+            try db.execute(
+                sql: """
+                    INSERT INTO favorite_service_new (networkId, serviceId, displayOrder)
+                    SELECT networkId, serviceId, displayOrder
+                    FROM favorite_service
+                    """
+            )
+            try db.drop(table: "favorite_service")
+            try db.rename(table: "favorite_service_new", to: "favorite_service")
         }
 
         return migrator
