@@ -19,12 +19,6 @@ struct SettingsView: View {
         Form {
             Section {
                 NavigationLink {
-                    CaptureSettingsView(appModel: appModel)
-                } label: {
-                    Label("キャプチャ設定", systemImage: "photo.on.rectangle.angled")
-                }
-
-                NavigationLink {
                     BackendSettingsView(
                         configStore: configStore,
                         manager: manager
@@ -38,6 +32,12 @@ struct SettingsView: View {
                         appModel: appModel, pluginStore: pluginStore, playerState: playerState)
                 } label: {
                     Label("プラグイン設定", systemImage: "puzzlepiece.extension")
+                }
+
+                NavigationLink {
+                    CaptureSettingsView(appModel: appModel)
+                } label: {
+                    Label("キャプチャ設定", systemImage: "photo.on.rectangle.angled")
                 }
 
                 NavigationLink {

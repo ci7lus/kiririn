@@ -24,11 +24,6 @@ private struct AboutAppHeaderView: View {
                     .foregroundStyle(.secondary)
             }
             .multilineTextAlignment(.center)
-
-            Link(destination: githubURL) {
-                Label("GitHub リポジトリ", systemImage: "link")
-            }
-            .controlSize(.small)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
@@ -73,6 +68,10 @@ struct AboutAppView: View {
             appHeaderSection
 
             Section {
+                Link(destination: githubURL) {
+                    Label("GitHubリポジトリ", systemImage: "link")
+                }
+
                 NavigationLink {
                     VLCKitAboutView()
                 } label: {
