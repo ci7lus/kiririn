@@ -16,9 +16,12 @@ struct CaptureListView: View {
     @State private var previewURL: URL?
     @State private var isSelectionMode = false
     @State private var selectedIDs: Set<String> = []
+    @State private var captureScrollProxy: ScrollViewProxy?
+    @State private var isAtScrollTop = true
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
     #endif
+    @Environment(\.isTabActive) private var isTabActive
 
     private let limit = 20
 
@@ -50,61 +53,99 @@ struct CaptureListView: View {
                     emptyStateView
                 }
             } else {
-                ScrollView {
-                    LazyVGrid(columns: columns, spacing: 16) {
-                        ForEach(items) { item in
-                            CaptureHistoryItemView(
-                                item: item,
-                                previewURL: $previewURL,
-                                isSelectionMode: isSelectionMode,
-                                isSelected: selectedIDs.contains(item.id),
-                                onSelectionToggle: { toggleSelection(for: item.id) },
-                                onPlay: { playItem(item) },
-                                onDelete: {
-                                    await service.deleteHistoryItem(item)
-                                    if let index = items.firstIndex(where: { $0.id == item.id }) {
-                                        items.remove(at: index)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: 16) {
+                            ForEach(items) { item in
+                                CaptureHistoryItemView(
+                                    item: item,
+                                    previewURL: $previewURL,
+                                    isSelectionMode: isSelectionMode,
+                                    isSelected: selectedIDs.contains(item.id),
+                                    onSelectionToggle: { toggleSelection(for: item.id) },
+                                    onPlay: { playItem(item) },
+                                    onDelete: {
+                                        await service.deleteHistoryItem(item)
+                                        if let index = items.firstIndex(where: { $0.id == item.id })
+                                        {
+                                            items.remove(at: index)
+                                        }
+                                    }
+                                )
+                                .id(item.id)
+                                .onAppear {
+                                    if item.id == items.first?.id {
+                                        isAtScrollTop = true
+                                    }
+                                    if item == items.last && hasMore && !isLoading {
+                                        Task { await loadMore() }
                                     }
                                 }
-                            )
-                            .onAppear {
-                                if item == items.last && hasMore && !isLoading {
-                                    Task { await loadMore() }
+                                .onDisappear {
+                                    if item.id == items.first?.id {
+                                        isAtScrollTop = false
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                        if isLoading {
+                            ProgressView()
+                                .padding()
+                        }
+                    }
+                    .padding(.vertical, 16)
+                    #if os(macOS)
+                        .onAppear { captureScrollProxy = proxy }
+                    #endif
+                }
+                #if os(macOS)
+                    .overlay(alignment: .bottomTrailing) {
+                        if !items.isEmpty && !isAtScrollTop {
+                            Button {
+                                withAnimation {
+                                    captureScrollProxy?.scrollTo(items.first?.id, anchor: .top)
+                                }
+                            } label: {
+                                Image(systemName: "arrow.up")
+                                .font(.title3.weight(.semibold))
+                                .frame(width: 52, height: 52)
+                                .background(.ultraThinMaterial, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .shadow(color: .black.opacity(0.2), radius: 8, y: 3)
+                            .padding(.trailing, 20)
+                            .padding(.bottom, 24)
+                            .help("先頭に戻る")
+                        }
+                    }
+                #endif
+            }
+        }
+        .navigationTitle(showsNavigationTitle && isTabActive ? "キャプチャ履歴" : "")
+        .toolbar {
+            if isTabActive {
+                if !items.isEmpty {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button(isSelectionMode ? "完了" : "選択") {
+                            withAnimation {
+                                if isSelectionMode {
+                                    isSelectionMode = false
+                                    selectedIDs.removeAll()
+                                } else {
+                                    isSelectionMode = true
                                 }
                             }
                         }
                     }
-                    .padding(.horizontal)
-                    if isLoading {
-                        ProgressView()
-                            .padding()
-                    }
                 }
-                .padding(.vertical, 16)
-            }
-        }
-        .navigationTitle(showsNavigationTitle ? "キャプチャ履歴" : "")
-        .toolbar {
-            if !items.isEmpty {
-                ToolbarItem(placement: .primaryAction) {
-                    Button(isSelectionMode ? "完了" : "選択") {
-                        withAnimation {
-                            if isSelectionMode {
-                                isSelectionMode = false
-                                selectedIDs.removeAll()
-                            } else {
-                                isSelectionMode = true
-                            }
+                if isSelectionMode, !selectedIDs.isEmpty {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button(role: .destructive) {
+                            Task { await deleteSelectedItems() }
+                        } label: {
+                            Label("削除", systemImage: "trash")
                         }
-                    }
-                }
-            }
-            if isSelectionMode, !selectedIDs.isEmpty {
-                ToolbarItem(placement: .primaryAction) {
-                    Button(role: .destructive) {
-                        Task { await deleteSelectedItems() }
-                    } label: {
-                        Label("削除", systemImage: "trash")
                     }
                 }
             }
@@ -205,6 +246,7 @@ struct CaptureListView: View {
 
     private func loadInitial() async {
         isLoading = true
+        isAtScrollTop = true
         offset = 0
         let results = await service.loadHistory(searchText: searchText, limit: limit, offset: 0)
         items = results
@@ -503,12 +545,15 @@ private struct VideoThumbnailView: View {
 private struct CaptureSearchableModifier: ViewModifier {
     let isEnabled: Bool
     @Binding var searchText: String
+    @Environment(\.isTabActive) private var isTabActive
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if isEnabled {
-            content.searchable(text: $searchText, prompt: "検索")
-        } else {
+        ZStack {
+            if isEnabled && isTabActive {
+                Color.clear
+                    .allowsHitTesting(false)
+                    .searchable(text: $searchText, prompt: "検索")
+            }
             content
         }
     }

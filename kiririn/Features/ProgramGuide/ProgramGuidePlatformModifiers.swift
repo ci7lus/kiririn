@@ -1,5 +1,27 @@
 import SwiftUI
 
+#if os(macOS)
+    private struct ProgramGuideSearchToolbarModifier: ViewModifier {
+        let isSearchSheetPresented: Binding<Bool>
+        @Environment(\.isTabActive) private var isTabActive
+
+        func body(content: Content) -> some View {
+            content.toolbar {
+                if isTabActive {
+                    ToolbarItem(placement: .automatic) {
+                        Button {
+                            isSearchSheetPresented.wrappedValue = true
+                        } label: {
+                            Label("番組検索", systemImage: "magnifyingglass")
+                        }
+                        .help("番組を検索")
+                    }
+                }
+            }
+        }
+    }
+#endif
+
 extension View {
     @ViewBuilder
     func programGuideTitle(showsNavigationTitle: Bool, size: CGSize) -> some View {
@@ -69,16 +91,8 @@ extension View {
                 .padding(.bottom, 24)
             }
         #elseif os(macOS)
-            self.toolbar {
-                ToolbarItem(placement: .automatic) {
-                    Button {
-                        isSearchSheetPresented.wrappedValue = true
-                    } label: {
-                        Label("番組検索", systemImage: "magnifyingglass")
-                    }
-                    .help("番組を検索")
-                }
-            }
+            self.modifier(
+                ProgramGuideSearchToolbarModifier(isSearchSheetPresented: isSearchSheetPresented))
         #else
             self
         #endif

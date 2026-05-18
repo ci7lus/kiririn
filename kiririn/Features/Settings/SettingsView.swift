@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State var playerState: PlayerState
     @ObservedObject private var captureService = CaptureService.shared
     @State private var isFolderPickerPresented = false
+    @Environment(\.isTabActive) private var isTabActive
 
     var body: some View {
         Form {
@@ -58,7 +59,7 @@ struct SettingsView: View {
             #endif
         }
         .formStyle(.grouped)
-        .navigationTitle("設定")
+        .navigationTitle(isTabActive ? "設定" : "")
         .fileImporter(
             isPresented: $isFolderPickerPresented,
             allowedContentTypes: [.folder],

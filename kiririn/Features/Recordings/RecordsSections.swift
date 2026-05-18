@@ -9,9 +9,10 @@ struct BackendRecordsView: View {
     let showsNavigationTitle: Bool
     let showsSearch: Bool
 
-    @State private var viewModel = RecordsViewModel()
+    let viewModel: RecordsViewModel
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var hasCompletedInitialLoad = false
+    @State private var visibleIds: Set<String> = []
     private let localRecordManager = LocalRecordManager.shared
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
@@ -44,50 +45,65 @@ struct BackendRecordsView: View {
                         )
                     }
                 } else {
-                    List {
-                        ForEach(visibleRecords) { record in
-                            let localRecordID = LocalRecordManager.localRecordID(
-                                backendId: record.backendId,
-                                recordID: record.id
-                            )
-                            RecordRowView(
-                                record: record,
-                                thumbnailData: viewModel.thumbnailData(for: record),
-                                isThumbnailFailed: viewModel.isThumbnailFailed(for: record),
-                                playbackPosition: viewModel.playbackPosition(for: record),
-                                localSaveProgress: localRecordManager.downloadProgressByItemId[
-                                    localRecordID],
-                                onCancelLocalSave: {
-                                    localRecordManager.cancelDownload(id: localRecordID)
-                                },
-                                manager: manager
-                            ) {
-                                playRecord(record)
-                            }
-                            .onAppear {
-                                Task {
-                                    await viewModel.loadThumbnailIfNeeded(
-                                        for: record, manager: manager)
+                    ScrollViewReader { proxy in
+                        List {
+                            ForEach(visibleRecords) { record in
+                                let localRecordID = LocalRecordManager.localRecordID(
+                                    backendId: record.backendId,
+                                    recordID: record.id
+                                )
+                                RecordRowView(
+                                    record: record,
+                                    thumbnailData: viewModel.thumbnailData(for: record),
+                                    isThumbnailFailed: viewModel.isThumbnailFailed(for: record),
+                                    playbackPosition: viewModel.playbackPosition(for: record),
+                                    localSaveProgress: localRecordManager.downloadProgressByItemId[
+                                        localRecordID],
+                                    onCancelLocalSave: {
+                                        localRecordManager.cancelDownload(id: localRecordID)
+                                    },
+                                    manager: manager
+                                ) {
+                                    playRecord(record)
                                 }
-                                if record.id == visibleRecords.last?.id {
+                                .onAppear {
                                     Task {
-                                        await loadRecords(reset: false)
+                                        await viewModel.loadThumbnailIfNeeded(
+                                            for: record, manager: manager)
                                     }
+                                    if record.id == visibleRecords.last?.id {
+                                        Task {
+                                            await loadRecords(reset: false)
+                                        }
+                                    }
+                                    visibleIds.insert(record.id)
+                                    if viewModel.hasRestoredScroll { updateTopVisible() }
+                                }
+                                .onDisappear {
+                                    visibleIds.remove(record.id)
+                                    if viewModel.hasRestoredScroll { updateTopVisible() }
                                 }
                             }
-                        }
 
-                        if viewModel.isLoading {
-                            HStack {
-                                Spacer()
-                                ProgressView()
-                                Spacer()
+                            if viewModel.isLoading {
+                                HStack {
+                                    Spacer()
+                                    ProgressView()
+                                    Spacer()
+                                }
+                                .listRowSeparator(.hidden)
                             }
-                            .listRowSeparator(.hidden)
                         }
-                    }
-                    .refreshable {
-                        await refreshRecords()
+                        .refreshable {
+                            await refreshRecords()
+                        }
+                        .task {
+                            guard !viewModel.hasRestoredScroll else { return }
+                            if let id = viewModel.scrolledRecordId {
+                                proxy.scrollTo(id, anchor: .top)
+                            }
+                            viewModel.hasRestoredScroll = true
+                        }
                     }
                 }
             }
@@ -112,10 +128,11 @@ struct BackendRecordsView: View {
         }
         .task {
             viewModel.searchText = searchText
-            if viewModel.records.isEmpty {
+            let needsLoad = viewModel.records.isEmpty
+            if needsLoad {
                 await loadRecords(reset: true)
             }
-            if let cacheStore = AppModel.shared.cacheStore {
+            if needsLoad, let cacheStore = AppModel.shared.cacheStore {
                 await viewModel.loadPlaybackPositions(
                     for: viewModel.records, cacheStore: cacheStore)
             }
@@ -144,6 +161,11 @@ struct BackendRecordsView: View {
         #else
             playerState.play(playable: playable)
         #endif
+    }
+
+    private func updateTopVisible() {
+        guard let top = visibleRecords.first(where: { visibleIds.contains($0.id) }) else { return }
+        viewModel.scrolledRecordId = top.id
     }
 
     private func scheduleSearch() {
@@ -185,12 +207,15 @@ struct BackendRecordsView: View {
 private struct RecordsSearchableModifier: ViewModifier {
     let isEnabled: Bool
     @Binding var searchText: String
+    @Environment(\.isTabActive) private var isTabActive
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if isEnabled {
-            content.searchable(text: $searchText, prompt: "検索")
-        } else {
+        ZStack {
+            if isEnabled && isTabActive {
+                Color.clear
+                    .allowsHitTesting(false)
+                    .searchable(text: $searchText, prompt: "検索")
+            }
             content
         }
     }

@@ -5,11 +5,50 @@ import UniformTypeIdentifiers
     import UIKit
 #endif
 
+private struct IsTabActiveKey: EnvironmentKey {
+    static let defaultValue: Bool = true
+}
+
+extension EnvironmentValues {
+    var isTabActive: Bool {
+        get { self[IsTabActiveKey.self] }
+        set { self[IsTabActiveKey.self] = newValue }
+    }
+}
+
 struct ContentView: View {
     let appModel: AppModel
 
     @State private var isLoadingIndicatorVisible = false
     @State private var loadingIndicatorHideTask: Task<Void, Never>?
+    #if os(macOS)
+        private enum AppTab: String, CaseIterable, Hashable {
+            case nowPlaying, guide, recordings, capture, settings
+
+            var title: String {
+                switch self {
+                case .nowPlaying: return "放送中"
+                case .guide: return "番組表"
+                case .recordings: return "録画"
+                case .capture: return "キャプチャ"
+                case .settings: return "設定"
+                }
+            }
+
+            var icon: String {
+                switch self {
+                case .nowPlaying: return "tv"
+                case .guide: return "calendar"
+                case .recordings: return "film.stack"
+                case .capture: return "photo.on.rectangle.angled"
+                case .settings: return "gear"
+                }
+            }
+        }
+
+        @State private var selectedMacTab: AppTab? = .nowPlaying
+        @State private var visitedMacTabs: Set<AppTab> = [.nowPlaying]
+    #endif
     @Environment(\.scenePhase) private var scenePhase
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
@@ -26,57 +65,84 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            TabView {
-                Tab("放送中", systemImage: "tv") {
-                    NavigationStack {
-                        ServiceListView(manager: manager, playerState: playerState)
+            #if os(macOS)
+                NavigationSplitView {
+                    List(AppTab.allCases, id: \.self, selection: $selectedMacTab) { tab in
+                        Label(tab.title, systemImage: tab.icon)
+                    }
+                    .listStyle(.sidebar)
+                    .navigationSplitViewColumnWidth(min: 160, ideal: 200)
+                } detail: {
+                    ZStack {
+                        ForEach(macTabDisplayOrder, id: \.self) { tab in
+                            macTabContent(for: tab)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .opacity(selectedMacTab == tab ? 1 : 0)
+                                .allowsHitTesting(selectedMacTab == tab)
+                                .accessibilityHidden(selectedMacTab != tab)
+                                .environment(\.isTabActive, selectedMacTab == tab)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .onChange(of: selectedMacTab) { old, new in
+                    if let tab = new {
+                        visitedMacTabs.insert(tab)
+                    } else if let old {
+                        selectedMacTab = old
                     }
                 }
+            #else
+                TabView {
+                    Tab("放送中", systemImage: "tv") {
+                        NavigationStack {
+                            ServiceListView(manager: manager, playerState: playerState)
+                        }
+                    }
 
-                Tab("番組表", systemImage: "calendar") {
-                    NavigationStack {
-                        ProgramGuideView(manager: manager, playerState: playerState)
+                    Tab("番組表", systemImage: "calendar") {
+                        NavigationStack {
+                            ProgramGuideView(manager: manager, playerState: playerState)
+                        }
                     }
-                }
 
-                Tab("録画", systemImage: "film.stack") {
-                    NavigationStack {
-                        RecordsListView(
-                            manager: manager,
-                            searchText: Bindable(appModel).recordingsSearchText,
-                            showsNavigationTitle: true,
-                            showsSearch: true,
-                            playerState: playerState
-                        )
+                    Tab("録画", systemImage: "film.stack") {
+                        NavigationStack {
+                            RecordsListView(
+                                manager: manager,
+                                searchText: Bindable(appModel).recordingsSearchText,
+                                showsNavigationTitle: true,
+                                showsSearch: true,
+                                playerState: playerState
+                            )
+                        }
                     }
-                }
 
-                Tab("キャプチャ", systemImage: "photo.on.rectangle.angled") {
-                    NavigationStack {
-                        CaptureListView(
-                            showsNavigationTitle: true,
-                            showsSearch: true,
-                            playerState: playerState
-                        )
+                    Tab("キャプチャ", systemImage: "photo.on.rectangle.angled") {
+                        NavigationStack {
+                            CaptureListView(
+                                showsNavigationTitle: true,
+                                showsSearch: true,
+                                playerState: playerState
+                            )
+                        }
                     }
-                }
 
-                Tab("設定", systemImage: "gear") {
-                    NavigationStack {
-                        SettingsView(
-                            configStore: configStore,
-                            manager: manager,
-                            appModel: appModel,
-                            pluginStore: pluginStore,
-                            playerState: playerState
-                        )
+                    Tab("設定", systemImage: "gear") {
+                        NavigationStack {
+                            SettingsView(
+                                configStore: configStore,
+                                manager: manager,
+                                appModel: appModel,
+                                pluginStore: pluginStore,
+                                playerState: playerState
+                            )
+                        }
                     }
                 }
-            }
-            #if !os(macOS)
                 .opacity(playerState.isActive && playerState.mode == .fullscreen ? 0 : 1)
+                .tabViewStyle(.sidebarAdaptable)
             #endif
-            .tabViewStyle(.sidebarAdaptable)
 
             #if !os(macOS)
                 if playerState.player != nil {
@@ -196,6 +262,61 @@ struct ContentView: View {
             }
         #endif
     }
+
+    #if os(macOS)
+        private var macTabDisplayOrder: [AppTab] {
+            var result: [AppTab] = []
+            if let sel = selectedMacTab, visitedMacTabs.contains(sel) {
+                result.append(sel)
+            }
+            for tab in AppTab.allCases where visitedMacTabs.contains(tab) && tab != selectedMacTab {
+                result.append(tab)
+            }
+            return result
+        }
+
+        @ViewBuilder
+        private func macTabContent(for tab: AppTab) -> some View {
+            switch tab {
+            case .nowPlaying:
+                NavigationStack {
+                    ServiceListView(manager: manager, playerState: playerState)
+                }
+            case .guide:
+                NavigationStack {
+                    ProgramGuideView(manager: manager, playerState: playerState)
+                }
+            case .recordings:
+                NavigationStack {
+                    RecordsListView(
+                        manager: manager,
+                        searchText: Bindable(appModel).recordingsSearchText,
+                        showsNavigationTitle: true,
+                        showsSearch: true,
+                        playerState: playerState
+                    )
+                }
+            case .capture:
+                NavigationStack {
+                    CaptureListView(
+                        showsNavigationTitle: true,
+                        showsSearch: true,
+                        playerState: playerState
+                    )
+                }
+            case .settings:
+                NavigationStack {
+                    SettingsView(
+                        configStore: configStore,
+                        manager: manager,
+                        appModel: appModel,
+                        pluginStore: pluginStore,
+                        playerState: playerState
+                    )
+                }
+            }
+        }
+    #endif
 
     #if !os(macOS)
         private func handleFileImport(_ result: Result<[URL], Error>) {

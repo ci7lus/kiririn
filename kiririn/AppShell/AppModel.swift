@@ -32,6 +32,18 @@ final class AppModel {
     var focusedPlayerID: String?
     var recordingsSearchText = ""
 
+    @ObservationIgnored
+    private var recordingsViewModelStore: [String: RecordsViewModel] = [:]
+
+    func recordingsViewModel(for backendId: String) -> RecordsViewModel {
+        if let existing = recordingsViewModelStore[backendId] {
+            return existing
+        }
+        let vm = RecordsViewModel()
+        recordingsViewModelStore[backendId] = vm
+        return vm
+    }
+
     var focusedPlayerState: PlayerState? {
         guard let focusedPlayerID else { return nil }
         return activePlayerStates.first { $0.id == focusedPlayerID }

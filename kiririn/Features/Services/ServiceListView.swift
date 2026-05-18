@@ -766,26 +766,25 @@ private struct FavoriteServiceOrderingRow: View {
 
 private struct ServiceListTitleModifier: ViewModifier {
     let isEnabled: Bool
+    @Environment(\.isTabActive) private var isTabActive
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if isEnabled {
-            content.navigationTitle("放送中")
-        } else {
-            content
-        }
+        content.navigationTitle(isEnabled && isTabActive ? "放送中" : "")
     }
 }
 
 private struct ServiceListSearchableModifier: ViewModifier {
     let isEnabled: Bool
     @Binding var searchText: String
+    @Environment(\.isTabActive) private var isTabActive
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if isEnabled {
-            content.searchable(text: $searchText, prompt: "検索")
-        } else {
+        ZStack {
+            if isEnabled && isTabActive {
+                Color.clear
+                    .allowsHitTesting(false)
+                    .searchable(text: $searchText, prompt: "検索")
+            }
             content
         }
     }

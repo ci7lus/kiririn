@@ -11,6 +11,8 @@ class RecordsViewModel {
     var hasMore = true
     var searchText = ""
     var errorMessage: String?
+    var scrolledRecordId: String?
+    var hasRestoredScroll = false
 
     private var pageToken: String?
     private let limit = 20
@@ -112,6 +114,7 @@ class RecordsViewModel {
         if reset {
             pageToken = nil
             hasMore = true
+            scrolledRecordId = nil
         }
         guard hasMore else { return }
         isLoading = true

@@ -213,13 +213,9 @@ struct ProgramCellView: View, Equatable {
 
 struct ProgramGuideTitleModifier: ViewModifier {
     let isEnabled: Bool
+    @Environment(\.isTabActive) private var isTabActive
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if isEnabled {
-            content.navigationTitle("番組表")
-        } else {
-            content
-        }
+        content.navigationTitle(isEnabled && isTabActive ? "番組表" : "")
     }
 }

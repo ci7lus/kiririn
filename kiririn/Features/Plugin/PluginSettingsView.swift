@@ -16,6 +16,7 @@ struct PluginSettingsView: View {
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
     #endif
+    @Environment(\.isTabActive) private var isTabActive
 
     var body: some View {
         Group {
@@ -111,89 +112,91 @@ struct PluginSettingsView: View {
 
     @ToolbarContentBuilder
     private var settingsToolbar: some ToolbarContent {
-        ToolbarItem(placement: .automatic) {
-            Button {
-                showingImporter = true
-            } label: {
-                Image(systemName: "plus")
+        if isTabActive {
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    showingImporter = true
+                } label: {
+                    Image(systemName: "plus")
+                }
             }
+            #if !os(macOS)
+                ToolbarItem(placement: .topBarTrailing) {
+                    EditButton()
+                }
+            #endif
+            #if os(macOS)
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        NSWorkspace.shared.open(pluginStore.pluginDirectoryURL)
+                    } label: {
+                        Image(systemName: "folder")
+                    }
+                    .help("プラグインフォルダを開く")
+
+                    Button {
+                        if let id = selectedPluginID {
+                            openWindow(id: AppWindowID.plugin.rawValue, value: id)
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.forward.square")
+                    }
+                    .help("選択したプラグインを別ウィンドウで開く")
+                    .disabled(selectedPluginID == nil)
+
+                    Button {
+                        if let id = selectedPluginID {
+                            editingPlugin = pluginStore.plugin(id: id)
+                        }
+                    } label: {
+                        Image(systemName: "info.circle")
+                    }
+                    .help("選択したプラグインを編集")
+                    .disabled(selectedPluginID == nil)
+
+                    Button {
+                        if let id = selectedPluginID {
+                            movePlugin(id: id, delta: -1)
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up")
+                    }
+                    .help("選択したプラグインを上へ移動")
+                    .disabled(!canMoveSelected(delta: -1))
+
+                    Button {
+                        if let id = selectedPluginID {
+                            movePlugin(id: id, delta: 1)
+                        }
+                    } label: {
+                        Image(systemName: "arrow.down")
+                    }
+                    .help("選択したプラグインを下へ移動")
+                    .disabled(!canMoveSelected(delta: 1))
+
+                    Button {
+                        if let id = selectedPluginID {
+                            appModel.reloadPluginInAllPlayerStates(id: id.uuidString)
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .help("選択したプラグインを再読み込み")
+                    .disabled(selectedPluginID == nil)
+
+                    Button(role: .destructive) {
+                        if let id = selectedPluginID {
+                            pluginIDsToDelete = [id]
+                            showingDeleteConfirmation = true
+                        }
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .help("選択したプラグインを削除")
+                    .disabled(selectedPluginID == nil)
+                }
+            #endif
         }
-        #if !os(macOS)
-            ToolbarItem(placement: .topBarTrailing) {
-                EditButton()
-            }
-        #endif
-        #if os(macOS)
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    NSWorkspace.shared.open(pluginStore.pluginDirectoryURL)
-                } label: {
-                    Image(systemName: "folder")
-                }
-                .help("プラグインフォルダを開く")
-
-                Button {
-                    if let id = selectedPluginID {
-                        openWindow(id: AppWindowID.plugin.rawValue, value: id)
-                    }
-                } label: {
-                    Image(systemName: "arrow.up.forward.square")
-                }
-                .help("選択したプラグインを別ウィンドウで開く")
-                .disabled(selectedPluginID == nil)
-
-                Button {
-                    if let id = selectedPluginID {
-                        editingPlugin = pluginStore.plugin(id: id)
-                    }
-                } label: {
-                    Image(systemName: "info.circle")
-                }
-                .help("選択したプラグインを編集")
-                .disabled(selectedPluginID == nil)
-
-                Button {
-                    if let id = selectedPluginID {
-                        movePlugin(id: id, delta: -1)
-                    }
-                } label: {
-                    Image(systemName: "arrow.up")
-                }
-                .help("選択したプラグインを上へ移動")
-                .disabled(!canMoveSelected(delta: -1))
-
-                Button {
-                    if let id = selectedPluginID {
-                        movePlugin(id: id, delta: 1)
-                    }
-                } label: {
-                    Image(systemName: "arrow.down")
-                }
-                .help("選択したプラグインを下へ移動")
-                .disabled(!canMoveSelected(delta: 1))
-
-                Button {
-                    if let id = selectedPluginID {
-                        appModel.reloadPluginInAllPlayerStates(id: id.uuidString)
-                    }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .help("選択したプラグインを再読み込み")
-                .disabled(selectedPluginID == nil)
-
-                Button(role: .destructive) {
-                    if let id = selectedPluginID {
-                        pluginIDsToDelete = [id]
-                        showingDeleteConfirmation = true
-                    }
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .help("選択したプラグインを削除")
-                .disabled(selectedPluginID == nil)
-            }
-        #endif
     }
 
     @ViewBuilder

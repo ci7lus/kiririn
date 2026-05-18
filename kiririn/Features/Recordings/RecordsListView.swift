@@ -7,8 +7,7 @@ struct RecordsListView: View {
     let showsNavigationTitle: Bool
     let showsSearch: Bool
     @State var playerState: PlayerState
-    @AppStorage("records.lastSelectedBackendId") private var persistedSelectedBackendId = ""
-    @State private var selectedBackendId: String?
+    @AppStorage("records.lastSelectedBackendId") private var selectedBackendId = ""
     @State private var showingURLInput = false
     @State private var showingFilePicker = false
     @State private var urlInputText = ""
@@ -16,6 +15,7 @@ struct RecordsListView: View {
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
     #endif
+    @Environment(\.isTabActive) private var isTabActive
 
     private var recordingBackendIds: [String] {
         let _ = manager.backendSyncCount
@@ -28,26 +28,23 @@ struct RecordsListView: View {
     }
 
     private var currentBackendId: String? {
-        if let selectedBackendId, recordingBackendIds.contains(selectedBackendId) {
+        if !selectedBackendId.isEmpty, recordingBackendIds.contains(selectedBackendId) {
             return selectedBackendId
         }
         return recordingBackendIds.first
     }
 
     var body: some View {
-        AnyView(
-            recordsContent
-                .navigationTitle(showsNavigationTitle ? "録画" : "")
-                .task {
-                    ensureSelectedBackend()
-                }
-                .onChange(of: recordingBackendIds) { _, _ in
-                    ensureSelectedBackend()
-                }
-                .onChange(of: selectedBackendId) { _, newValue in
-                    persistedSelectedBackendId = newValue ?? ""
-                }
-                .toolbar {
+        recordsContent
+            .navigationTitle(showsNavigationTitle && isTabActive ? "録画" : "")
+            .task {
+                ensureSelectedBackend()
+            }
+            .onChange(of: recordingBackendIds) { _, _ in
+                ensureSelectedBackend()
+            }
+            .toolbar {
+                if isTabActive {
                     if !recordingBackendIds.isEmpty {
                         ToolbarItem(placement: .principal) {
                             HStack(spacing: 0) {
@@ -63,18 +60,17 @@ struct RecordsListView: View {
                                     }
                                 }
                                 .pickerStyle(.menu)
-                                if let selectedBackendId {
-                                    if selectedBackendId == "local" {
+                                if let backendId = currentBackendId {
+                                    if backendId == "local" {
                                         BackendBadge(typeName: "Local")
                                     } else {
                                         BackendBadge(
-                                            typeName: manager.backendTypeName(selectedBackendId))
+                                            typeName: manager.backendTypeName(backendId))
                                     }
                                 }
                             }
                         }
                     }
-
                     #if os(macOS)
                         ToolbarItem(placement: .automatic) {
                             Button {
@@ -85,7 +81,6 @@ struct RecordsListView: View {
                             .help("録画一覧を再読込")
                         }
                     #endif
-
                     ToolbarItem(placement: addMenuPlacement) {
                         Menu {
                             Button {
@@ -93,7 +88,6 @@ struct RecordsListView: View {
                             } label: {
                                 Label("ファイルから再生", systemImage: "doc")
                             }
-
                             Button {
                                 urlInputText = ""
                                 showingURLInput = true
@@ -106,28 +100,28 @@ struct RecordsListView: View {
                         }
                     }
                 }
-                .fileImporter(
-                    isPresented: $showingFilePicker,
-                    allowedContentTypes: [
-                        .movie, .video, .mpeg2TransportStream, .mpeg4Movie, .quickTimeMovie,
-                        .audiovisualContent,
-                    ],
-                    allowsMultipleSelection: false
-                ) { result in
-                    handleFileImport(result)
+            }
+            .fileImporter(
+                isPresented: $showingFilePicker,
+                allowedContentTypes: [
+                    .movie, .video, .mpeg2TransportStream, .mpeg4Movie, .quickTimeMovie,
+                    .audiovisualContent,
+                ],
+                allowsMultipleSelection: false
+            ) { result in
+                handleFileImport(result)
+            }
+            .alert("URLから再生", isPresented: $showingURLInput) {
+                TextField("https://...", text: $urlInputText)
+                    .urlTextInputModifiers()
+                    .autocorrectionDisabled()
+                Button("再生") {
+                    playFromURL(urlInputText)
                 }
-                .alert("URLから再生", isPresented: $showingURLInput) {
-                    TextField("https://...", text: $urlInputText)
-                        .urlTextInputModifiers()
-                        .autocorrectionDisabled()
-                    Button("再生") {
-                        playFromURL(urlInputText)
-                    }
-                    Button("キャンセル", role: .cancel) {}
-                } message: {
-                    Text("動画のURLを入力してください")
-                }
-        )
+                Button("キャンセル", role: .cancel) {}
+            } message: {
+                Text("動画のURLを入力してください")
+            }
     }
 
     @ViewBuilder
@@ -157,7 +151,8 @@ struct RecordsListView: View {
                     refreshTrigger: refreshTrigger,
                     searchText: $searchText,
                     showsNavigationTitle: showsNavigationTitle,
-                    showsSearch: showsSearch
+                    showsSearch: showsSearch,
+                    viewModel: AppModel.shared.recordingsViewModel(for: backendId)
                 )
                 .id(backendId)
             }
@@ -178,19 +173,8 @@ struct RecordsListView: View {
     }
 
     private func ensureSelectedBackend() {
-        guard let first = recordingBackendIds.first else {
-            selectedBackendId = nil
-            return
-        }
-        if let selectedBackendId, recordingBackendIds.contains(selectedBackendId) {
-            return
-        }
-        if !persistedSelectedBackendId.isEmpty,
-            recordingBackendIds.contains(persistedSelectedBackendId)
-        {
-            selectedBackendId = persistedSelectedBackendId
-            return
-        }
+        guard let first = recordingBackendIds.first else { return }
+        if !selectedBackendId.isEmpty, recordingBackendIds.contains(selectedBackendId) { return }
         selectedBackendId = first
     }
 

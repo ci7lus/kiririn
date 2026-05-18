@@ -8,6 +8,7 @@ struct BackendSettingsView: View {
     @State private var selectedBackendID: String?
     @State private var showingDeleteConfirmation = false
     @State private var backendIDsToDelete: [String] = []
+    @Environment(\.isTabActive) private var isTabActive
 
     var body: some View {
         listView
@@ -170,62 +171,64 @@ struct BackendSettingsView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: addButtonPlacement) {
-            Button {
-                showingAddSheet = true
-            } label: {
-                Image(systemName: "plus")
+        if isTabActive {
+            ToolbarItem(placement: addButtonPlacement) {
+                Button {
+                    showingAddSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                }
             }
+            #if !os(macOS)
+                ToolbarItem(placement: .topBarTrailing) {
+                    EditButton()
+                }
+            #endif
+            #if os(macOS)
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        if let id = selectedBackendID {
+                            editingConfig = configStore.configurations.first { $0.id == id }
+                        }
+                    } label: {
+                        Image(systemName: "info.circle")
+                    }
+                    .help("選択したバックエンドを編集")
+                    .disabled(selectedBackendID == nil)
+
+                    Button {
+                        if let id = selectedBackendID {
+                            moveConfig(id: id, delta: -1)
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up")
+                    }
+                    .help("選択したバックエンドを上へ移動")
+                    .disabled(!canMoveSelected(delta: -1))
+
+                    Button {
+                        if let id = selectedBackendID {
+                            moveConfig(id: id, delta: 1)
+                        }
+                    } label: {
+                        Image(systemName: "arrow.down")
+                    }
+                    .help("選択したバックエンドを下へ移動")
+                    .disabled(!canMoveSelected(delta: 1))
+
+                    Button(role: .destructive) {
+                        if let id = selectedBackendID {
+                            backendIDsToDelete = [id]
+                            showingDeleteConfirmation = true
+                        }
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .help("選択したバックエンドを削除")
+                    .disabled(selectedBackendID == nil)
+                }
+            #endif
         }
-        #if !os(macOS)
-            ToolbarItem(placement: .topBarTrailing) {
-                EditButton()
-            }
-        #endif
-        #if os(macOS)
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    if let id = selectedBackendID {
-                        editingConfig = configStore.configurations.first { $0.id == id }
-                    }
-                } label: {
-                    Image(systemName: "info.circle")
-                }
-                .help("選択したバックエンドを編集")
-                .disabled(selectedBackendID == nil)
-
-                Button {
-                    if let id = selectedBackendID {
-                        moveConfig(id: id, delta: -1)
-                    }
-                } label: {
-                    Image(systemName: "arrow.up")
-                }
-                .help("選択したバックエンドを上へ移動")
-                .disabled(!canMoveSelected(delta: -1))
-
-                Button {
-                    if let id = selectedBackendID {
-                        moveConfig(id: id, delta: 1)
-                    }
-                } label: {
-                    Image(systemName: "arrow.down")
-                }
-                .help("選択したバックエンドを下へ移動")
-                .disabled(!canMoveSelected(delta: 1))
-
-                Button(role: .destructive) {
-                    if let id = selectedBackendID {
-                        backendIDsToDelete = [id]
-                        showingDeleteConfirmation = true
-                    }
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .help("選択したバックエンドを削除")
-                .disabled(selectedBackendID == nil)
-            }
-        #endif
     }
 
     private var addButtonPlacement: ToolbarItemPlacement {
