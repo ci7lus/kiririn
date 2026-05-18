@@ -1033,14 +1033,6 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         let position = min(max(basePosition, 0), 1)
         guard position > 0 else { return }
 
-        // Ended items should not remain as resume history.
-        if position >= 0.985 {
-            Task {
-                await cacheStore?.deletePlaybackPosition(playableID: playable.id)
-            }
-            return
-        }
-
         if !force && abs(position - lastSavedPlaybackPosition) < 0.01 {
             return
         }
