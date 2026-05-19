@@ -258,10 +258,14 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     }
 
     func play(playable: Playable) {
+        let previousPlayableID = currentPlayable?.id
         cleanup(releasePlayer: true)
         clearPlaybackError()
         var playableForPlayback = playable
         playableForPlayback.normalizeIdentity()
+        if let previousPlayableID, previousPlayableID != playableForPlayback.id {
+            resetPlaybackRateToDefault()
+        }
         switch playableForPlayback.source {
         case .fileURL(let url, let bookmarkData):
             var actualURL = url
@@ -481,6 +485,11 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         }
 
         currentPlayable = playable
+    }
+
+    private func resetPlaybackRateToDefault() {
+        playbackRate = 1.0
+        playbackStatus.rate = 1.0
     }
 
     func setRate(_ rate: Float) {
