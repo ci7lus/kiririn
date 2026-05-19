@@ -8,12 +8,12 @@
 
 /* Begin PBXBuildFile section */
 		CE171EEE2F61AE4D008DEA05 /* OrderedCollections in Frameworks */ = {isa = PBXBuildFile; productRef = CE171EED2F61AE4D008DEA05 /* OrderedCollections */; };
+		CE21E9412FF10C020007B5F6 /* PronamaAssets in Frameworks */ = {isa = PBXBuildFile; productRef = CE21E9402FF10C020007B5F6 /* PronamaAssets */; };
 		CE4442812FB87FAD0092C2BF /* VLCKit in Frameworks */ = {isa = PBXBuildFile; productRef = CE4442802FB87FAD0092C2BF /* VLCKit */; };
 		CE44428E2FB8B9050092C2BF /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = CE44428D2FB8B9050092C2BF /* Sentry */; };
 		CE47B1A72F4DC5AA00680B2E /* Logging in Frameworks */ = {isa = PBXBuildFile; productRef = CE47B1A62F4DC5AA00680B2E /* Logging */; };
 		CE47B1AA2F4DC65200680B2E /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CE47B1A92F4DC65200680B2E /* GRDB */; };
 		CE54EBE92FB834D4009AFCBC /* LicenseList in Frameworks */ = {isa = PBXBuildFile; productRef = CE54EBE82FB834D4009AFCBC /* LicenseList */; };
-		CE21E9412FF10C020007B5F6 /* PronamaAssets in Frameworks */ = {isa = PBXBuildFile; productRef = CE21E9402FF10C020007B5F6 /* PronamaAssets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
