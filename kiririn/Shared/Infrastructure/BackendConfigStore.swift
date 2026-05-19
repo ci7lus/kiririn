@@ -3,6 +3,7 @@ import Foundation
 @Observable
 class BackendConfigStore {
     private let localDefaults: UserDefaults
+    private let keychainStore = KeychainCredentialStore()
     private let configsKey = "kiririn.backend.configurations"
     private let enabledKey = "kiririn.backend.enabled."
 
@@ -22,7 +23,13 @@ class BackendConfigStore {
             return
         }
         let decoder = JSONDecoder()
-        configurations = (try? decoder.decode([BackendConfiguration].self, from: data)) ?? []
+        var loaded = (try? decoder.decode([BackendConfiguration].self, from: data)) ?? []
+        for index in loaded.indices {
+            if let auth = keychainStore.load(forBackendId: loaded[index].id) {
+                loaded[index].auth = auth
+            }
+        }
+        configurations = loaded
         enabledStates = configurations.reduce(into: [:]) { result, config in
             let key = enabledKey + config.id
             let enabled =
@@ -32,8 +39,16 @@ class BackendConfigStore {
     }
 
     private func saveConfigurations() {
+        for config in configurations {
+            keychainStore.save(config.auth, forBackendId: config.id)
+        }
+        let stripped = configurations.map { config -> BackendConfiguration in
+            var c = config
+            c.auth = .none
+            return c
+        }
         let encoder = JSONEncoder()
-        guard let data = try? encoder.encode(configurations) else { return }
+        guard let data = try? encoder.encode(stripped) else { return }
         localDefaults.set(data, forKey: configsKey)
     }
 
@@ -52,6 +67,7 @@ class BackendConfigStore {
 
     func removeConfiguration(id: String) {
         configurations.removeAll { $0.id == id }
+        keychainStore.delete(forBackendId: id)
         saveConfigurations()
         enabledStates[id] = nil
         localDefaults.removeObject(forKey: enabledKey + id)
