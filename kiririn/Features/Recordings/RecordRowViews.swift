@@ -10,6 +10,8 @@ struct RecordRowView: View {
     let manager: BackendManager
     let onTap: () -> Void
 
+    @State private var decodedThumbnail: Image?
+
     private var formattedDate: String? {
         record.displayDate.map { $0.formatted(.displayDateTimeFull) }
     }
@@ -21,10 +23,6 @@ struct RecordRowView: View {
 
     private var isLocalSaveInProgress: Bool {
         localSaveProgress != nil
-    }
-
-    private func imageFromData(_ data: Data) -> Image? {
-        recordingsImage(from: data)
     }
 
     @ViewBuilder
@@ -42,12 +40,10 @@ struct RecordRowView: View {
     @ViewBuilder
     private var thumbnailView: some View {
         ZStack(alignment: .bottom) {
-            if let thumbnailData,
-                let thumbnailImage = imageFromData(thumbnailData)
-            {
+            if let decodedThumbnail {
                 Color.kiririnSecondarySystemBackground
                     .overlay {
-                        thumbnailImage
+                        decodedThumbnail
                             .resizable()
                             .aspectRatio(contentMode: .fill)
                             .allowsHitTesting(false)
@@ -140,6 +136,13 @@ struct RecordRowView: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .task(id: thumbnailData) {
+            guard let data = thumbnailData else {
+                decodedThumbnail = nil
+                return
+            }
+            decodedThumbnail = await decodeRecordingsImage(from: data)
+        }
         .contextMenu {
             if isLocalSaveInProgress, let onCancelLocalSave {
                 Button(role: .destructive, action: onCancelLocalSave) {

@@ -24,6 +24,20 @@ func recordingsImage(from data: Data) -> Image? {
     #endif
 }
 
+func decodeRecordingsImage(from data: Data) async -> Image? {
+    #if canImport(UIKit)
+        let image = await Task.detached(priority: .utility) { UIImage(data: data) }.value
+        guard let image else { return nil }
+        return Image(uiImage: image)
+    #elseif canImport(AppKit)
+        let image = await Task.detached(priority: .utility) { NSImage(data: data) }.value
+        guard let image else { return nil }
+        return Image(nsImage: image)
+    #else
+        return nil
+    #endif
+}
+
 extension View {
     @ViewBuilder
     fileprivate func recordingsURLTextInputModifiers() -> some View {
