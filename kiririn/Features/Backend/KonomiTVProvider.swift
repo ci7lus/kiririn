@@ -45,7 +45,7 @@ final class KonomiTVProvider: RecordingBackendProvider {
             queryItems: queryItems
         )
 
-        let records = response.recorded_programs.map { $0.toRecord(backendId: configuration.id) }
+        let records = response.recordedPrograms.map { $0.toRecord(backendId: configuration.id) }
 
         // KonomiTVの1ページは30件固定
         let pageSize = 30
@@ -117,22 +117,39 @@ private nonisolated struct KonomiTVVersionInfo: Codable, Sendable {
 
 private nonisolated struct KonomiTVRecordedPrograms: Codable, Sendable {
     let total: Int
-    let recorded_programs: [KonomiTVRecordedProgram]
+    let recordedPrograms: [KonomiTVRecordedProgram]
+
+    private enum CodingKeys: String, CodingKey {
+        case total
+        case recordedPrograms = "recorded_programs"
+    }
 }
 
 private nonisolated struct KonomiTVRecordedProgram: Codable, Sendable {
     let id: Int
     let title: String
     let description: String
-    let start_time: String
-    let end_time: String
+    let startTime: String
+    let endTime: String
     let duration: Double
     let genres: [KonomiTVGenre]?
     let channel: KonomiTVChannel?
-    let recorded_video: KonomiTVRecordedVideo?
+    let recordedVideo: KonomiTVRecordedVideo?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case description
+        case startTime = "start_time"
+        case endTime = "end_time"
+        case duration
+        case genres
+        case channel
+        case recordedVideo = "recorded_video"
+    }
 
     func toRecord(backendId: String) -> Recorded {
-        let start = parseDate(start_time) ?? Date()
+        let start = parseDate(startTime) ?? Date()
 
         let programGenres = genres?.compactMap { $0.toProgramGenre() } ?? []
 
@@ -148,7 +165,7 @@ private nonisolated struct KonomiTVRecordedProgram: Codable, Sendable {
             duration: duration,
             genres: programGenres,
             variants: [RecordedVariant(id: "default", name: "Default")],
-            isRecording: recorded_video?.status == "Recording",
+            isRecording: recordedVideo?.status == "Recording",
             hasThumbnail: true,
             backendId: backendId
         )

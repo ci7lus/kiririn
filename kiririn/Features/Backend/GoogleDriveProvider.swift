@@ -99,16 +99,16 @@ final class GoogleDriveProvider: RecordingBackendProvider {
         {
             logger.info("Access token is expired (expired at \(expiry)), refreshing...")
             if let tokenResponse = try await refreshAccessToken(refreshToken: refreshToken) {
-                let newExpiry = Date().addingTimeInterval(TimeInterval(tokenResponse.expires_in))
+                let newExpiry = Date().addingTimeInterval(TimeInterval(tokenResponse.expiresIn))
                 var newConfig = currentConfig
                 newConfig.auth = .oauth2(
-                    accessToken: tokenResponse.access_token,
-                    refreshToken: tokenResponse.refresh_token ?? refreshToken,
+                    accessToken: tokenResponse.accessToken,
+                    refreshToken: tokenResponse.refreshToken ?? refreshToken,
                     expiryDate: newExpiry
                 )
                 self.configuration = newConfig
                 self.onConfigurationUpdated?(newConfig)
-                return tokenResponse.access_token
+                return tokenResponse.accessToken
             }
             return nil
         }
@@ -382,11 +382,19 @@ private nonisolated struct GoogleDriveFile: Codable, Sendable {
 }
 
 private struct GoogleOAuthTokenResponse: Codable {
-    let access_token: String
-    let expires_in: Int
-    let refresh_token: String?
+    let accessToken: String
+    let expiresIn: Int
+    let refreshToken: String?
     let scope: String
-    let token_type: String
+    let tokenType: String
+
+    private enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case expiresIn = "expires_in"
+        case refreshToken = "refresh_token"
+        case scope
+        case tokenType = "token_type"
+    }
 }
 
 // MARK: - UI Components
@@ -533,11 +541,11 @@ struct GoogleDriveAuthEditor: View {
             let tokenResponse = try JSONDecoder().decode(GoogleOAuthTokenResponse.self, from: data)
 
             await MainActor.run {
-                print("Token exchange succeeded: \(tokenResponse.expires_in)")
+                print("Token exchange succeeded: \(tokenResponse.expiresIn)")
                 self.auth = .oauth2(
-                    accessToken: tokenResponse.access_token,
-                    refreshToken: tokenResponse.refresh_token,
-                    expiryDate: Date().addingTimeInterval(TimeInterval(tokenResponse.expires_in))
+                    accessToken: tokenResponse.accessToken,
+                    refreshToken: tokenResponse.refreshToken,
+                    expiryDate: Date().addingTimeInterval(TimeInterval(tokenResponse.expiresIn))
                 )
                 if self.name.isEmpty {
                     self.name = "Google Drive"

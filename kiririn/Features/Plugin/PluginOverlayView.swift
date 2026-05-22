@@ -1519,7 +1519,9 @@ private struct PluginWebView: PluginWebViewRepresentable {
         }
 
         func cancelAllExternalRequests() {
-            pendingExternalRequests.values.forEach { $0.cancel() }
+            for task in pendingExternalRequests.values {
+                task.cancel()
+            }
             pendingExternalRequests.removeAll()
         }
 

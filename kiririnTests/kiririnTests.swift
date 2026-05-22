@@ -9,7 +9,7 @@ import Testing
 
 @testable import kiririn
 
-struct kiririnTests {
+struct KiririnTests {
 
     @Test func replacingARIBEnclosedGlyphsForDisplayMapsKnownBroadcastMarks() {
         let source = "🈑字幕🈔音声🆞🆧⚿㊙🈀🆬"

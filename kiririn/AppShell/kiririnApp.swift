@@ -130,7 +130,7 @@ extension Notification.Name {
 #endif
 
 @main
-struct kiririnApp: App {
+struct KiririnApp: App {
     @State private var appModel = AppModel.shared
 
     init() {

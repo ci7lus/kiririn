@@ -626,7 +626,8 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         let presentEventDesc = metadata["PresentEventDesc"]?.trimmingCharacters(
             in: .whitespacesAndNewlines)
         var presentEventExtended = OrderedDictionary<String, String>()
-        metadata
+        let sortedPresentEventExtendedItems =
+            metadata
             .filter { $0.key.hasPrefix(presentEventItemsPrefix) }
             .compactMap { item -> (order: String, title: String, value: String)? in
                 let rawKey = String(item.key.dropFirst(presentEventItemsPrefix.count))
@@ -643,7 +644,10 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
                 return (order: "99", title: rawKey, value: item.value)
             }
             .sorted { $0.order < $1.order || ($0.order == $1.order && $0.title < $1.title) }
-            .forEach { presentEventExtended[$0.title] = $0.value }
+
+        for item in sortedPresentEventExtendedItems {
+            presentEventExtended[item.title] = item.value
+        }
 
         let startAt: Date? = {
             guard let raw = metadata["PresentEventStartAt"], let value = Double(raw) else {

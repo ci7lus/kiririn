@@ -908,7 +908,9 @@
 
             override func updateTrackingAreas() {
                 super.updateTrackingAreas()
-                trackingAreas.forEach { removeTrackingArea($0) }
+                for trackingArea in trackingAreas {
+                    removeTrackingArea(trackingArea)
+                }
                 addTrackingArea(
                     NSTrackingArea(
                         rect: bounds,

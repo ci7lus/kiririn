@@ -560,7 +560,9 @@ class BackendManager {
 
             let continuations = initialNetworkStateContinuations
             initialNetworkStateContinuations.removeAll()
-            continuations.forEach { $0.resume() }
+            for continuation in continuations {
+                continuation.resume()
+            }
 
             guard previousState != .wifi, newState == .wifi else { return }
             await retryPendingProgramCatalogRefreshes()
