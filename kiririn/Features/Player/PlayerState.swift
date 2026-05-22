@@ -1312,7 +1312,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
     var availableOverlayPlugins: [PluginDefinition] {
         plugins.filter {
-            $0.isEnabled && !$0.htmlContent.isEmpty && $0.supports(area: .playerOverlay)
+            $0.isEnabled && $0.supports(area: .overlay)
         }
     }
 
@@ -1321,9 +1321,9 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         return availableOverlayPlugins
     }
 
-    var availableBottomTabPlugins: [PluginDefinition] {
+    var availablePanelPlugins: [PluginDefinition] {
         plugins.filter {
-            $0.isEnabled && !$0.htmlContent.isEmpty && $0.supports(area: .pluginScreen)
+            $0.isEnabled && $0.supports(area: .panel)
         }
     }
 }

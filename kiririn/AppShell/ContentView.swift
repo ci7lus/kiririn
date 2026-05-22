@@ -21,6 +21,7 @@ struct ContentView: View {
 
     @State private var isLoadingIndicatorVisible = false
     @State private var loadingIndicatorHideTask: Task<Void, Never>?
+    @State private var droppedPluginAlertMessage: String?
     #if os(macOS)
         private enum AppTab: String, CaseIterable, Hashable {
             case nowPlaying, guide, recordings, capture, settings
@@ -184,8 +185,28 @@ struct ContentView: View {
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.86), value: playerState.isActive)
+        .alert(
+            "プラグインの通知",
+            isPresented: Binding(
+                get: { droppedPluginAlertMessage != nil },
+                set: { newValue in
+                    if !newValue {
+                        droppedPluginAlertMessage = nil
+                        pluginStore.clearDroppedPluginAlertMessage()
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                droppedPluginAlertMessage = nil
+                pluginStore.clearDroppedPluginAlertMessage()
+            }
+        } message: {
+            Text(droppedPluginAlertMessage ?? "")
+        }
         .onAppear {
             isLoadingIndicatorVisible = manager.isDataLoading
+            droppedPluginAlertMessage = pluginStore.droppedPluginAlertMessage
         }
         .onChange(of: manager.isDataLoading) { _, isLoading in
             loadingIndicatorHideTask?.cancel()
@@ -214,6 +235,9 @@ struct ContentView: View {
         }
         .onChange(of: pluginStore.plugins) { _, _ in
             appModel.syncPluginsToPlayer()
+        }
+        .onChange(of: pluginStore.droppedPluginAlertMessage) { _, newValue in
+            droppedPluginAlertMessage = newValue
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }

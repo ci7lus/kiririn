@@ -71,6 +71,11 @@ final class AppModel {
         activePlayerStates = [playerState]
         focusedPlayerID = playerState.id
         pluginStore = PluginStore()
+        pluginStore.onLocalFolderManifestChanged = { [weak self] pluginID in
+            guard let self else { return }
+            self.syncPluginsToPlayer()
+            self.reloadPluginInAllPlayerStates(id: pluginID.uuidString)
+        }
         playerState.plugins = pluginStore.plugins
     }
 
@@ -136,6 +141,7 @@ final class AppModel {
     }
 
     func reloadPluginsInAllPlayerStates() {
+        ExtensionPluginRuntimeRegistry.shared.invalidateAll()
         playerState.reloadPlugins()
         for state in activePlayerStates where state !== playerState {
             state.reloadPlugins()
@@ -143,6 +149,9 @@ final class AppModel {
     }
 
     func reloadPluginInAllPlayerStates(id: String) {
+        if let pluginID = UUID(uuidString: id) {
+            ExtensionPluginRuntimeRegistry.shared.invalidate(pluginID: pluginID)
+        }
         playerState.reloadPlugin(id: id)
         for state in activePlayerStates where state !== playerState {
             state.reloadPlugin(id: id)

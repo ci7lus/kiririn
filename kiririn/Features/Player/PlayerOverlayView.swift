@@ -186,7 +186,7 @@
                 }
 
             }
-            .onChange(of: playerState.availableBottomTabPlugins.map(\.id)) {
+            .onChange(of: playerState.availablePanelPlugins.map(\.id)) {
                 ensureLowerTabSelection()
             }
             .onChange(of: playerState.mode) { oldMode, newMode in
@@ -250,21 +250,13 @@
 
                     ForEach(playerState.availableOverlayPlugins) { plugin in
                         PluginOverlayView(
-                            pluginID: plugin.id.uuidString,
-                            manifestPluginID: plugin.manifestID,
-                            htmlContent: plugin.htmlContent,
+                            pluginDefinition: plugin,
                             appModel: appModel,
                             reloadToken: playerState.pluginReloadToken
                                 + playerState.perPluginReloadTokens[
                                     plugin.id.uuidString, default: 0],
-                            displayArea: .playerOverlay,
-                            playerID: playerState.id,
-                            manifestContextId: plugin.manifestContextId,
-                            allowedURLPatterns: plugin.manifestAllowedURLPatterns,
-                            viewSize: frame.size,
-                            onReloadRequested: {
-                                playerState.reloadPlugin(id: plugin.id.uuidString)
-                            }
+                            displayArea: .overlay,
+                            playerID: playerState.id
                         )
                         .id(plugin.id)
                         .opacity(playerState.showingPluginOverlay ? 1 : 0)
@@ -1969,7 +1961,7 @@
         @Binding var selectedPluginID: UUID?
 
         private var enabledPlugins: [PluginDefinition] {
-            pluginStore.plugins.filter { $0.isEnabled && $0.supports(area: .pluginScreen) }
+            pluginStore.plugins.filter { $0.isEnabled && $0.supports(area: .panel) }
         }
 
         private var selectedPlugin: PluginDefinition? {
@@ -1979,7 +1971,7 @@
         var body: some View {
             ZStack {
                 if let plugin = selectedPlugin {
-                    LowerContextPluginScreen(
+                    LowerContextPluginPanel(
                         plugin: plugin, playerState: playerState, appModel: appModel
                     )
                     .id(plugin.id)
@@ -2029,32 +2021,22 @@
         }
     }
 
-    private struct LowerContextPluginScreen: View {
+    private struct LowerContextPluginPanel: View {
         let plugin: PluginDefinition
         @State var playerState: PlayerState
         let appModel: AppModel
 
         var body: some View {
-            GeometryReader { geo in
-                PluginOverlayView(
-                    pluginID: plugin.id.uuidString,
-                    manifestPluginID: plugin.manifestID,
-                    htmlContent: plugin.htmlContent,
-                    appModel: appModel,
-                    reloadToken: playerState.pluginReloadToken
-                        + playerState.perPluginReloadTokens[plugin.id.uuidString, default: 0],
-                    displayArea: .pluginScreen,
-                    playerID: playerState.id,
-                    manifestContextId: plugin.manifestContextId,
-                    allowedURLPatterns: plugin.manifestAllowedURLPatterns,
-                    viewSize: geo.size,
-                    onReloadRequested: {
-                        playerState.reloadPlugin(id: plugin.id.uuidString)
-                    }
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.kiririnSecondarySystemBackground)
-            }
+            PluginOverlayView(
+                pluginDefinition: plugin,
+                appModel: appModel,
+                reloadToken: playerState.pluginReloadToken
+                    + playerState.perPluginReloadTokens[plugin.id.uuidString, default: 0],
+                displayArea: .panel,
+                playerID: playerState.id
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.kiririnSecondarySystemBackground)
         }
     }
 #endif

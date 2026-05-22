@@ -22,25 +22,15 @@
                         }
                         .frame(width: 0, height: 0)
 
-                        GeometryReader { geo in
-                            PluginOverlayView(
-                                pluginID: plugin.id.uuidString,
-                                manifestPluginID: plugin.manifestID,
-                                htmlContent: plugin.htmlContent,
-                                appModel: appModel,
-                                reloadToken: appModel.playerState.pluginReloadToken
-                                    + appModel.playerState.perPluginReloadTokens[
-                                        plugin.id.uuidString, default: 0],
-                                displayArea: .pluginScreen,
-                                playerID: nil,
-                                manifestContextId: plugin.manifestContextId,
-                                allowedURLPatterns: plugin.manifestAllowedURLPatterns,
-                                viewSize: geo.size,
-                                onReloadRequested: {
-                                    appModel.playerState.reloadPlugin(id: plugin.id.uuidString)
-                                }
-                            )
-                        }
+                        PluginOverlayView(
+                            pluginDefinition: plugin,
+                            appModel: appModel,
+                            reloadToken: appModel.playerState.pluginReloadToken
+                                + appModel.playerState.perPluginReloadTokens[
+                                    plugin.id.uuidString, default: 0],
+                            displayArea: .panel
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                     .navigationTitle(plugin.name)
                     .contextMenu {

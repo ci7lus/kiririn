@@ -9,6 +9,7 @@
         @Binding var editingPlugin: PluginDefinition?
         @Binding var showingDeleteConfirmation: Bool
         @Binding var pluginIDsToDelete: [UUID]
+        let onToggleEnabled: (PluginDefinition, Bool) -> Void
         let onOpenWindow: (UUID) -> Void
 
         var body: some View {
@@ -17,7 +18,7 @@
                     PluginRowView(
                         plugin: plugin,
                         onToggle: { enabled in
-                            pluginStore.setEnabled(enabled, for: plugin.id)
+                            onToggleEnabled(plugin, enabled)
                         },
                         onEdit: {
                             editingPlugin = plugin

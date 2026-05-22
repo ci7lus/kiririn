@@ -215,7 +215,7 @@ private struct AppCommands: Commands {
         #if os(macOS)
             CommandMenu("プラグイン") {
                 let enabledPlugins = appModel.pluginStore.plugins.filter {
-                    $0.isEnabled && !$0.htmlContent.isEmpty
+                    $0.isEnabled
                 }
 
                 if enabledPlugins.isEmpty {

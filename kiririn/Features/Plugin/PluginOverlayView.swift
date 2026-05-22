@@ -10,258 +10,419 @@ import WebKit
 #endif
 
 enum PluginDisplayArea: String, Codable, CaseIterable, Sendable {
-    case playerOverlay
-    case pluginSettings
-    case pluginScreen
+    case overlay = "overlay"
+    case options = "options"
+    case panel = "panel"
 
     var localizedName: String {
         switch self {
-        case .playerOverlay: return "プレイヤーオーバーレイ"
-        case .pluginSettings: return "プラグイン設定"
-        case .pluginScreen: return "プラグインスクリーン"
+        case .overlay: return "プレイヤーオーバーレイ"
+        case .options: return "プラグイン設定"
+        case .panel: return "パネル"
         }
     }
 }
 
-enum PluginWebOrigin {
-    static func host(pluginID: String, manifestContextId: String?) -> String {
-        if let manifestContextId, !manifestContextId.isEmpty {
-            return "\(manifestContextId).ctx.plugin.kiririn.internal"
+enum ExtensionPluginContextConfiguration {
+    private static let errorDomain = "PluginRuntime"
+    private static let baseURLScheme = "webkit-extension"
+
+    static func uniqueIdentifier(for manifestID: String) -> String {
+        manifestID
+    }
+
+    private static func baseURL(forHost host: String, identity: String) throws -> URL {
+        var components = URLComponents()
+        components.scheme = baseURLScheme
+        components.host = host
+        components.path = "/"
+
+        guard let baseURL = components.url else {
+            throw NSError(
+                domain: errorDomain,
+                code: 3,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "プラグインの base URL が不正です: \(identity)"
+                ]
+            )
         }
-        return "\(pluginID.lowercased()).plugin.kiririn.internal"
+
+        return baseURL
     }
 
-    static func url(pluginID: String, manifestContextId: String?) -> URL? {
-        URL(string: "https://\(host(pluginID: pluginID, manifestContextId: manifestContextId))/")
+    private static func host(from baseURL: URL, identity: String) throws -> String {
+        guard let host = baseURL.host, !host.isEmpty else {
+            throw NSError(
+                domain: errorDomain,
+                code: 4,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "プラグインの host を解決できませんでした: \(identity)"
+                ]
+            )
+        }
+
+        return host
     }
 
-    static func host(for plugin: PluginDefinition) -> String {
-        host(pluginID: plugin.id.uuidString, manifestContextId: plugin.manifestContextId)
+    static func baseURL(for pluginID: UUID) throws -> URL {
+        try baseURL(forHost: pluginID.uuidString.lowercased(), identity: pluginID.uuidString)
+    }
+
+    static func host(for pluginID: UUID) throws -> String {
+        try host(from: baseURL(for: pluginID), identity: pluginID.uuidString)
+    }
+
+    static func websiteDataHost(for pluginID: UUID) throws -> String {
+        try host(for: pluginID)
+    }
+
+    @MainActor
+    static func makeContext(
+        for webExtension: WKWebExtension,
+        pluginID: UUID,
+        manifestID: String,
+        requestedPermissions: [String],
+        requestedHostPermissions: [String]
+    ) throws -> WKWebExtensionContext {
+        let context = WKWebExtensionContext(for: webExtension)
+        try applyStableIdentity(to: context, pluginID: pluginID, manifestID: manifestID)
+        applyRequestedPermissions(requestedPermissions, to: context)
+        applyRequestedHostPermissions(requestedHostPermissions, to: context)
+        return context
+    }
+
+    @MainActor
+    static func applyStableIdentity(
+        to context: WKWebExtensionContext,
+        pluginID: UUID,
+        manifestID: String
+    ) throws {
+        context.uniqueIdentifier = uniqueIdentifier(for: manifestID)
+        context.baseURL = try baseURL(for: pluginID)
+    }
+
+    @MainActor
+    private static func applyRequestedPermissions(
+        _ requestedPermissions: [String],
+        to context: WKWebExtensionContext
+    ) {
+        for permission in requestedPermissions {
+            context.setPermissionStatus(
+                .grantedExplicitly,
+                for: WKWebExtension.Permission(permission)
+            )
+        }
+    }
+
+    @MainActor
+    private static func applyRequestedHostPermissions(
+        _ hostPermissions: [String],
+        to context: WKWebExtensionContext
+    ) {
+        for pattern in hostPermissions {
+            guard let matchPattern = try? WKWebExtension.MatchPattern(string: pattern) else {
+                continue
+            }
+            context.setPermissionStatus(.grantedExplicitly, for: matchPattern)
+        }
     }
 }
 
 @MainActor
 enum PluginWebsiteDataStore {
-    private static let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
-    private static let cleanupHTML = """
-        <!doctype html>
-        <html>
-        <head><meta charset=\"utf-8\"></head>
-        <body></body>
-        </html>
-        """
-    private static let cleanupScript = """
-            try { localStorage.clear(); } catch {}
-            try { sessionStorage.clear(); } catch {}
-            try {
-                if ('caches' in self) {
-                    const cacheKeys = await caches.keys();
-                    await Promise.all(cacheKeys.map(key => caches.delete(key)));
-                }
-            } catch {}
-            try {
-                if ('indexedDB' in self && typeof indexedDB.databases === 'function') {
-                    const databases = await indexedDB.databases();
-                    await Promise.all((databases || []).map(database => {
-                        if (!database || !database.name) {
-                            return Promise.resolve();
-                        }
-                        return new Promise(resolve => {
-                            const request = indexedDB.deleteDatabase(database.name);
-                            request.onsuccess = () => resolve();
-                            request.onerror = () => resolve();
-                            request.onblocked = () => resolve();
-                        });
-                    }));
-                }
-            } catch {}
-            try {
-                if ('serviceWorker' in navigator) {
-                    const registrations = await navigator.serviceWorker.getRegistrations();
-                    await Promise.all(registrations.map(registration => registration.unregister()));
-                }
-            } catch {}
-            try {
-                const expires = 'expires=Thu, 01 Jan 1970 00:00:00 GMT';
-                const cookieNames = document.cookie
-                    .split(';')
-                    .map(entry => entry.split('=')[0]?.trim())
-                    .filter(Boolean);
-                for (const name of cookieNames) {
-                    document.cookie = `${name}=; ${expires}; path=/`;
-                    document.cookie = `${name}=; ${expires}; path=/; domain=${location.hostname}`;
-                }
-            } catch {}
-            return true;
-        """
+    private static let extensionDataTypes = WKWebExtensionController.allExtensionDataTypes
+    private static let websiteDataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
 
-    @MainActor
-    static func removeAllData(forHost host: String) async throws {
+    static func unregisterServiceWorkers(for plugin: PluginDefinition) async {
+        guard let host = try? ExtensionPluginContextConfiguration.websiteDataHost(for: plugin.id)
+        else { return }
+        let swTypes: Set<String> = [WKWebsiteDataTypeServiceWorkerRegistrations]
         let dataStore = WKWebsiteDataStore.default()
-        try await clearCookies(forHost: host, dataStore: dataStore)
-        try await clearOriginStorage(forHost: host, dataStore: dataStore)
-
-        let records = await exactRecords(forHost: host, dataStore: dataStore)
+        let records = await matchingRecords(forHost: host, dataStore: dataStore)
         guard !records.isEmpty else { return }
-
         await withCheckedContinuation { continuation in
-            dataStore.removeData(ofTypes: dataTypes, for: records) {
+            dataStore.removeData(ofTypes: swTypes, for: records) {
                 continuation.resume(returning: ())
             }
         }
     }
 
-    private static func exactRecords(forHost host: String, dataStore: WKWebsiteDataStore) async
+    @MainActor
+    static func removeAllData(for plugin: PluginDefinition, store: PluginStore) async throws
+        -> Bool
+    {
+        let removedWebsiteData = try await removeWebsiteData(for: plugin)
+
+        do {
+            let runtime = try await ExtensionPluginRuntimeRegistry.shared.makeRuntime(
+                for: plugin,
+                store: store
+            )
+            let removedExtensionData = await removeExtensionData(for: runtime)
+            return removedExtensionData || removedWebsiteData
+        } catch {
+            if removedWebsiteData {
+                return true
+            }
+            throw error
+        }
+    }
+
+    private static func removeExtensionData(for runtime: ExtensionPluginRuntime) async -> Bool {
+        guard
+            let record = await runtime.controller.dataRecord(
+                ofTypes: extensionDataTypes,
+                for: runtime.context
+            )
+        else {
+            return false
+        }
+
+        let removableTypes = record.containedDataTypes.intersection(extensionDataTypes)
+        guard !removableTypes.isEmpty else { return false }
+
+        await runtime.controller.removeData(ofTypes: removableTypes, from: [record])
+        return true
+    }
+
+    private static func removeWebsiteData(for plugin: PluginDefinition) async throws -> Bool {
+        let host = try ExtensionPluginContextConfiguration.websiteDataHost(for: plugin.id)
+        return await removeWebsiteData(forHost: host)
+    }
+
+    private static func removeWebsiteData(forHost host: String) async -> Bool {
+        let dataStore = WKWebsiteDataStore.default()
+        let records = await matchingRecords(forHost: host, dataStore: dataStore)
+        guard !records.isEmpty else { return false }
+
+        await withCheckedContinuation { continuation in
+            dataStore.removeData(ofTypes: websiteDataTypes, for: records) {
+                continuation.resume(returning: ())
+            }
+        }
+
+        return true
+    }
+
+    private static func matchingRecords(forHost host: String, dataStore: WKWebsiteDataStore) async
         -> [WKWebsiteDataRecord]
     {
-        await withCheckedContinuation { continuation in
-            dataStore.fetchDataRecords(ofTypes: dataTypes) { records in
+        let normalizedHost = host.lowercased()
+
+        return await withCheckedContinuation { continuation in
+            dataStore.fetchDataRecords(ofTypes: websiteDataTypes) { records in
                 continuation.resume(
                     returning: records.filter {
-                        $0.displayName.caseInsensitiveCompare(host) == .orderedSame
+                        let displayName = $0.displayName.lowercased()
+                        return displayName == normalizedHost
+                            || displayName.hasSuffix(".\(normalizedHost)")
                     })
-            }
-        }
-    }
-
-    private static func clearCookies(forHost host: String, dataStore: WKWebsiteDataStore)
-        async throws
-    {
-        let cookieStore = dataStore.httpCookieStore
-        let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
-            cookieStore.getAllCookies { continuation.resume(returning: $0) }
-        }
-
-        let matchingCookies = cookies.filter { cookie in
-            cookie.domain.caseInsensitiveCompare(host) == .orderedSame
-                || cookie.domain.caseInsensitiveCompare(".\(host)") == .orderedSame
-        }
-
-        for cookie in matchingCookies {
-            await withCheckedContinuation { continuation in
-                cookieStore.delete(cookie) {
-                    continuation.resume(returning: ())
-                }
-            }
-        }
-    }
-
-    private static func clearOriginStorage(forHost host: String, dataStore: WKWebsiteDataStore)
-        async throws
-    {
-        try await OriginCleaner(host: host, dataStore: dataStore).run()
-    }
-
-    @MainActor
-    private final class OriginCleaner: NSObject, WKNavigationDelegate {
-        private let webView: WKWebView
-        private let baseURL: URL
-        private var continuation: CheckedContinuation<Void, Error>?
-
-        init(host: String, dataStore: WKWebsiteDataStore) throws {
-            guard let baseURL = URL(string: "https://\(host)/") else {
-                throw NSError(
-                    domain: "PluginWebsiteDataStore", code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "プラグインのデータ削除に必要な WebView を初期化できませんでした"])
-            }
-
-            let configuration = WKWebViewConfiguration()
-            configuration.websiteDataStore = dataStore
-
-            self.baseURL = baseURL
-            self.webView = WKWebView(frame: .zero, configuration: configuration)
-            super.init()
-            webView.navigationDelegate = self
-        }
-
-        func run() async throws {
-            try await withCheckedThrowingContinuation { continuation in
-                self.continuation = continuation
-                webView.loadHTMLString(cleanupHTML, baseURL: baseURL)
-            }
-        }
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            Task { @MainActor in
-                do {
-                    _ = try await webView.callAsyncJavaScript(
-                        cleanupScript,
-                        arguments: [:],
-                        in: nil,
-                        contentWorld: .page
-                    )
-                    finish(.success(()))
-                } catch {
-                    finish(.failure(error))
-                }
-            }
-        }
-
-        func webView(
-            _ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error
-        ) {
-            finish(.failure(error))
-        }
-
-        func webView(
-            _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
-            withError error: Error
-        ) {
-            finish(.failure(error))
-        }
-
-        private func finish(_ result: Result<Void, Error>) {
-            guard let continuation else { return }
-            self.continuation = nil
-            webView.navigationDelegate = nil
-
-            switch result {
-            case .success:
-                continuation.resume(returning: ())
-            case .failure(let error):
-                continuation.resume(throwing: error)
             }
         }
     }
 }
 
+@MainActor
+private final class PluginExtensionControllerDelegate: NSObject, WKWebExtensionControllerDelegate {
+    func webExtensionController(
+        _ controller: WKWebExtensionController,
+        promptForPermissions permissions: Set<WKWebExtension.Permission>,
+        in tab: (any WKWebExtensionTab)?,
+        for extensionContext: WKWebExtensionContext,
+        completionHandler: @escaping (Set<WKWebExtension.Permission>, Date?) -> Void
+    ) {
+        completionHandler(permissions, nil)
+    }
+
+    func webExtensionController(
+        _ controller: WKWebExtensionController,
+        promptForPermissionMatchPatterns matchPatterns: Set<WKWebExtension.MatchPattern>,
+        in tab: (any WKWebExtensionTab)?,
+        for extensionContext: WKWebExtensionContext,
+        completionHandler: @escaping (Set<WKWebExtension.MatchPattern>, Date?) -> Void
+    ) {
+        completionHandler(matchPatterns, nil)
+    }
+}
+
+@MainActor
+final class ExtensionPluginRuntime {
+    let pluginID: UUID
+    let manifest: ExtensionPluginManifest
+    let resourceBaseURL: URL
+    let webExtension: WKWebExtension
+    let context: WKWebExtensionContext
+    let controller: WKWebExtensionController
+    private let controllerDelegate: PluginExtensionControllerDelegate
+    private var isInvalidated = false
+
+    init(
+        plugin: PluginDefinition,
+        manifest: ExtensionPluginManifest,
+        resourceBaseURL: URL
+    ) async throws {
+        let normalizedResourceBaseURL = resourceBaseURL.standardizedFileURL
+        guard normalizedResourceBaseURL.isFileURL else {
+            throw NSError(
+                domain: "PluginRuntime",
+                code: 2,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "プラグインのリソース URL が不正です: \(resourceBaseURL.absoluteString)"
+                ]
+            )
+        }
+        self.pluginID = plugin.id
+        self.manifest = manifest
+        self.resourceBaseURL = normalizedResourceBaseURL
+        self.webExtension = try await WKWebExtension(
+            resourceBaseURL: normalizedResourceBaseURL)
+        self.context = try ExtensionPluginContextConfiguration.makeContext(
+            for: webExtension,
+            pluginID: plugin.id,
+            manifestID: plugin.manifestID,
+            requestedPermissions: manifest.requestedPermissions,
+            requestedHostPermissions: manifest.requestedHostPermissions
+        )
+        self.context.isInspectable = true
+        let delegate = PluginExtensionControllerDelegate()
+        self.controllerDelegate = delegate
+        self.controller = WKWebExtensionController()
+        self.controller.delegate = delegate
+        try controller.load(context)
+    }
+
+    func pageURL(for area: PluginDisplayArea) -> URL? {
+        guard let pagePath = manifest.pagePath(for: area) else {
+            return nil
+        }
+        return context.baseURL.appending(path: pagePath)
+    }
+
+    func invalidate() {
+        guard !isInvalidated else { return }
+        isInvalidated = true
+        try? controller.unload(context)
+    }
+}
+
+@MainActor
+final class ExtensionPluginRuntimeRegistry {
+    static let shared = ExtensionPluginRuntimeRegistry()
+
+    private struct PendingRuntimeLoad {
+        let token: UUID
+        let task: Task<ExtensionPluginRuntime, Error>
+    }
+
+    private var runtimes: [UUID: ExtensionPluginRuntime] = [:]
+    private var pendingLoads: [UUID: PendingRuntimeLoad] = [:]
+
+    func makeRuntime(for plugin: PluginDefinition, store: PluginStore) async throws
+        -> ExtensionPluginRuntime
+    {
+        if let runtime = runtimes[plugin.id] {
+            return runtime
+        }
+
+        if let pendingLoad = pendingLoads[plugin.id] {
+            return try await resolvePendingLoad(pendingLoad, for: plugin, store: store)
+        }
+
+        let manifest = try store.resolvedManifest(for: plugin)
+
+        let resourceBaseURL = try store.resourceBaseURL(for: plugin)
+        let pendingLoad = PendingRuntimeLoad(
+            token: UUID(),
+            task: Task { @MainActor in
+                try await ExtensionPluginRuntime(
+                    plugin: plugin,
+                    manifest: manifest,
+                    resourceBaseURL: resourceBaseURL
+                )
+            }
+        )
+        pendingLoads[plugin.id] = pendingLoad
+        return try await resolvePendingLoad(pendingLoad, for: plugin, store: store)
+    }
+
+    func invalidate(pluginID: UUID) {
+        pendingLoads.removeValue(forKey: pluginID)?.task.cancel()
+        runtimes.removeValue(forKey: pluginID)?.invalidate()
+    }
+
+    func invalidateAll() {
+        let activeRuntimes = Array(runtimes.values)
+        let activeLoads = Array(pendingLoads.values)
+        runtimes = [:]
+        pendingLoads = [:]
+        for pendingLoad in activeLoads {
+            pendingLoad.task.cancel()
+        }
+        for runtime in activeRuntimes {
+            runtime.invalidate()
+        }
+    }
+
+    private func resolvePendingLoad(
+        _ pendingLoad: PendingRuntimeLoad,
+        for plugin: PluginDefinition,
+        store: PluginStore
+    ) async throws -> ExtensionPluginRuntime {
+        do {
+            let runtime = try await pendingLoad.task.value
+
+            if let existingRuntime = runtimes[plugin.id], existingRuntime === runtime {
+                return existingRuntime
+            }
+
+            guard pendingLoads[plugin.id]?.token == pendingLoad.token else {
+                runtime.invalidate()
+                try Task.checkCancellation()
+                return try await makeRuntime(for: plugin, store: store)
+            }
+
+            pendingLoads[plugin.id] = nil
+
+            if let existingRuntime = runtimes[plugin.id] {
+                if existingRuntime !== runtime {
+                    runtime.invalidate()
+                }
+                return existingRuntime
+            }
+
+            runtimes[plugin.id] = runtime
+            return runtime
+        } catch {
+            if pendingLoads[plugin.id]?.token == pendingLoad.token {
+                pendingLoads[plugin.id] = nil
+            }
+            throw error
+        }
+    }
+}
+
 struct PluginOverlayView: View {
-    let pluginID: String
-    let manifestPluginID: String?
-    let htmlContent: String
+    let pluginDefinition: PluginDefinition
     let appModel: AppModel
     let reloadToken: Int
     let displayArea: PluginDisplayArea
     let playerID: String?
-    let manifestContextId: String?
-    let allowedURLPatterns: [String]?
-    let viewSize: CGSize
-    let onReloadRequested: (() -> Void)?
 
     init(
-        pluginID: String,
-        manifestPluginID: String? = nil,
-        htmlContent: String,
+        pluginDefinition: PluginDefinition,
         appModel: AppModel,
         reloadToken: Int,
         displayArea: PluginDisplayArea,
-        playerID: String? = nil,
-        manifestContextId: String? = nil,
-        allowedURLPatterns: [String]? = nil,
-        viewSize: CGSize,
-        onReloadRequested: (() -> Void)? = nil
+        playerID: String? = nil
     ) {
-        self.pluginID = pluginID
-        self.manifestPluginID = manifestPluginID
-        self.htmlContent = htmlContent
+        self.pluginDefinition = pluginDefinition
         self.appModel = appModel
         self.reloadToken = reloadToken
         self.displayArea = displayArea
         self.playerID = playerID
-        self.manifestContextId = manifestContextId
-        self.allowedURLPatterns = allowedURLPatterns
-        self.viewSize = viewSize
-        self.onReloadRequested = onReloadRequested
     }
 
     @State private var isCrashed = false
@@ -269,6 +430,7 @@ struct PluginOverlayView: View {
     @State private var isDetailsExpanded = false
     @State private var pendingOpenURL: URL?
     @State private var openURLToken = 0
+    @State private var extensionRuntime: ExtensionPluginRuntime?
 
     var body: some View {
         // アクティブな全プレイヤーの状態を追跡するハッシュを生成し、これを元に再描画と同期をトリガーさせる。
@@ -277,35 +439,27 @@ struct PluginOverlayView: View {
             appModel.activePlayerStates.map {
                 "\($0.id):\($0.currentPlayable?.id ?? "none"):\($0.playbackStatus.isPlaying):\($0.currentPlayable?.isSeekable ?? false)"
             }.joined(separator: "|") + (appModel.focusedPlayerID ?? "")
-
         ZStack {
-            PluginWebView(
-                pluginID: pluginID,
-                htmlContent: htmlContent,
-                appModel: appModel,
-                reloadToken: reloadToken,
-                displayArea: displayArea,
-                playerID: playerID,
-                manifestContextId: manifestContextId,
-                allowedURLPatterns: allowedURLPatterns,
-                deepLinkURL: pendingOpenURL,
-                deepLinkToken: openURLToken,
-                viewSize: viewSize,
-                stateHash: stateHash,
-                onCrash: {
-                    isDetailsExpanded = false
-                    isCrashed = true
-                },
-                onError: { error, isFatal in
-                    lastError = error
-                    if isFatal {
+            if extensionRuntime != nil {
+                PluginWebView(
+                    pluginDefinition: pluginDefinition,
+                    extensionRuntime: extensionRuntime,
+                    appModel: appModel,
+                    reloadToken: reloadToken,
+                    displayArea: displayArea,
+                    playerID: playerID,
+                    deepLinkURL: pendingOpenURL,
+                    deepLinkToken: openURLToken,
+                    stateHash: stateHash,
+                    onCrash: {
                         isDetailsExpanded = false
                         isCrashed = true
                     }
-                },
-                onReloadRequested: onReloadRequested
-            )
-            .allowsHitTesting(!isCrashed)
+                )
+                .allowsHitTesting(!isCrashed)
+            } else if displayArea != .overlay {
+                ProgressView()
+            }
 
             if isCrashed {
                 crashView
@@ -314,14 +468,22 @@ struct PluginOverlayView: View {
         .onChange(of: reloadToken) {
             isCrashed = false
             lastError = nil
+            ExtensionPluginRuntimeRegistry.shared.invalidate(pluginID: pluginDefinition.id)
+            extensionRuntime = nil
+        }
+        .onDisappear {
+            releaseExtensionRuntime()
         }
         .onAppear {
             consumeQueuedOpenURLIfNeeded()
         }
+        .task(id: runtimeLoadKey) {
+            await loadExtensionRuntime()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .pluginOpenURLRequested)) {
             notification in
-            guard let manifestPluginID,
-                let userInfo = notification.userInfo,
+            let manifestPluginID = pluginDefinition.manifestID
+            guard let userInfo = notification.userInfo,
                 let targetManifestID = userInfo["manifestID"] as? String,
                 targetManifestID == manifestPluginID,
                 let urlString = userInfo["url"] as? String,
@@ -334,9 +496,7 @@ struct PluginOverlayView: View {
     }
 
     private func consumeQueuedOpenURLIfNeeded() {
-        guard let manifestPluginID else {
-            return
-        }
+        let manifestPluginID = pluginDefinition.manifestID
         let queuedURLs = appModel.consumePendingPluginOpenURLs(manifestID: manifestPluginID)
         guard !queuedURLs.isEmpty else { return }
         for queuedURL in queuedURLs {
@@ -349,9 +509,42 @@ struct PluginOverlayView: View {
         openURLToken += 1
     }
 
+    private var runtimeLoadKey: String {
+        return
+            "\(pluginDefinition.id.uuidString)-\(reloadToken)-\(pluginDefinition.resourceBasePath)"
+    }
+
+    @MainActor
+    private func loadExtensionRuntime() async {
+        let expectedLoadKey = runtimeLoadKey
+
+        do {
+            let runtime = try await ExtensionPluginRuntimeRegistry.shared.makeRuntime(
+                for: pluginDefinition,
+                store: appModel.pluginStore
+            )
+            guard !Task.isCancelled, runtimeLoadKey == expectedLoadKey else { return }
+            extensionRuntime = runtime
+        } catch {
+            guard !Task.isCancelled, runtimeLoadKey == expectedLoadKey else {
+                return
+            }
+            extensionRuntime = nil
+            lastError = error.localizedDescription
+            if displayArea != .overlay {
+                isCrashed = true
+            }
+        }
+    }
+
+    @MainActor
+    private func releaseExtensionRuntime() {
+        extensionRuntime = nil
+    }
+
     @ViewBuilder
     private var crashView: some View {
-        if displayArea == .playerOverlay {
+        if displayArea == .overlay {
             // オーバーレイの場合はエラーを表示しない
             Color.clear
         } else {
@@ -409,7 +602,12 @@ struct PluginOverlayView: View {
                         isCrashed = false
                         lastError = nil
                         isDetailsExpanded = false
-                        onReloadRequested?()
+                        ExtensionPluginRuntimeRegistry.shared.invalidate(
+                            pluginID: pluginDefinition.id)
+                        extensionRuntime = nil
+                        Task {
+                            await loadExtensionRuntime()
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -437,29 +635,31 @@ struct PluginOverlayView: View {
 #endif
 
 private struct PluginWebView: PluginWebViewRepresentable {
-    let pluginID: String
-    let htmlContent: String
+    let pluginDefinition: PluginDefinition
+    let extensionRuntime: ExtensionPluginRuntime?
     let appModel: AppModel
     let reloadToken: Int
     let displayArea: PluginDisplayArea
     let playerID: String?
-    let manifestContextId: String?
-    let allowedURLPatterns: [String]?
     let deepLinkURL: URL?
     let deepLinkToken: Int
-    let viewSize: CGSize
     let stateHash: String
     let onCrash: @MainActor () -> Void
-    let onError: @MainActor (String, Bool) -> Void
-    let onReloadRequested: (() -> Void)?
+    private let logger = Logging.Logger(label: "PluginWebView")
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(
-            parent: self, onCrash: onCrash, onError: onError, onReloadRequested: onReloadRequested)
+        Coordinator(parent: self, onCrash: onCrash)
     }
 
     private func makePlatformWebView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
+        let config: WKWebViewConfiguration = {
+            if let existingConfig = extensionRuntime?.context.webViewConfiguration {
+                return existingConfig
+            } else {
+                logger.error("Failed to get web view configuration. Using default.")
+                return WKWebViewConfiguration()
+            }
+        }()
         config.applicationNameForUserAgent = makeApplicationNameForUserAgent()
         let contentController = WKUserContentController()
 
@@ -486,106 +686,29 @@ private struct PluginWebView: PluginWebViewRepresentable {
             webView.isOpaque = false
             webView.backgroundColor = .clear
             webView.scrollView.backgroundColor = .clear
-            webView.scrollView.isScrollEnabled = displayArea != .playerOverlay
+            webView.scrollView.isScrollEnabled = displayArea != .overlay
             webView.scrollView.contentInsetAdjustmentBehavior = .never
         #endif
         webView.uiDelegate = context.coordinator
         webView.navigationDelegate = context.coordinator
         context.coordinator.webView = webView
-        context.coordinator.lastLoadedHTML = htmlContent
+        context.coordinator.lastLoadedPageURL = currentPageURLString()
         context.coordinator.lastReloadToken = reloadToken
         context.coordinator.isPageReady = false
 
-        if displayArea == .playerOverlay, let pid = playerID {
+        if displayArea == .overlay, let pid = playerID {
             let wv = webView
             let pid = pid
-            let plugID = pluginID
+            let plugID = pluginDefinition.id.uuidString
             Task { @MainActor in
                 PluginOverlaySnapshotRegistry.shared.register(wv, playerID: pid, pluginID: plugID)
             }
         }
 
         Task { @MainActor in
-            await self.applyContentBlockersAndLoad(to: webView)
+            self.loadPluginPage(into: webView)
         }
         return webView
-    }
-
-    @MainActor
-    private func applyContentBlockersAndLoad(to webView: WKWebView) async {
-        let pluginHost = PluginWebOrigin.host(
-            pluginID: pluginID, manifestContextId: manifestContextId)
-        let rulesJSON = Self.contentBlockerRulesJSON(
-            for: allowedURLPatterns, pluginHost: pluginHost)
-        let logger = Logger(label: "PluginBridge")
-        do {
-            let store = Self.makeContentRuleListStore()
-            let ruleList: WKContentRuleList = try await withCheckedThrowingContinuation {
-                continuation in
-                store.compileContentRuleList(
-                    forIdentifier: pluginID,
-                    encodedContentRuleList: rulesJSON
-                ) { ruleList, error in
-                    if let error {
-                        continuation.resume(throwing: error)
-                    } else if let ruleList {
-                        continuation.resume(returning: ruleList)
-                    } else {
-                        continuation.resume(
-                            throwing: NSError(domain: "kiririn.plugin", code: -1, userInfo: nil))
-                    }
-                }
-            }
-            webView.configuration.userContentController.add(ruleList)
-        } catch {
-            logger.warning(
-                "Content blocker compilation failed for plugin \(pluginID): \(error.localizedDescription). JSON: \(rulesJSON)"
-            )
-        }
-        loadHTML(into: webView)
-    }
-
-    private static func makeContentRuleListStore() -> WKContentRuleListStore {
-        let fm = FileManager.default
-        if let cacheDir = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            let storeURL = cacheDir.appendingPathComponent(
-                "kiririn_content_rule_lists", isDirectory: true)
-            try? fm.createDirectory(at: storeURL, withIntermediateDirectories: true)
-            if let store = WKContentRuleListStore(url: storeURL) {
-                return store
-            }
-        }
-        return WKContentRuleListStore.default()
-    }
-
-    private static func contentBlockerRulesJSON(for patterns: [String]?, pluginHost: String)
-        -> String
-    {
-        let escapedHost = NSRegularExpression.escapedPattern(for: pluginHost)
-        var rules: [[String: Any]] = [
-            ["trigger": ["url-filter": ".*"], "action": ["type": "block"]],
-            [
-                "trigger": ["url-filter": "^https?://[^/]*\\.kiririn\\.internal/"],
-                "action": ["type": "ignore-previous-rules"],
-            ],
-            [
-                "trigger": ["url-filter": "^blob:https?://\(escapedHost)/"],
-                "action": ["type": "ignore-previous-rules"],
-            ],
-        ]
-        if let patterns {
-            for pattern in patterns {
-                rules.append([
-                    "trigger": ["url-filter": pattern], "action": ["type": "ignore-previous-rules"],
-                ])
-            }
-        }
-        guard let data = try? JSONSerialization.data(withJSONObject: rules),
-            let json = String(data: data, encoding: .utf8)
-        else {
-            return "[]"
-        }
-        return json
     }
 
     #if os(macOS)
@@ -599,23 +722,20 @@ private struct PluginWebView: PluginWebViewRepresentable {
     #endif
 
     private func updatePlatformWebView(_ webView: WKWebView, context: Context) {
-        let htmlChanged = context.coordinator.lastLoadedHTML != htmlContent
+        let pageChanged = context.coordinator.lastLoadedPageURL != currentPageURLString()
         let tokenChanged = context.coordinator.lastReloadToken != reloadToken
 
-        if htmlChanged || tokenChanged {
-            context.coordinator.lastLoadedHTML = htmlContent
+        if pageChanged || tokenChanged {
+            context.coordinator.lastLoadedPageURL = currentPageURLString()
             context.coordinator.lastReloadToken = reloadToken
             context.coordinator.lastInjectedPlayablesJson = nil
             context.coordinator.lastInjectedStatusesJson = nil
             context.coordinator.lastInjectedFocusedPlayerID = nil
-            context.coordinator.lastInjectedDisplayArea = nil
             context.coordinator.lastInjectedPlayerIDs = nil
             context.coordinator.wantsCaptureEvents = false
-            context.coordinator.cancelAllExternalRequests()
             context.coordinator.isPageReady = false
-            webView.configuration.userContentController.removeAllContentRuleLists()
             Task { @MainActor in
-                await self.applyContentBlockersAndLoad(to: webView)
+                self.loadPluginPage(into: webView)
             }
         }
         if context.coordinator.lastInjectedOpenURLToken != deepLinkToken {
@@ -633,7 +753,6 @@ private struct PluginWebView: PluginWebViewRepresentable {
         injectPlayables(into: webView, coordinator: coordinator, force: force)
         injectStatuses(into: webView, coordinator: coordinator, force: force)
         injectFocus(into: webView, coordinator: coordinator, force: force)
-        injectDisplayArea(into: webView, coordinator: coordinator, force: force)
     }
 
     #if os(macOS)
@@ -648,20 +767,19 @@ private struct PluginWebView: PluginWebViewRepresentable {
 
     private static func dismantlePlatformWebView(_ uiView: WKWebView, coordinator: Coordinator) {
         uiView.stopLoading()
-        coordinator.cancelAllExternalRequests()
+        uiView.loadHTMLString("", baseURL: nil)
         coordinator.captureEventCancellable?.cancel()
         coordinator.captureEventCancellable = nil
-        uiView.configuration.userContentController.removeAllContentRuleLists()
         uiView.configuration.userContentController.removeAllUserScripts()
         uiView.configuration.userContentController.removeScriptMessageHandler(forName: "kiririn")
         uiView.uiDelegate = nil
         uiView.navigationDelegate = nil
 
         if let parent = coordinator.parent,
-            parent.displayArea == .playerOverlay,
+            parent.displayArea == .overlay,
             let playerID = parent.playerID
         {
-            let pluginID = parent.pluginID
+            let pluginID = parent.pluginDefinition.id.uuidString
             Task { @MainActor in
                 PluginOverlaySnapshotRegistry.shared.unregister(
                     playerID: playerID, pluginID: pluginID)
@@ -681,18 +799,35 @@ private struct PluginWebView: PluginWebViewRepresentable {
         }
     #endif
 
-    private func loadHTML(into webView: WKWebView) {
-        if htmlContent.hasPrefix("http://") || htmlContent.hasPrefix("https://") {
-            if let url = URL(string: htmlContent) {
-                webView.load(URLRequest(url: url))
+    private func makeRuntimeInfoContext() -> [String: Any] {
+        let bundle = Bundle.main
+        let appVersion =
+            bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let buildVersion =
+            (bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "1"
+        let runtimePlayerID: Any = {
+            if displayArea == .overlay {
+                return playerID ?? NSNull()
             }
-        } else {
-            webView.loadHTMLString(htmlContent, baseURL: pluginBaseURL())
-        }
-    }
+            return NSNull()
+        }()
 
-    private func pluginBaseURL() -> URL? {
-        PluginWebOrigin.url(pluginID: pluginID, manifestContextId: manifestContextId)
+        return [
+            "platform": {
+                #if os(macOS)
+                    "macOS"
+                #else
+                    "iOS"
+                #endif
+            }(),
+            "osVersion": ProcessInfo.processInfo.operatingSystemVersionString,
+            "appVersion": appVersion ?? NSNull(),
+            "buildVersion": buildVersion,
+            "bundleIdentifier": bundle.bundleIdentifier ?? NSNull(),
+            "bridgeVersion": 2,
+            "displayAreaType": displayArea.rawValue,
+            "playerID": runtimePlayerID,
+        ]
     }
 
     private func makeApplicationNameForUserAgent() -> String {
@@ -734,6 +869,18 @@ private struct PluginWebView: PluginWebViewRepresentable {
         let js =
             "if(window.kiririn && window.kiririn._onPlayablesChange) window.kiririn._onPlayablesChange(\(json));"
         webView.evaluateJavaScript(js)
+    }
+
+    private func loadPluginPage(into webView: WKWebView) {
+        if let extensionRuntime,
+            let extensionPageURL = extensionRuntime.pageURL(for: displayArea)
+        {
+            webView.load(URLRequest(url: extensionPageURL))
+        }
+    }
+
+    private func currentPageURLString() -> String? {
+        extensionRuntime?.pageURL(for: displayArea)?.absoluteString
     }
 
     private func injectStatuses(
@@ -786,36 +933,6 @@ private struct PluginWebView: PluginWebViewRepresentable {
         webView.evaluateJavaScript(js)
     }
 
-    private func injectDisplayArea(
-        into webView: WKWebView, coordinator: Coordinator, force: Bool = false
-    ) {
-        var area: [String: Any] = [
-            "type": displayArea.rawValue,
-            "width": viewSize.width,
-            "height": viewSize.height,
-        ]
-        if let pid = playerID {
-            area["playerID"] = pid
-        }
-
-        if !force, let lastArea = coordinator.lastInjectedDisplayArea,
-            NSDictionary(dictionary: lastArea).isEqual(to: area)
-        {
-            return
-        }
-        coordinator.lastInjectedDisplayArea = area
-
-        guard
-            let jsonData = try? JSONSerialization.data(
-                withJSONObject: area, options: [.sortedKeys]),
-            let jsonString = String(data: jsonData, encoding: .utf8)
-        else { return }
-
-        let js =
-            "if(window.kiririn && window.kiririn._onDisplayAreaChange){window.kiririn._onDisplayAreaChange(\(jsonString));}"
-        webView.evaluateJavaScript(js)
-    }
-
     private func makeBridgeJS() -> String {
         let playables = appModel.activePlayerStates.compactMap { state -> [String: Any]? in
             guard var schema = state.currentPlayable?.toPluginSchema() else { return nil }
@@ -845,19 +962,10 @@ private struct PluginWebView: PluginWebViewRepresentable {
             (try? JSONSerialization.data(withJSONObject: statuses, options: [.sortedKeys])).flatMap
         { String(data: $0, encoding: .utf8) } ?? "[]"
 
-        var displayContext: [String: Any] = [
-            "type": displayArea.rawValue,
-            "width": viewSize.width,
-            "height": viewSize.height,
-        ]
-        if let pid = playerID {
-            displayContext["playerID"] = pid
-        }
-
         guard
-            let displayData = try? JSONSerialization.data(
-                withJSONObject: displayContext, options: [.sortedKeys]),
-            let displayString = String(data: displayData, encoding: .utf8)
+            let runtimeInfoData = try? JSONSerialization.data(
+                withJSONObject: makeRuntimeInfoContext(), options: [.sortedKeys]),
+            let runtimeInfoString = String(data: runtimeInfoData, encoding: .utf8)
         else {
             return "window.kiririn = {};"
         }
@@ -871,13 +979,11 @@ private struct PluginWebView: PluginWebViewRepresentable {
                 _focusedPlayerID: \(focusedID.isEmpty ? "null" : "\"\(focusedID)\""),
                 _focusedPlayerIDListeners: [],
                 _playerClosedListeners: [],
-                _displayArea: \(displayString),
-                _displayAreaListeners: [],
+                _runtimeInfo: \(runtimeInfoString),
                 _openURLListeners: [],
                 _captureTakenListeners: [],
                 _captureBlobResolvers: Object.create(null),
                 _captureEventsSubscribed: false,
-                _externalRequestResolvers: Object.create(null),
 
                 getPlayables: function() { return this._playables; },
                 onPlayablesChange: function(callback) { this._playablesListeners.push(callback); },
@@ -917,12 +1023,7 @@ private struct PluginWebView: PluginWebViewRepresentable {
                     return this.getPlayerStatuses().find(s => s.playerID === playerID) || null;
                 },
 
-                getDisplayArea: function() { return this._displayArea; },
-                onDisplayAreaChange: function(callback) { this._displayAreaListeners.push(callback); },
-                _onDisplayAreaChange: function(area) {
-                    this._displayArea = area;
-                    this._displayAreaListeners.forEach(function(cb) { try { cb(area); } catch(e) {} });
-                },
+                getRuntimeInfo: function() { return this._runtimeInfo; },
 
                 onOpenURL: function(callback) { this._openURLListeners.push(callback); },
                 _emitOpenURL: function(payload) {
@@ -938,14 +1039,10 @@ private struct PluginWebView: PluginWebViewRepresentable {
                 },
                 _emitCaptureTaken: function(payload) {
                     const normalizedPayload = payload ? Object.assign({}, payload, {
-                        capturedAt: payload.capturedAt == null ? null : new Date(payload.capturedAt * 1000),
-                        references: Array.isArray(payload.references) ? payload.references : []
+                        capturedAt: new Date(payload.capturedAt * 1000),
+                        variants: Array.isArray(payload.variants) ? payload.variants : []
                     }) : payload;
                     this._captureTakenListeners.forEach(function(cb) { try { cb(normalizedPayload); } catch(e) {} });
-                },
-
-                reload: function() {
-                    window.webkit.messageHandlers.kiririn.postMessage({type: 'reload'});
                 },
 
                 sendMessage: function(type, data) {
@@ -970,10 +1067,6 @@ private struct PluginWebView: PluginWebViewRepresentable {
 
                 getCaptureBlob: function(ref) {
                     return this._performCaptureBlobRequest(ref);
-                },
-
-                fetch: function(input, init) {
-                    return this._performBridgeFetch(input, init);
                 },
 
                 _resolveCaptureBlob: function(requestID, payload) {
@@ -1005,172 +1098,14 @@ private struct PluginWebView: PluginWebViewRepresentable {
                     if (!pending) { return; }
                     delete this._captureBlobResolvers[requestID];
                     pending.reject(new TypeError(message || 'Capture blob request failed'));
-                },
-
-                _resolveExternalRequest: function(requestID, payload) {
-                    const pending = this._externalRequestResolvers[requestID];
-                    if (!pending) { return; }
-                    delete this._externalRequestResolvers[requestID];
-                    if (pending.abortHandler && pending.signal) {
-                        pending.signal.removeEventListener('abort', pending.abortHandler);
-                    }
-
-                    try {
-                        const bytes = payload && payload.bodyBase64 ? (function(base64) {
-                            const binary = atob(base64);
-                            const buffer = new Uint8Array(binary.length);
-                            for (let index = 0; index < binary.length; index += 1) {
-                                buffer[index] = binary.charCodeAt(index);
-                            }
-                            return buffer;
-                        })(payload.bodyBase64) : new Uint8Array();
-
-                        pending.resolve(new Response(bytes, {
-                            status: payload.status || 200,
-                            statusText: payload.statusText || '',
-                            headers: payload.headers || {}
-                        }));
-                    } catch (error) {
-                        pending.reject(error);
-                    }
-                },
-
-                _rejectExternalRequest: function(requestID, message) {
-                    const pending = this._externalRequestResolvers[requestID];
-                    if (!pending) { return; }
-                    delete this._externalRequestResolvers[requestID];
-                    if (pending.abortHandler && pending.signal) {
-                        pending.signal.removeEventListener('abort', pending.abortHandler);
-                    }
-                    pending.reject(new TypeError(message || 'External request failed'));
                 }
             };
 
             (function() {
-                const originalFetch = window.fetch ? window.fetch.bind(window) : null;
-                let nextExternalRequestID = 0;
                 let nextCaptureBlobRequestID = 0;
-
-                function headersToObject(headers) {
-                    const result = {};
-                    headers.forEach(function(value, key) {
-                        if (Object.prototype.hasOwnProperty.call(result, key)) {
-                            result[key] = result[key] + ', ' + value;
-                        } else {
-                            result[key] = value;
-                        }
-                    });
-                    return result;
-                }
-
-                function arrayBufferToBase64(buffer) {
-                    const bytes = new Uint8Array(buffer);
-                    const chunkSize = 0x8000;
-                    let binary = '';
-
-                    for (let index = 0; index < bytes.length; index += chunkSize) {
-                        const chunk = bytes.subarray(index, Math.min(index + chunkSize, bytes.length));
-                        binary += String.fromCharCode.apply(null, Array.from(chunk));
-                    }
-
-                    return btoa(binary);
-                }
-
-                async function buildExternalRequestPayload(input, init) {
-                    const request = input instanceof Request ? input : new Request(input, init);
-                    const url = new URL(request.url, window.location.href);
-                    const headers = headersToObject(request.headers);
-                    let bodyBase64 = null;
-
-                    if (request.method !== 'GET' && request.method !== 'HEAD') {
-                        const bodyBuffer = await request.clone().arrayBuffer();
-                        if (bodyBuffer.byteLength > 0) {
-                            bodyBase64 = arrayBufferToBase64(bodyBuffer);
-                        }
-                    }
-
-                    return {
-                        request: request,
-                        payload: {
-                            requestID: 'external-request-' + (++nextExternalRequestID),
-                            url: url.toString(),
-                            method: request.method,
-                            headers: headers,
-                            bodyBase64: bodyBase64,
-                            credentials: request.credentials
-                        }
-                    };
-                }
-
-                window.kiririn._performBridgeFetch = function(input, init) {
-                    let resolvedURL;
-                    try {
-                        const rawURL = input instanceof Request ? input.url : input;
-                        resolvedURL = new URL(rawURL, window.location.href);
-                    } catch (error) {
-                        if (originalFetch) {
-                            return originalFetch(input, init);
-                        }
-                        return Promise.reject(error);
-                    }
-
-                    if (resolvedURL.protocol !== 'http:' && resolvedURL.protocol !== 'https:') {
-                        if (originalFetch) {
-                            return originalFetch(input, init);
-                        }
-                        return Promise.reject(new TypeError('Only HTTP(S) requests are supported by kiririn.fetch'));
-                    }
-
-                    if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.kiririn) {
-                        if (originalFetch) {
-                            return originalFetch(input, init);
-                        }
-                        return Promise.reject(new TypeError('Kiririn bridge is unavailable'));
-                    }
-
-                    return (async function() {
-                        const prepared = await buildExternalRequestPayload(input, init);
-                        const request = prepared.request;
-                        const payload = prepared.payload;
-                        const signal = request.signal;
-
-                        return await new Promise(function(resolve, reject) {
-                            if (signal && signal.aborted) {
-                                reject(new DOMException('The operation was aborted.', 'AbortError'));
-                                return;
-                            }
-
-                            const pending = {
-                                resolve: resolve,
-                                reject: reject,
-                                signal: signal || null,
-                                abortHandler: null
-                            };
-
-                            if (signal) {
-                                pending.abortHandler = function() {
-                                    delete window.kiririn._externalRequestResolvers[payload.requestID];
-                                    window.webkit.messageHandlers.kiririn.postMessage({
-                                        type: '_externalRequestCancel',
-                                        data: { requestID: payload.requestID }
-                                    });
-                                    reject(new DOMException('The operation was aborted.', 'AbortError'));
-                                };
-                                signal.addEventListener('abort', pending.abortHandler, { once: true });
-                            }
-
-                            window.kiririn._externalRequestResolvers[payload.requestID] = pending;
-                            window.webkit.messageHandlers.kiririn.postMessage({
-                                type: '_externalRequest',
-                                data: payload
-                            });
-                        });
-                    })();
-                };
-
-                window.kiririn._performCaptureBlobRequest = function(ref) {
-                    if (!ref || typeof ref.playerID !== 'string' || typeof ref.captureID !== 'string' || (ref.variant !== 'original' && ref.variant !== 'composite')) {
-                        return Promise.reject(new TypeError('Invalid capture reference'));
+                window.kiririn._performCaptureBlobRequest = function(captureID, variant) {
+                    if (typeof captureID !== 'string' || captureID.length === 0 || (variant !== 'original' && variant !== 'composite')) {
+                        return Promise.reject(new TypeError('Invalid capture request'));
                     }
 
                     if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.kiririn) {
@@ -1187,11 +1122,8 @@ private struct PluginWebView: PluginWebViewRepresentable {
                             type: '_captureBlobRequest',
                             data: {
                                 requestID: requestID,
-                                ref: {
-                                    playerID: ref.playerID,
-                                    captureID: ref.captureID,
-                                    variant: ref.variant
-                                }
+                                captureID: captureID,
+                                variant: variant
                             }
                         });
                     });
@@ -1200,23 +1132,16 @@ private struct PluginWebView: PluginWebViewRepresentable {
 
             // Logging interception
             (function() {
-                window.onerror = function(message, source, lineno, colno, error) {
-                    const stack = error && error.stack ? error.stack : '';
-                    const msg = `${message} at ${source}:${lineno}:${colno}\\n${stack}`;
-                    window.webkit.messageHandlers.kiririn.postMessage({
-                        type: '_error',
-                        data: { message: msg }
-                    });
+                function presentUnhandledPluginError(message) {
+                    window.alert(message);
+                }
+
+                window.onerror = function(message) {
+                    presentUnhandledPluginError(String(message));
                 };
 
                 window.onunhandledrejection = function(event) {
-                    const error = event.reason;
-                    const stack = (error && error.stack) ? error.stack : '';
-                    const msg = `Unhandled Rejection: ${error}\\n${stack}`;
-                    window.webkit.messageHandlers.kiririn.postMessage({
-                        type: '_error',
-                        data: { message: msg }
-                    });
+                    presentUnhandledPluginError(String(event.reason));
                 };
             })();
             """
@@ -1225,9 +1150,8 @@ private struct PluginWebView: PluginWebViewRepresentable {
     class Coordinator: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
         var parent: PluginWebView?
         weak var webView: WKWebView?
-        var lastLoadedHTML: String?
+        var lastLoadedPageURL: String?
         var lastReloadToken: Int = 0
-        var lastInjectedDisplayArea: [String: Any]?
         var lastInjectedPlayablesJson: String?
         var lastInjectedStatusesJson: String?
         var lastInjectedFocusedPlayerID: String?
@@ -1236,21 +1160,14 @@ private struct PluginWebView: PluginWebViewRepresentable {
         var isPageReady = false
         var wantsCaptureEvents = false
         var pendingOpenURLEvents: [URL] = []
-        var pendingExternalRequests: [String: URLSessionDataTask] = [:]
+        var announcedCaptureEvents: [String: PluginCaptureEvent] = [:]
         var captureEventCancellable: AnyCancellable?
         let onCrash: @MainActor () -> Void
-        let onError: @MainActor (String, Bool) -> Void
-        let onReloadRequested: (() -> Void)?
         private let logger = Logger(label: "PluginBridge")
 
-        init(
-            parent: PluginWebView, onCrash: @escaping @MainActor () -> Void,
-            onError: @escaping @MainActor (String, Bool) -> Void, onReloadRequested: (() -> Void)?
-        ) {
+        init(parent: PluginWebView, onCrash: @escaping @MainActor () -> Void) {
             self.parent = parent
             self.onCrash = onCrash
-            self.onError = onError
-            self.onReloadRequested = onReloadRequested
         }
 
         nonisolated func userContentController(
@@ -1262,41 +1179,12 @@ private struct PluginWebView: PluginWebViewRepresentable {
                     let type = body["type"] as? String
                 else { return }
 
-                if type == "_log" {
-                    guard let data = body["data"] as? [String: Any],
-                        let level = data["level"] as? String,
-                        let msg = data["message"] as? String
-                    else { return }
-
-                    switch level {
-                    case "warning":
-                        logger.warning("[\(message.name)] \(msg)")
-                    case "error":
-                        logger.error("[\(message.name)] \(msg)")
-                        onError(msg, false)
-                    default:
-                        logger.info("[\(message.name)] \(msg)")
-                    }
-                } else if type == "_error" {
-                    guard let data = body["data"] as? [String: Any],
-                        let msg = data["message"] as? String
-                    else { return }
-                    logger.error("[\(message.name)] \(msg)")
-                    onError(msg, true)
-                } else if type == "_captureTakenSubscribe" {
+                if type == "_captureTakenSubscribe" {
                     wantsCaptureEvents = true
                     subscribeToCaptureEventsIfNeeded()
                 } else if type == "_captureBlobRequest" {
                     guard let data = body["data"] as? [String: Any] else { return }
                     await handleCaptureBlobRequest(data)
-                } else if type == "reload" {
-                    onReloadRequested?()
-                } else if type == "_externalRequest" {
-                    guard let data = body["data"] as? [String: Any] else { return }
-                    handleExternalRequest(data)
-                } else if type == "_externalRequestCancel" {
-                    guard let data = body["data"] as? [String: Any] else { return }
-                    cancelExternalRequest(data)
                 } else if type == "player:play" || type == "player:pause"
                     || type == "player:togglePlayPause" || type == "player:seek"
                 {
@@ -1360,11 +1248,12 @@ private struct PluginWebView: PluginWebViewRepresentable {
 
         @MainActor
         private func dispatchPluginCaptureEvent(_ event: PluginCaptureEvent) {
+            announcedCaptureEvents[event.captureID] = event
             let payload: [String: Any] = [
                 "playerID": event.playerID,
                 "captureID": event.captureID,
                 "capturedAt": event.capturedAt.timeIntervalSince1970,
-                "references": event.references.map { Self.captureReferenceObject(from: $0) },
+                "variants": event.variants.map { Self.captureVariantObject(from: $0) },
             ]
 
             guard let payloadLiteral = Self.javaScriptObjectLiteral(payload) else { return }
@@ -1376,29 +1265,35 @@ private struct PluginWebView: PluginWebViewRepresentable {
         @MainActor
         private func handleCaptureBlobRequest(_ data: [String: Any]) async {
             guard let requestID = data["requestID"] as? String else { return }
-            guard let ref = data["ref"] as? [String: Any],
-                let requestedPlayerID = ref["playerID"] as? String,
-                let captureID = ref["captureID"] as? String,
-                let variantRawValue = ref["variant"] as? String,
+            guard let captureID = data["captureID"] as? String,
+                let variantRawValue = data["variant"] as? String,
                 let variant = PluginCaptureVariant(rawValue: variantRawValue)
             else {
-                rejectCaptureBlob(requestID: requestID, message: "キャプチャ参照が不正です")
+                rejectCaptureBlob(requestID: requestID, message: "キャプチャ要求が不正です")
                 return
             }
 
-            guard canReceiveCaptureEvent(for: requestedPlayerID) else {
+            guard let announcedEvent = announcedCaptureEvents[captureID] else {
                 rejectCaptureBlob(requestID: requestID, message: "このコンテキストでは対象のキャプチャを取得できません")
                 return
             }
 
-            let reference = PluginCaptureBlobReference(
-                playerID: requestedPlayerID,
-                captureID: captureID,
-                variant: variant,
-                overlayPluginManifestIDs: []
-            )
+            guard canReceiveCaptureEvent(for: announcedEvent.playerID) else {
+                rejectCaptureBlob(requestID: requestID, message: "このコンテキストでは対象のキャプチャを取得できません")
+                return
+            }
 
-            guard let blob = await CaptureService.shared.captureBlob(for: reference) else {
+            guard announcedEvent.variants.contains(where: { $0.type == variant }) else {
+                rejectCaptureBlob(requestID: requestID, message: "このコンテキストでは対象のキャプチャを取得できません")
+                return
+            }
+
+            guard
+                let blob = await CaptureService.shared.captureBlob(
+                    captureID: captureID,
+                    variant: variant
+                )
+            else {
                 resolveCaptureBlob(requestID: requestID, payload: nil)
                 return
             }
@@ -1410,119 +1305,6 @@ private struct PluginWebView: PluginWebViewRepresentable {
                     "mimeType": blob.mimeType,
                 ]
             )
-        }
-
-        private func handleExternalRequest(_ data: [String: Any]) {
-            guard let requestID = data["requestID"] as? String else { return }
-            guard let urlString = data["url"] as? String,
-                let url = URL(string: urlString),
-                let scheme = url.scheme?.lowercased(),
-                scheme == "http" || scheme == "https"
-            else {
-                rejectExternalRequest(requestID: requestID, message: "外部リクエストURLが無効です")
-                return
-            }
-
-            let allowedPatterns = parent?.allowedURLPatterns
-            if let allowedPatterns {
-                let absoluteURL = url.absoluteString
-                let isAllowed = allowedPatterns.contains { pattern in
-                    guard let regex = try? NSRegularExpression(pattern: pattern) else {
-                        return false
-                    }
-                    return regex.firstMatch(
-                        in: absoluteURL, range: NSRange(absoluteURL.startIndex..., in: absoluteURL))
-                        != nil
-                }
-                if !isAllowed {
-                    rejectExternalRequest(
-                        requestID: requestID, message: "アクセスが許可されていない URL です: \(url.absoluteString)"
-                    )
-                    return
-                }
-            } else {
-                rejectExternalRequest(requestID: requestID, message: "このプラグインは外部リクエストを宣言していません")
-                return
-            }
-
-            var request = URLRequest(url: url)
-            request.httpMethod = (data["method"] as? String)?.uppercased() ?? "GET"
-
-            if let headers = data["headers"] as? [String: Any] {
-                for (name, value) in headers {
-                    request.setValue(String(describing: value), forHTTPHeaderField: name)
-                }
-            }
-
-            if let bodyBase64 = data["bodyBase64"] as? String {
-                guard let body = Data(base64Encoded: bodyBase64) else {
-                    rejectExternalRequest(requestID: requestID, message: "外部リクエスト本文のデコードに失敗しました")
-                    return
-                }
-                request.httpBody = body
-            }
-
-            let credentials = (data["credentials"] as? String) ?? "same-origin"
-            request.httpShouldHandleCookies = credentials == "include"
-            let method = request.httpMethod ?? "GET"
-            let requestURL = url.absoluteString
-
-            let task = URLSession.kiririnShared.dataTask(with: request) {
-                [weak self] data, response, error in
-                guard let self else { return }
-
-                Task { @MainActor in
-                    self.pendingExternalRequests[requestID] = nil
-                }
-
-                if let error {
-                    self.rejectExternalRequest(
-                        requestID: requestID, message: error.localizedDescription)
-                    return
-                }
-
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    self.rejectExternalRequest(
-                        requestID: requestID, message: "外部リクエストから有効なレスポンスを受け取れませんでした")
-                    return
-                }
-
-                self.logger.info(
-                    "bridge fetch: \(method) \(requestURL) -> \(httpResponse.statusCode)")
-
-                let headers = httpResponse.allHeaderFields.reduce(into: [String: String]()) {
-                    partialResult, element in
-                    guard let name = element.key as? String else { return }
-                    partialResult[name] = String(describing: element.value)
-                }
-
-                self.resolveExternalRequest(
-                    requestID: requestID,
-                    payload: [
-                        "status": httpResponse.statusCode,
-                        "statusText": HTTPURLResponse.localizedString(
-                            forStatusCode: httpResponse.statusCode),
-                        "headers": headers,
-                        "bodyBase64": (data ?? Data()).base64EncodedString(),
-                    ]
-                )
-            }
-
-            pendingExternalRequests[requestID] = task
-            task.resume()
-        }
-
-        private func cancelExternalRequest(_ data: [String: Any]) {
-            guard let requestID = data["requestID"] as? String else { return }
-            pendingExternalRequests[requestID]?.cancel()
-            pendingExternalRequests[requestID] = nil
-        }
-
-        func cancelAllExternalRequests() {
-            for task in pendingExternalRequests.values {
-                task.cancel()
-            }
-            pendingExternalRequests.removeAll()
         }
 
         func queueOpenURLEvent(_ url: URL) {
@@ -1540,26 +1322,6 @@ private struct PluginWebView: PluginWebViewRepresentable {
                     "if (window.kiririn && window.kiririn._emitOpenURL) { window.kiririn._emitOpenURL(\(payloadLiteral)); }"
                 )
             }
-        }
-
-        private func resolveExternalRequest(requestID: String, payload: [String: Any]) {
-            guard let requestIDLiteral = Self.javaScriptStringLiteral(requestID),
-                let payloadLiteral = Self.javaScriptObjectLiteral(payload)
-            else { return }
-
-            evaluateJavaScript(
-                "if (window.kiririn && window.kiririn._resolveExternalRequest) { window.kiririn._resolveExternalRequest(\(requestIDLiteral), \(payloadLiteral)); }"
-            )
-        }
-
-        private func rejectExternalRequest(requestID: String, message: String) {
-            guard let requestIDLiteral = Self.javaScriptStringLiteral(requestID),
-                let messageLiteral = Self.javaScriptStringLiteral(message)
-            else { return }
-
-            evaluateJavaScript(
-                "if (window.kiririn && window.kiririn._rejectExternalRequest) { window.kiririn._rejectExternalRequest(\(requestIDLiteral), \(messageLiteral)); }"
-            )
         }
 
         private func resolveCaptureBlob(requestID: String, payload: [String: Any]?) {
@@ -1610,14 +1372,12 @@ private struct PluginWebView: PluginWebViewRepresentable {
             return json
         }
 
-        nonisolated private static func captureReferenceObject(
-            from reference: PluginCaptureBlobReference
+        nonisolated private static func captureVariantObject(
+            from variant: PluginCaptureVariantMetadata
         ) -> [String: Any] {
             [
-                "playerID": reference.playerID,
-                "captureID": reference.captureID,
-                "variant": reference.variant.rawValue,
-                "overlayPluginManifestIDs": reference.overlayPluginManifestIDs,
+                "type": variant.type.rawValue,
+                "overlayPluginManifestIDs": variant.overlayPluginManifestIDs,
             ]
         }
 
@@ -1627,27 +1387,6 @@ private struct PluginWebView: PluginWebViewRepresentable {
             Task { @MainActor in
                 onCrash()
             }
-        }
-
-        func webView(
-            _ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
-            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
-        ) {
-            if let url = navigationAction.request.url,
-                url.host?.hasSuffix(".kiririn.internal") == true
-            {
-                // 自前ドメインへのナビゲーション（リロード等）をインターセプト
-                if navigationAction.navigationType == .reload
-                    || navigationAction.navigationType == .linkActivated
-                {
-                    Task { @MainActor in
-                        onReloadRequested?()
-                    }
-                    decisionHandler(.cancel)
-                    return
-                }
-            }
-            decisionHandler(.allow)
         }
 
         // MARK: - WKUIDelegate

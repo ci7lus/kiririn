@@ -29,7 +29,7 @@ struct SettingsView: View {
                 }
 
                 NavigationLink {
-                    PluginSettingsView(
+                    PluginsSettingsView(
                         appModel: appModel, pluginStore: pluginStore, playerState: playerState)
                 } label: {
                     Label("プラグイン設定", systemImage: "puzzlepiece.extension")

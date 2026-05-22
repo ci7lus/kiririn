@@ -16,10 +16,8 @@ enum PluginCaptureVariant: String, Codable, Sendable {
     case composite
 }
 
-struct PluginCaptureBlobReference: Codable, Equatable, Sendable {
-    let playerID: String
-    let captureID: String
-    let variant: PluginCaptureVariant
+struct PluginCaptureVariantMetadata: Codable, Equatable, Sendable {
+    let type: PluginCaptureVariant
     let overlayPluginManifestIDs: [String]
 }
 
@@ -27,7 +25,7 @@ struct PluginCaptureEvent: Codable, Equatable, Sendable {
     let playerID: String
     let captureID: String
     let capturedAt: Date
-    let references: [PluginCaptureBlobReference]
+    let variants: [PluginCaptureVariantMetadata]
 }
 
 struct PluginCaptureBlob: Sendable {
@@ -219,9 +217,9 @@ final class CaptureService: ObservableObject {
         didAddCapture.send((playerID: nil, item))
     }
 
-    func captureBlob(for reference: PluginCaptureBlobReference) async -> PluginCaptureBlob? {
-        guard let item = await cacheStore?.fetchCaptureHistoryItem(id: reference.captureID),
-            let targetURL = Self.captureURL(for: reference.variant, in: item)
+    func captureBlob(captureID: String, variant: PluginCaptureVariant) async -> PluginCaptureBlob? {
+        guard let item = await cacheStore?.fetchCaptureHistoryItem(id: captureID),
+            let targetURL = Self.captureURL(for: variant, in: item)
         else {
             return nil
         }
@@ -263,21 +261,17 @@ final class CaptureService: ObservableObject {
         playerID: String,
         overlayPluginManifestIDs: [String]
     ) -> PluginCaptureEvent {
-        var references: [PluginCaptureBlobReference] = [
-            PluginCaptureBlobReference(
-                playerID: playerID,
-                captureID: item.id,
-                variant: .original,
+        var variants: [PluginCaptureVariantMetadata] = [
+            PluginCaptureVariantMetadata(
+                type: .original,
                 overlayPluginManifestIDs: []
             )
         ]
 
         if !item.variantPaths.isEmpty {
-            references.append(
-                PluginCaptureBlobReference(
-                    playerID: playerID,
-                    captureID: item.id,
-                    variant: .composite,
+            variants.append(
+                PluginCaptureVariantMetadata(
+                    type: .composite,
                     overlayPluginManifestIDs: overlayPluginManifestIDs
                 )
             )
@@ -287,7 +281,7 @@ final class CaptureService: ObservableObject {
             playerID: playerID,
             captureID: item.id,
             capturedAt: item.date,
-            references: references
+            variants: variants
         )
     }
 

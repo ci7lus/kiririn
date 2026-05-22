@@ -73,21 +73,13 @@
                             if !playerState.availableOverlayPlugins.isEmpty {
                                 ForEach(playerState.availableOverlayPlugins) { plugin in
                                     PluginOverlayView(
-                                        pluginID: plugin.id.uuidString,
-                                        manifestPluginID: plugin.manifestID,
-                                        htmlContent: plugin.htmlContent,
+                                        pluginDefinition: plugin,
                                         appModel: appModel,
                                         reloadToken: playerState.pluginReloadToken
                                             + playerState.perPluginReloadTokens[
                                                 plugin.id.uuidString, default: 0],
-                                        displayArea: .playerOverlay,
-                                        playerID: playerState.id,
-                                        manifestContextId: plugin.manifestContextId,
-                                        allowedURLPatterns: plugin.manifestAllowedURLPatterns,
-                                        viewSize: videoGeo.size,
-                                        onReloadRequested: {
-                                            playerState.reloadPlugin(id: plugin.id.uuidString)
-                                        }
+                                        displayArea: .overlay,
+                                        playerID: playerState.id
                                     )
                                     .id(plugin.id)
                                     .opacity(playerState.showingPluginOverlay ? 1 : 0)
@@ -460,7 +452,7 @@
                         Section("プラグインウィンドウ") {
                             ForEach(
                                 pluginStore.plugins.filter {
-                                    $0.isEnabled && !$0.htmlContent.isEmpty
+                                    $0.isEnabled
                                 }
                             ) { plugin in
                                 Button(plugin.name) {
