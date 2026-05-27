@@ -3,6 +3,7 @@ import Security
 
 struct KeychainCredentialStore {
     private let service = "jp.pronama.kiririn.backend.auth"
+    private let label = "kiririn Backend Credential"
 
     func save(_ auth: BackendAuth, forBackendId backendId: String) {
         guard case .none = auth else {
@@ -13,12 +14,16 @@ struct KeychainCredentialStore {
                 kSecAttrService: service,
                 kSecAttrAccount: backendId,
             ]
-            let attributes: [CFString: Any] = [kSecValueData: data]
+            let attributes: [CFString: Any] = [
+                kSecValueData: data,
+                kSecAttrLabel: label,
+            ]
             let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
 
             if updateStatus == errSecItemNotFound {
                 var addQuery = query
                 addQuery[kSecValueData] = data
+                addQuery[kSecAttrLabel] = label
                 addQuery[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlock
                 SecItemAdd(addQuery as CFDictionary, nil)
             }
