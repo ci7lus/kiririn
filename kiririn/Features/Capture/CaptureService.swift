@@ -65,7 +65,7 @@ final class CaptureService: ObservableObject {
         }
     }
 
-    let didAddCapture = PassthroughSubject<CaptureHistoryItem, Never>()
+    let didAddCapture = PassthroughSubject<(playerID: String?, CaptureHistoryItem), Never>()
     let didUpdateCapture = PassthroughSubject<CaptureHistoryItem, Never>()
     let didClearHistory = PassthroughSubject<Void, Never>()
     let didCaptureForPlugin = PassthroughSubject<PluginCaptureEvent, Never>()
@@ -137,7 +137,7 @@ final class CaptureService: ObservableObject {
             path: savedPath, type: .image, programName: programName, serviceName: serviceName,
             caption: caption, broadcastTime: broadcastTime)
 
-        didAddCapture.send(item)
+        didAddCapture.send((playerID: playerID, item))
 
         var itemForPluginEvent = item
         var effectiveOverlayPluginManifestIDs: [String] = []
@@ -216,7 +216,7 @@ final class CaptureService: ObservableObject {
         let item = await addToHistory(
             path: savedPath, type: .video, programName: programName, serviceName: serviceName,
             caption: caption, broadcastTime: broadcastTime)
-        didAddCapture.send(item)
+        didAddCapture.send((playerID: nil, item))
     }
 
     func captureBlob(for reference: PluginCaptureBlobReference) async -> PluginCaptureBlob? {

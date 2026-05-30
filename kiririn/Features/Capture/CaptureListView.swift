@@ -159,7 +159,7 @@ struct CaptureListView: View {
                 await loadInitial()
             }
         }
-        .onReceive(service.didAddCapture) { newItem in
+        .onReceive(service.didAddCapture) { (_, newItem) in
             if searchText.isEmpty
                 || (newItem.programName?.lowercased().contains(searchText.lowercased()) == true)
                 || (newItem.serviceName?.lowercased().contains(searchText.lowercased()) == true)

@@ -210,7 +210,8 @@
                 tapWindowInitialControlsState = nil
                 tapWindowCount = 0
             }
-            .onReceive(CaptureService.shared.didAddCapture) { item in
+            .onReceive(CaptureService.shared.didAddCapture) { (playerID, item) in
+                guard playerID == playerState.id else { return }
                 if item.type == .image {
                     showCaptureFeedback(text: "キャプチャを撮影しました", systemImage: "camera.fill")
                 }
