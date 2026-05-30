@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct RecordsListView: View {
     let manager: BackendManager
@@ -103,10 +102,7 @@ struct RecordsListView: View {
             }
             .fileImporter(
                 isPresented: $showingFilePicker,
-                allowedContentTypes: [
-                    .movie, .video, .mpeg2TransportStream, .mpeg4Movie, .quickTimeMovie,
-                    .audiovisualContent,
-                ],
+                allowedContentTypes: PlayableMediaUTTypes.allowedContentTypes,
                 allowsMultipleSelection: false
             ) { result in
                 handleFileImport(result)
@@ -130,7 +126,7 @@ struct RecordsListView: View {
             ContentUnavailableView(
                 "録画バックエンドなし",
                 systemImage: "internaldrive",
-                description: Text("EPGStationを追加すると録画番組を閲覧できます\nツールバーからファイルやURLを直接再生できます")
+                description: Text("録画対応バックエンドを追加すると録画を再生できます\nツールバーからファイルやURLを直接再生できます")
             )
         } else if let backendId = currentBackendId {
             if backendId == "local" {

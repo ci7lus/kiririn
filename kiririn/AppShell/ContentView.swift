@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 #if !os(macOS)
     import UIKit
@@ -152,10 +151,7 @@ struct ContentView: View {
                 }
                 .fileImporter(
                     isPresented: $showingFilePicker,
-                    allowedContentTypes: [
-                        .movie, .video, .mpeg2TransportStream, .mpeg4Movie, .quickTimeMovie,
-                        .audiovisualContent,
-                    ],
+                    allowedContentTypes: PlayableMediaUTTypes.allowedContentTypes,
                     allowsMultipleSelection: false
                 ) { result in
                     handleFileImport(result)

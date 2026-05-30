@@ -3,14 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct KiririnMediaDocument: FileDocument {
-    static var readableContentTypes: [UTType] = [
-        .movie,
-        .video,
-        .mpeg2TransportStream,
-        .mpeg4Movie,
-        .quickTimeMovie,
-        .audiovisualContent,
-    ]
+    static var readableContentTypes: [UTType] = PlayableMediaUTTypes.allowedContentTypes
 
     let displayName: String
 
