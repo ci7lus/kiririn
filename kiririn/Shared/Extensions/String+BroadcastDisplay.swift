@@ -3,7 +3,7 @@ import Foundation
 extension String {
     nonisolated func replacingARIBEnclosedGlyphsForDisplay() -> String {
         broadcastDisplaySegments()
-            .map { $0.isEnclosed ? "【\($0.text)】" : $0.text }
+            .map { $0.isEnclosed ? "[\($0.text)]" : $0.text }
             .joined()
     }
 

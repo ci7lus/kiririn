@@ -150,6 +150,7 @@
             guard let window else { return }
             let currentTitle =
                 playerState.currentPlayable?.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingARIBEnclosedGlyphsForDisplay()
             if let currentTitle, !currentTitle.isEmpty {
                 window.title = currentTitle
             } else {
