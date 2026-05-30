@@ -22,6 +22,8 @@ struct ContentView: View {
     @State private var isLoadingIndicatorVisible = false
     @State private var loadingIndicatorHideTask: Task<Void, Never>?
     @State private var droppedPluginAlertMessage: String?
+    @State private var externalInstallConfirmation: PluginInstallConfirmationRequest?
+    @State private var externalInstallErrorMessage: String?
     #if os(macOS)
         private enum AppTab: String, CaseIterable, Hashable {
             case nowPlaying, guide, recordings, capture, settings
@@ -65,6 +67,104 @@ struct ContentView: View {
     private var pluginStore: PluginStore { appModel.pluginStore }
 
     var body: some View {
+        mainStack
+            .onAppear {
+                isLoadingIndicatorVisible = manager.isDataLoading
+                droppedPluginAlertMessage = pluginStore.droppedPluginAlertMessage
+            }
+            .onChange(of: manager.isDataLoading) { _, isLoading in
+                loadingIndicatorHideTask?.cancel()
+                loadingIndicatorHideTask = nil
+
+                if isLoading {
+                    isLoadingIndicatorVisible = true
+                } else {
+                    loadingIndicatorHideTask = Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(250))
+                        guard !Task.isCancelled else { return }
+                        if !manager.isDataLoading {
+                            isLoadingIndicatorVisible = false
+                        }
+                        loadingIndicatorHideTask = nil
+                    }
+                }
+            }
+            .onDisappear {
+                loadingIndicatorHideTask?.cancel()
+                loadingIndicatorHideTask = nil
+            }
+            .task {
+                appModel.setupIfNeeded()
+                appModel.syncPluginsToPlayer()
+            }
+            .onChange(of: pluginStore.plugins) { _, _ in
+                appModel.syncPluginsToPlayer()
+            }
+            .onChange(of: pluginStore.droppedPluginAlertMessage) { _, newValue in
+                droppedPluginAlertMessage = newValue
+            }
+            .onChange(of: appModel.pendingPluginInstallPreviews.count) { _, _ in
+                presentNextExternalInstallIfPossible()
+            }
+            .onChange(of: appModel.pendingPluginInstallErrorMessage) { _, newValue in
+                guard let message = newValue else { return }
+                externalInstallErrorMessage = message
+                appModel.pendingPluginInstallErrorMessage = nil
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else { return }
+                if playerState.isPipEnabled {
+                    playerState.isPipEnabled = false
+                }
+                Task {
+                    await manager.handleAppDidBecomeActive()
+                }
+            }
+            .onOpenURL { url in
+                if url.isFileURL && url.pathExtension.lowercased() == "kppx" {
+                    appModel.queuePluginInstall(from: url)
+                } else {
+                    appModel.handleDeepLink(url: url)
+                }
+            }
+            #if os(macOS)
+                .onReceive(NotificationCenter.default.publisher(for: .requestOpenPlayable)) {
+                    notification in
+                    guard let playable = notification.object as? Playable else { return }
+                    openWindow(id: AppWindowID.player.rawValue, value: playable)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .requestOpenPluginWindow)) {
+                    notification in
+                    guard let pluginID = notification.object as? UUID else { return }
+                    openWindow(id: AppWindowID.plugin.rawValue, value: pluginID)
+                }
+            #endif
+            #if !os(macOS)
+                .onReceive(NotificationCenter.default.publisher(for: .requestOpenFile)) { _ in
+                    showingFilePicker = true
+                }
+                .onReceive(
+                    NotificationCenter.default.publisher(
+                        for: UIApplication.userDidTakeScreenshotNotification)
+                ) { _ in
+                    guard playerState.player != nil else { return }
+                    playerState.takeCapture()
+                }
+                .fileImporter(
+                    isPresented: $showingFilePicker,
+                    allowedContentTypes: [
+                        .movie, .video, .mpeg2TransportStream, .mpeg4Movie, .quickTimeMovie,
+                        .audiovisualContent,
+                    ],
+                    allowsMultipleSelection: false
+                ) { result in
+                    handleFileImport(result)
+                }
+            #endif
+    }
+
+    @ViewBuilder
+    private var mainStack: some View {
         ZStack {
             #if os(macOS)
                 NavigationSplitView {
@@ -204,87 +304,20 @@ struct ContentView: View {
         } message: {
             Text(droppedPluginAlertMessage ?? "")
         }
-        .onAppear {
-            isLoadingIndicatorVisible = manager.isDataLoading
-            droppedPluginAlertMessage = pluginStore.droppedPluginAlertMessage
-        }
-        .onChange(of: manager.isDataLoading) { _, isLoading in
-            loadingIndicatorHideTask?.cancel()
-            loadingIndicatorHideTask = nil
-
-            if isLoading {
-                isLoadingIndicatorVisible = true
-            } else {
-                loadingIndicatorHideTask = Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(250))
-                    guard !Task.isCancelled else { return }
-                    if !manager.isDataLoading {
-                        isLoadingIndicatorVisible = false
-                    }
-                    loadingIndicatorHideTask = nil
+        .modifier(
+            ExternalPluginInstallModifier(
+                confirmation: $externalInstallConfirmation,
+                errorMessage: $externalInstallErrorMessage,
+                onCancel: {
+                    externalInstallConfirmation = nil
+                    presentNextExternalInstallIfPossible()
+                },
+                onConfirm: { confirmExternalInstall($0) },
+                onErrorDismiss: {
+                    externalInstallErrorMessage = nil
+                    presentNextExternalInstallIfPossible()
                 }
-            }
-        }
-        .onDisappear {
-            loadingIndicatorHideTask?.cancel()
-            loadingIndicatorHideTask = nil
-        }
-        .task {
-            appModel.setupIfNeeded()
-            appModel.syncPluginsToPlayer()
-        }
-        .onChange(of: pluginStore.plugins) { _, _ in
-            appModel.syncPluginsToPlayer()
-        }
-        .onChange(of: pluginStore.droppedPluginAlertMessage) { _, newValue in
-            droppedPluginAlertMessage = newValue
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .active else { return }
-            if playerState.isPipEnabled {
-                playerState.isPipEnabled = false
-            }
-            Task {
-                await manager.handleAppDidBecomeActive()
-            }
-        }
-        .onOpenURL { url in
-            appModel.handleDeepLink(url: url)
-        }
-        #if os(macOS)
-            .onReceive(NotificationCenter.default.publisher(for: .requestOpenPlayable)) {
-                notification in
-                guard let playable = notification.object as? Playable else { return }
-                openWindow(id: AppWindowID.player.rawValue, value: playable)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .requestOpenPluginWindow)) {
-                notification in
-                guard let pluginID = notification.object as? UUID else { return }
-                openWindow(id: AppWindowID.plugin.rawValue, value: pluginID)
-            }
-        #endif
-        #if !os(macOS)
-            .onReceive(NotificationCenter.default.publisher(for: .requestOpenFile)) { _ in
-                showingFilePicker = true
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(
-                    for: UIApplication.userDidTakeScreenshotNotification)
-            ) { _ in
-                guard playerState.player != nil else { return }
-                playerState.takeCapture()
-            }
-            .fileImporter(
-                isPresented: $showingFilePicker,
-                allowedContentTypes: [
-                    .movie, .video, .mpeg2TransportStream, .mpeg4Movie, .quickTimeMovie,
-                    .audiovisualContent,
-                ],
-                allowsMultipleSelection: false
-            ) { result in
-                handleFileImport(result)
-            }
-        #endif
+            ))
     }
 
     #if os(macOS)
@@ -350,4 +383,56 @@ struct ContentView: View {
             appModel.playImportedFile(fileURL)
         }
     #endif
+
+    private func presentNextExternalInstallIfPossible() {
+        guard externalInstallConfirmation == nil, externalInstallErrorMessage == nil else {
+            return
+        }
+        externalInstallConfirmation = appModel.consumeNextPendingPluginInstallPreview()
+    }
+
+    private func confirmExternalInstall(_ request: PluginInstallConfirmationRequest) {
+        do {
+            _ = try pluginStore.installPlugin(from: request.preview)
+            externalInstallConfirmation = nil
+            appModel.reloadPluginsInAllPlayerStates()
+            #if os(macOS)
+                selectedMacTab = .settings
+            #endif
+            presentNextExternalInstallIfPossible()
+        } catch {
+            externalInstallConfirmation = nil
+            externalInstallErrorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct ExternalPluginInstallModifier: ViewModifier {
+    @Binding var confirmation: PluginInstallConfirmationRequest?
+    @Binding var errorMessage: String?
+    let onCancel: () -> Void
+    let onConfirm: (PluginInstallConfirmationRequest) -> Void
+    let onErrorDismiss: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $confirmation) { request in
+                PluginInstallConfirmationSheet(
+                    request: request,
+                    onCancel: onCancel,
+                    onConfirm: { onConfirm(request) }
+                )
+            }
+            .alert(
+                "プラグインの追加エラー",
+                isPresented: Binding(
+                    get: { errorMessage != nil },
+                    set: { newValue in if !newValue { errorMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { onErrorDismiss() }
+            } message: {
+                Text(errorMessage ?? "")
+            }
+    }
 }

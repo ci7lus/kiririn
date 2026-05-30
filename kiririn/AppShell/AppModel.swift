@@ -32,6 +32,9 @@ final class AppModel {
     var focusedPlayerID: String?
     var recordingsSearchText = ""
 
+    var pendingPluginInstallPreviews: [PluginInstallPreview] = []
+    var pendingPluginInstallErrorMessage: String?
+
     @ObservationIgnored
     private var recordingsViewModelStore: [String: RecordsViewModel] = [:]
 
@@ -216,6 +219,25 @@ final class AppModel {
         default:
             logger.debug("ignored unsupported deep link host: \(host)")
         }
+    }
+
+    func queuePluginInstall(from url: URL) {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let data = try Data(contentsOf: url)
+            let preview = try pluginStore.previewPlugin(packageData: data, sourceType: .localFile)
+            pendingPluginInstallPreviews.append(preview)
+        } catch {
+            logger.warning("queuePluginInstall failed: \(error.localizedDescription)")
+            pendingPluginInstallErrorMessage = error.localizedDescription
+        }
+    }
+
+    func consumeNextPendingPluginInstallPreview() -> PluginInstallConfirmationRequest? {
+        guard !pendingPluginInstallPreviews.isEmpty else { return nil }
+        let preview = pendingPluginInstallPreviews.removeFirst()
+        return PluginInstallConfirmationRequest(preview: preview, kind: .install)
     }
 
     func consumePendingPluginOpenURLs(manifestID: String) -> [URL] {
