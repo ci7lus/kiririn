@@ -499,7 +499,16 @@
                     .allowsHitTesting(false)
 
                 if isSeekActionAvailable && displayDuration > 0 {
-                    HStack(spacing: 48) {
+                    HStack(spacing: 32) {
+                        Button {
+                            seekToBeginning()
+                        } label: {
+                            Image(systemName: "backward.end.fill")
+                                .font(.system(size: 32, weight: .medium))
+                                .foregroundStyle(.white)
+                                .frame(width: 32, height: 32)
+                        }
+
                         Button {
                             seekBackward()
                         } label: {
@@ -523,7 +532,10 @@
                                 .font(.system(size: 32, weight: .medium))
                                 .foregroundStyle(.white)
                         }.keyboardShortcut(.rightArrow, modifiers: [])
+
+                        Color.clear.frame(width: 32)
                     }
+                    .frame(maxWidth: .infinity)
                 } else {
                     Button {
                         playerState.togglePlayPause()
@@ -718,18 +730,6 @@
                 .tag("caption")
                 .tabItem {
                     Label("字幕", systemImage: "captions.bubble")
-                }
-
-                NavigationStack {
-                    CaptureListView(
-                        showsNavigationTitle: false,
-                        showsSearch: false,
-                        playerState: playerState
-                    )
-                }
-                .tag("capture")
-                .tabItem {
-                    Label("キャプチャ", systemImage: "photo.on.rectangle.angled")
                 }
 
                 NavigationStack {
@@ -1300,7 +1300,16 @@
                     .allowsHitTesting(false)
 
                 if isSeekActionAvailable && displayDuration > 0 {
-                    HStack(spacing: 32) {
+                    HStack(spacing: 24) {
+                        Button {
+                            seekToBeginning()
+                        } label: {
+                            Image(systemName: "backward.end")
+                                .font(.system(size: 32, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 62, height: 62)
+                        }
+
                         Button {
                             seekBackward()
                         } label: {
@@ -1327,6 +1336,8 @@
                                 .foregroundStyle(.white)
                                 .frame(width: 62, height: 62)
                         }
+
+                        Color.clear.frame(width: 62)
                     }
                 } else {
                     Button {
@@ -1519,7 +1530,11 @@
             jump(seconds: -10)
         }
 
-        @ViewBuilder
+        private func seekToBeginning() {
+            guard isSeekActionAvailable else { return }
+            playerState.seek(to: 0)
+        }
+
         private func seekBarOverlay(horizontalPadding: CGFloat, bottomPadding: CGFloat) -> some View
         {
             VStack(alignment: .leading, spacing: 0) {

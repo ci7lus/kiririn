@@ -79,7 +79,6 @@ struct PluginsSettingsView: View {
     @State var pluginStore: PluginStore
     @State var playerState: PlayerState
 
-    @State private var showingImportMethodChooser = false
     @State private var showingPackageImporter = false
     @State private var showingRemoteURLSheet = false
     @State private var showingPluginSettingsSheet = false
@@ -177,23 +176,6 @@ struct PluginsSettingsView: View {
         .toolbar {
             settingsToolbar
         }
-        #if !os(macOS)
-            .confirmationDialog(
-                "追加方法",
-                isPresented: $showingImportMethodChooser,
-                titleVisibility: .visible
-            ) {
-                Button("URLから追加") {
-                    showingRemoteURLSheet = true
-                }
-
-                Button("kppxファイルを追加") {
-                    showingPackageImporter = true
-                }
-
-                Button("キャンセル", role: .cancel) {}
-            }
-        #endif
         .confirmationDialog(
             "プラグインを削除しますか？",
             isPresented: $showingDeleteConfirmation,
@@ -272,8 +254,14 @@ struct PluginsSettingsView: View {
                         Image(systemName: "plus")
                     }
                 #else
-                    Button {
-                        showingImportMethodChooser = true
+                    Menu {
+                        Button("URLから追加") {
+                            showingRemoteURLSheet = true
+                        }
+
+                        Button("kppxファイルを追加") {
+                            showingPackageImporter = true
+                        }
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -408,9 +396,7 @@ struct PluginsSettingsView: View {
     }
 
     private func presentNextInstallPreviewIfPossible() {
-        guard importErrorMessage == nil, activeInstallConfirmation == nil else {
-            return
-        }
+        guard activeInstallConfirmation == nil else { return }
 
         if !pendingInstallPreviews.isEmpty {
             let preview = pendingInstallPreviews.removeFirst()

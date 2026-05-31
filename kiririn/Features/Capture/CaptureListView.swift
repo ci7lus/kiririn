@@ -53,51 +53,57 @@ struct CaptureListView: View {
                     emptyStateView
                 }
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVGrid(columns: columns, spacing: 16) {
-                            ForEach(items) { item in
-                                CaptureHistoryItemView(
-                                    item: item,
-                                    previewURL: $previewURL,
-                                    isSelectionMode: isSelectionMode,
-                                    isSelected: selectedIDs.contains(item.id),
-                                    onSelectionToggle: { toggleSelection(for: item.id) },
-                                    onPlay: { playItem(item) },
-                                    onDelete: {
-                                        await service.deleteHistoryItem(item)
-                                        if let index = items.firstIndex(where: { $0.id == item.id })
-                                        {
-                                            items.remove(at: index)
+                GeometryReader { geometry in
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVGrid(columns: columns, spacing: 16) {
+                                ForEach(items) { item in
+                                    CaptureHistoryItemView(
+                                        item: item,
+                                        previewURL: $previewURL,
+                                        isSelectionMode: isSelectionMode,
+                                        isSelected: selectedIDs.contains(item.id),
+                                        onSelectionToggle: { toggleSelection(for: item.id) },
+                                        onPlay: { playItem(item) },
+                                        onDelete: {
+                                            await service.deleteHistoryItem(item)
+                                            if let index = items.firstIndex(where: {
+                                                $0.id == item.id
+                                            }) {
+                                                items.remove(at: index)
+                                            }
+                                        }
+                                    )
+                                    .id(item.id)
+                                    .onAppear {
+                                        if item.id == items.first?.id {
+                                            isAtScrollTop = true
+                                        }
+                                        if item == items.last && hasMore && !isLoading {
+                                            Task { await loadMore() }
                                         }
                                     }
-                                )
-                                .id(item.id)
-                                .onAppear {
-                                    if item.id == items.first?.id {
-                                        isAtScrollTop = true
-                                    }
-                                    if item == items.last && hasMore && !isLoading {
-                                        Task { await loadMore() }
-                                    }
-                                }
-                                .onDisappear {
-                                    if item.id == items.first?.id {
-                                        isAtScrollTop = false
+                                    .onDisappear {
+                                        if item.id == items.first?.id {
+                                            isAtScrollTop = false
+                                        }
                                     }
                                 }
                             }
+                            .padding(.horizontal)
+                            .padding(.top, 16)
+                            if isLoading {
+                                ProgressView()
+                                    .padding()
+                            }
+                            Color.clear
+                                .frame(height: geometry.safeAreaInsets.bottom + 16)
                         }
-                        .padding(.horizontal)
-                        if isLoading {
-                            ProgressView()
-                                .padding()
-                        }
+                        .ignoresSafeArea(.container, edges: .bottom)
+                        #if os(macOS)
+                            .onAppear { captureScrollProxy = proxy }
+                        #endif
                     }
-                    .padding(.vertical, 16)
-                    #if os(macOS)
-                        .onAppear { captureScrollProxy = proxy }
-                    #endif
                 }
                 #if os(macOS)
                     .overlay(alignment: .bottomTrailing) {

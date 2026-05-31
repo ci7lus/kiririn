@@ -28,9 +28,9 @@ struct CaptionHistoryView: View {
     @ViewBuilder
     private func captionRow(_ item: CaptionHistoryItem) -> some View {
         if let broadcastTime = item.broadcastTime {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 Text(formattedBroadcastTime(broadcastTime))
-                    .font(.caption.monospacedDigit())
+                    .font(.body.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .frame(minWidth: 52, alignment: .leading)
 
@@ -43,12 +43,12 @@ struct CaptionHistoryView: View {
             }
             .padding(.vertical, 2)
         } else {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 Button {
                     playerState.seek(to: item.position)
                 } label: {
                     Text(item.time.playerTimeString)
-                        .font(.caption.monospacedDigit())
+                        .font(.body.monospacedDigit())
                         .foregroundStyle(Color.accentColor)
                         .frame(minWidth: 52, alignment: .leading)
                 }
