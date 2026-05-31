@@ -30,7 +30,7 @@
 		</dict>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>Kiririn Plugin Package</string>
+			<string>kiririn Plugin Package</string>
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
 			<key>LSHandlerRank</key>
@@ -84,7 +84,7 @@
 				<string>public.data</string>
 			</array>
 			<key>UTTypeDescription</key>
-			<string>Kiririn Plugin Package</string>
+			<string>kiririn Plugin Package</string>
 			<key>UTTypeIcons</key>
 			<dict>
 				<key>UTTypeIconBadgeName</key>

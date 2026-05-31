@@ -131,6 +131,7 @@ struct PluginManifestPresentation {
     let manifestUpdateURL: String?
     let requestedPermissions: [String]
     let requestedHostPermissions: [String]
+    let packageAuthentication: PluginPackageAuthentication
 
     init(plugin: PluginDefinition, manifest: ExtensionPluginManifest?) {
         sourceLabel = plugin.sourceType.localizedLabel
@@ -144,6 +145,7 @@ struct PluginManifestPresentation {
         manifestUpdateURL = manifest?.manifestUpdateURL ?? plugin.manifestUpdateURL
         requestedPermissions = manifest?.requestedPermissions ?? []
         requestedHostPermissions = manifest?.requestedHostPermissions ?? []
+        packageAuthentication = plugin.packageAuthentication
     }
 
     init(preview: PluginInstallPreview) {
@@ -158,6 +160,7 @@ struct PluginManifestPresentation {
         manifestUpdateURL = preview.manifest.manifestUpdateURL
         requestedPermissions = preview.manifest.requestedPermissions
         requestedHostPermissions = preview.manifest.requestedHostPermissions
+        packageAuthentication = preview.packageAuthentication
     }
 }
 
@@ -166,6 +169,7 @@ struct PluginManifestInfoSections: View {
 
     var body: some View {
         metadataSection
+        signatureSection
         descriptionSection
         permissionsSection
         hostPermissionsSection
@@ -206,7 +210,7 @@ struct PluginManifestInfoSections: View {
             if let updateURL = info.manifestUpdateURL,
                 let url = URL(string: updateURL)
             {
-                LabeledContent("更新 URL") {
+                LabeledContent("更新URL") {
                     Link(updateURL, destination: url)
                         .foregroundStyle(.tint)
                         .lineLimit(1)
@@ -240,6 +244,42 @@ struct PluginManifestInfoSections: View {
     }
 
     @ViewBuilder
+    private var signatureSection: some View {
+        Section("署名") {
+            HStack(alignment: .firstTextBaseline) {
+                Text(info.packageAuthentication.state.localizedTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(signatureColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(signatureColor.opacity(0.12), in: Capsule())
+
+                Spacer(minLength: 12)
+
+                if let signatureSummaryText {
+                    Text(signatureSummaryText)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .multilineTextAlignment(.trailing)
+                        .textSelection(.enabled)
+                }
+            }
+
+            if !info.packageAuthentication.warnings.isEmpty {
+                ForEach(info.packageAuthentication.warnings, id: \.self) { warning in
+                    Label {
+                        Text(warning)
+                            .font(.footnote)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                    }
+                    .foregroundStyle(signatureWarningColor)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private var permissionsSection: some View {
         Section("権限") {
             if !info.requestedPermissions.isEmpty {
@@ -258,7 +298,7 @@ struct PluginManifestInfoSections: View {
 
     @ViewBuilder
     private var hostPermissionsSection: some View {
-        Section("アクセス許可 URL") {
+        Section("アクセス許可URL") {
             if !info.requestedHostPermissions.isEmpty {
                 ForEach(info.requestedHostPermissions, id: \.self) { pattern in
                     Text(pattern)
@@ -266,11 +306,65 @@ struct PluginManifestInfoSections: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Label("外部 URL へのアクセスなし", systemImage: "network.slash")
+                Label("外部URLへのアクセスなし", systemImage: "network.slash")
                     .foregroundStyle(.secondary)
                     .font(.subheadline)
             }
         }
+    }
+
+    private var signatureColor: Color {
+        switch info.packageAuthentication.state {
+        case .unsigned:
+            return .secondary
+        case .verified:
+            return .green
+        case .selfSigned:
+            return .secondary
+        case .revoked:
+            return .secondary
+        }
+    }
+
+    private var signatureWarningColor: Color {
+        switch info.packageAuthentication.state {
+        case .revoked:
+            return .red
+        default:
+            return .orange
+        }
+    }
+
+    private var signatureSummaryText: String? {
+        guard let signer = info.packageAuthentication.signers.first else {
+            return nil
+        }
+
+        let commonName =
+            signerCommonName(from: signer.distinguishedName) ?? signer.distinguishedName
+        let fingerprint = abbreviatedFingerprint(signer.publicKeySHA256)
+        let extraSignerSuffix: String
+        if info.packageAuthentication.signers.count > 1 {
+            extraSignerSuffix = " +\(info.packageAuthentication.signers.count - 1)"
+        } else {
+            extraSignerSuffix = ""
+        }
+        return "\(commonName) (\(fingerprint))\(extraSignerSuffix)"
+    }
+
+    private func signerCommonName(from distinguishedName: String) -> String? {
+        distinguishedName
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { $0.hasPrefix("CN=") }
+            .map { String($0.dropFirst(3)) }
+    }
+
+    private func abbreviatedFingerprint(_ fingerprint: String) -> String {
+        guard fingerprint.count > 24 else {
+            return fingerprint
+        }
+        return "\(fingerprint.prefix(12))...\(fingerprint.suffix(12))"
     }
 }
 
@@ -281,14 +375,16 @@ private struct PluginDetailView: View {
     let pluginID: UUID
 
     @State private var showingOverwriteImporter = false
-    @State private var showingRemoteURLSheet = false
+    @State private var showingUpdateCheckSheet = false
     @State private var showingClearWebDataConfirmation = false
     @State private var isClearingWebData = false
-    @State private var isUpdatingFromRemoteURL = false
+    @State private var isCheckingForUpdates = false
     @State private var manifestErrorMessage: String?
     @State private var webDataAlertMessage: String?
-    @State private var remoteURLString = ""
     @State private var activeInstallConfirmation: PluginInstallConfirmationRequest?
+    @State private var completedUpdateSheet: PluginUpdateCompletionSheetState?
+    @State private var pendingUpdateConfirmation: PluginInstallConfirmationRequest?
+    @State private var pendingCompletedUpdateSheet: PluginUpdateCompletionSheetState?
 
     private var plugin: PluginDefinition? {
         pluginStore.plugin(id: pluginID)
@@ -312,20 +408,9 @@ private struct PluginDetailView: View {
         }
         .formStyle(.grouped)
         .navigationTitle(plugin.name)
-        .sheet(isPresented: $showingRemoteURLSheet) {
-            PluginRemoteUpdateSheet(
-                urlString: $remoteURLString,
-                isImporting: isUpdatingFromRemoteURL,
-                onCancel: {
-                    remoteURLString = ""
-                    showingRemoteURLSheet = false
-                },
-                onImport: {
-                    Task {
-                        await updatePluginFromRemoteURL()
-                    }
-                }
-            )
+        .sheet(isPresented: $showingUpdateCheckSheet) {
+            PluginUpdateCheckSheet()
+                .interactiveDismissDisabled(isCheckingForUpdates)
         }
         .sheet(item: $activeInstallConfirmation) { request in
             PluginInstallConfirmationSheet(
@@ -335,6 +420,14 @@ private struct PluginDetailView: View {
                 },
                 onConfirm: {
                     confirmInstallConfirmation(request)
+                }
+            )
+        }
+        .sheet(item: $completedUpdateSheet) { state in
+            PluginUpdateCompletionSheet(
+                state: state,
+                onDismiss: {
+                    completedUpdateSheet = nil
                 }
             )
         }
@@ -348,7 +441,7 @@ private struct PluginDetailView: View {
             }
         #endif
         .alert(
-            "マニフェストエラー",
+            "プラグイン",
             isPresented: Binding(
                 get: { manifestErrorMessage != nil },
                 set: { if !$0 { manifestErrorMessage = nil } }
@@ -383,6 +476,16 @@ private struct PluginDetailView: View {
         } message: {
             Text(webDataAlertMessage ?? "")
         }
+        .onChange(of: showingUpdateCheckSheet) { _, isPresented in
+            guard !isPresented, let pendingUpdateConfirmation else { return }
+            activeInstallConfirmation = pendingUpdateConfirmation
+            self.pendingUpdateConfirmation = nil
+        }
+        .onChange(of: activeInstallConfirmation?.id) { _, requestID in
+            guard requestID == nil, let pendingCompletedUpdateSheet else { return }
+            completedUpdateSheet = pendingCompletedUpdateSheet
+            self.pendingCompletedUpdateSheet = nil
+        }
     }
 
     private func enabledSection(for plugin: PluginDefinition) -> some View {
@@ -391,7 +494,7 @@ private struct PluginDetailView: View {
 
             if plugin.isBlocked {
                 Label(
-                    "内容確認が必要なためブロックしています。再有効化するには内容確認が必要です。",
+                    "内容確認が必要なためブロックしています。再有効化するには内容の確認が必要です",
                     systemImage: "exclamationmark.triangle.fill"
                 )
                 .font(.footnote)
@@ -403,21 +506,16 @@ private struct PluginDetailView: View {
     @ViewBuilder
     private func actionsSection(for plugin: PluginDefinition) -> some View {
         Section {
-            if plugin.manifestUpdateURL != nil {
+            if plugin.canCheckForUpdates {
                 Button {
-                    remoteURLString = plugin.manifestUpdateURL ?? ""
-                    showingRemoteURLSheet = true
-                } label: {
-                    HStack(spacing: 8) {
-                        if isUpdatingFromRemoteURL {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Label("更新 URL から更新", systemImage: "arrow.clockwise.circle")
+                    Task {
+                        await checkForUpdates()
                     }
+                } label: {
+                    Label("アップデートを確認する", systemImage: "arrow.clockwise.circle")
                 }
                 .buttonStyle(.plain)
-                .disabled(isUpdatingFromRemoteURL)
+                .disabled(isCheckingForUpdates)
             }
 
             if plugin.sourceType != .localFolder {
@@ -428,13 +526,13 @@ private struct PluginDetailView: View {
                         showingOverwriteImporter = true
                     #endif
                 } label: {
-                    Label("kkpxファイルから上書き", systemImage: "arrow.down.doc")
+                    Label("kppxファイルから上書き", systemImage: "arrow.down.doc")
                 }
                 .buttonStyle(.plain)
             }
 
             #if os(macOS)
-                if plugin.sourceType == .localFolder {
+                if plugin.sourceType == .localFolder, pluginStore.isDeveloperModeEnabled {
                     Button {
                         replaceFolderFromOpenPanel()
                     } label: {
@@ -488,7 +586,11 @@ private struct PluginDetailView: View {
                     requestReenableConfirmation(for: currentPlugin)
                     return
                 }
-                pluginStore.setEnabled(newValue, for: currentPlugin.id)
+                do {
+                    try pluginStore.setEnabled(newValue, for: currentPlugin.id)
+                } catch {
+                    manifestErrorMessage = error.localizedDescription
+                }
             }
         )
     }
@@ -509,6 +611,20 @@ private struct PluginDetailView: View {
             switch request.kind {
             case .install:
                 break
+            case .update(let pluginID, _):
+                guard let previous = pluginStore.plugin(id: pluginID) else {
+                    throw PluginManifestValidationError(messages: ["プラグインが見つかりません"])
+                }
+                _ = try pluginStore.overwritePlugin(previous, with: request.preview)
+                pendingCompletedUpdateSheet = PluginUpdateCompletionSheetState(
+                    pluginName: request.preview.manifest.displayName,
+                    version: request.preview.manifest.version,
+                    updateInfoURL: request.preview.updateInfoURL
+                )
+                Task { @MainActor in
+                    await PluginWebsiteDataStore.unregisterServiceWorkers(for: previous)
+                    appModel.reloadPluginInAllPlayerStates(id: pluginID.uuidString)
+                }
             case .reenable(let pluginID):
                 _ = try pluginStore.reenableBlockedPlugin(id: pluginID, with: request.preview)
                 appModel.reloadPluginInAllPlayerStates(id: pluginID.uuidString)
@@ -534,12 +650,12 @@ private struct PluginDetailView: View {
             }
             do {
                 let data = try Data(contentsOf: url)
-                try pluginStore.overwritePlugin(
-                    plugin, withPackageData: data, sourceType: .localFile)
-                Task { @MainActor in
-                    await PluginWebsiteDataStore.unregisterServiceWorkers(for: plugin)
-                    appModel.reloadPluginInAllPlayerStates(id: pluginID.uuidString)
-                }
+                let preview = try pluginStore.previewPlugin(
+                    packageData: data, sourceType: .kppx)
+                activeInstallConfirmation = try PluginInstallConfirmationRequest(
+                    preview: preview,
+                    routing: pluginStore.updateRouting(replacing: plugin, with: preview)
+                )
             } catch let error as PluginManifestValidationError {
                 manifestErrorMessage = error.errorDescription
             } catch {
@@ -615,7 +731,7 @@ private struct PluginDetailView: View {
     #endif
 
     private func clearWebDataConfirmationMessage(for plugin: PluginDefinition) -> String {
-        "プラグインの panel / overlay / options に紐づくストレージを消去します。消去後は再読み込みされます。"
+        "プラグインのパネル/オーバーレイ/設定に紐づくストレージを消去します。消去後は再読み込みされます"
     }
 
     @MainActor
@@ -631,43 +747,53 @@ private struct PluginDetailView: View {
             )
 
             guard removedAnyData else {
-                webDataAlertMessage = "消去対象のストレージは見つかりませんでした。"
+                webDataAlertMessage = "消去対象のストレージは見つかりませんでした"
                 isClearingWebData = false
                 return
             }
 
             appModel.reloadPluginInAllPlayerStates(id: plugin.id.uuidString)
-            webDataAlertMessage = "プラグインのストレージを消去しました。"
+            webDataAlertMessage = "プラグインのストレージを消去しました"
         } catch {
-            webDataAlertMessage = "プラグインのストレージを消去できませんでした。"
+            webDataAlertMessage = "プラグインのストレージを消去できませんでした"
         }
 
         isClearingWebData = false
     }
 
     @MainActor
-    private func updatePluginFromRemoteURL() async {
-        guard !isUpdatingFromRemoteURL, let plugin = pluginStore.plugin(id: pluginID) else {
+    private func checkForUpdates() async {
+        guard !isCheckingForUpdates, let plugin = pluginStore.plugin(id: pluginID) else {
             return
         }
-        let trimmedURL = remoteURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedURL = (plugin.manifestUpdateURL ?? "").trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
         guard let url = URL(string: trimmedURL), !trimmedURL.isEmpty else {
-            manifestErrorMessage = "有効な URL を入力してください。"
+            manifestErrorMessage = "有効な更新URLが設定されていません"
             return
         }
 
-        isUpdatingFromRemoteURL = true
-        defer { isUpdatingFromRemoteURL = false }
+        isCheckingForUpdates = true
+        showingUpdateCheckSheet = true
+        pendingUpdateConfirmation = nil
+        defer { isCheckingForUpdates = false }
 
         do {
-            try await pluginStore.overwritePlugin(fromUpdateManifestURL: url, previous: plugin)
-            await PluginWebsiteDataStore.unregisterServiceWorkers(for: plugin)
-            remoteURLString = ""
-            showingRemoteURLSheet = false
-            appModel.reloadPluginInAllPlayerStates(id: pluginID.uuidString)
+            let preview = try await pluginStore.previewPlugin(
+                fromUpdateManifestURL: url,
+                previous: plugin
+            )
+            pendingUpdateConfirmation = try PluginInstallConfirmationRequest(
+                preview: preview,
+                routing: pluginStore.updateRouting(replacing: plugin, with: preview)
+            )
+            showingUpdateCheckSheet = false
         } catch let error as PluginManifestValidationError {
+            showingUpdateCheckSheet = false
             manifestErrorMessage = error.errorDescription
         } catch {
+            showingUpdateCheckSheet = false
             manifestErrorMessage = error.localizedDescription
         }
     }
@@ -695,46 +821,81 @@ private struct PluginOptionsScreen: View {
     }
 }
 
-private struct PluginRemoteUpdateSheet: View {
-    @Binding var urlString: String
-    let isImporting: Bool
-    let onCancel: () -> Void
-    let onImport: () -> Void
+private struct PluginUpdateCheckSheet: View {
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                ProgressView()
+                    .controlSize(.large)
+
+                Text("更新を確認中")
+                    .font(.headline)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(24)
+            .navigationTitle("アップデートを確認中")
+        }
+        #if os(macOS)
+            .frame(minWidth: 360, minHeight: 180)
+        #endif
+    }
+}
+
+private struct PluginUpdateCompletionSheetState: Identifiable {
+    let id = UUID()
+    let pluginName: String
+    let version: String?
+    let updateInfoURL: URL?
+}
+
+private struct PluginUpdateCompletionSheet: View {
+    @Environment(\.openURL) private var openURL
+
+    let state: PluginUpdateCompletionSheetState
+    let onDismiss: () -> Void
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("URL") {
-                    TextField("https://example.com/plugins/sample/update.json", text: $urlString)
-                        #if !os(macOS)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.URL)
-                            .textContentType(.URL)
-                        #endif
-                }
-            }
-            .navigationTitle("更新 URL から更新")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("キャンセル") { onCancel() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        onImport()
-                    } label: {
-                        if isImporting {
-                            ProgressView()
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(state.pluginName)
+                            .font(.headline)
+
+                        if let version = state.version {
+                            Text("バージョン\(version)へのアップデートが完了しました")
+                                .foregroundStyle(.secondary)
                         } else {
-                            Text("更新")
+                            Text("アップデートが完了しました")
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    .disabled(isImporting)
+                }
+
+                if let updateInfoURL = state.updateInfoURL {
+                    Section {
+                        Button {
+                            openURL(updateInfoURL)
+                        } label: {
+                            Label("更新情報を開く", systemImage: "safari")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("アップデート完了")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("閉じる") {
+                        onDismiss()
+                    }
                 }
             }
         }
         #if os(macOS)
-            .frame(minWidth: 420, minHeight: 160)
+            .frame(minWidth: 420, minHeight: 220)
         #endif
     }
 }

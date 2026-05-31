@@ -5,16 +5,13 @@ import Logging
 
 private let logger = Logger(label: "PluginStore")
 enum PluginSourceType: String, Codable, Sendable {
-    case remoteUrl
-    case localFile
+    case kppx
     case localFolder
 
     var localizedLabel: String {
         switch self {
-        case .localFile:
-            return "kkpx"
-        case .remoteUrl:
-            return "配布 URL"
+        case .kppx:
+            return "kppx"
         case .localFolder:
             return "ローカルフォルダ"
         }
@@ -33,6 +30,8 @@ struct ExtensionPluginManifest: Equatable {
     let panelPage: String?
     let optionsPage: String?
     let isBackgroundExists: Bool
+    let strictMinVersion: String?
+    let strictMaxVersion: String?
     let manifestUpdateURL: String?
     let requestedPermissions: [String]
     let requestedHostPermissions: [String]
@@ -58,8 +57,39 @@ struct PluginInstallPreview: Identifiable {
     let id = UUID()
     let sourceType: PluginSourceType
     let manifest: ExtensionPluginManifest
+    let packageAuthentication: PluginPackageAuthentication
+    let updateInfoURL: URL?
+    let installWarnings: [String]
 
     fileprivate let payload: Payload
+}
+
+#if DEBUG
+    // PluginSignatureBehaviorTests で利用するテスト用イニシャライザ
+    extension PluginInstallPreview {
+        static func testing(
+            sourceType: PluginSourceType = .kppx,
+            manifest: ExtensionPluginManifest,
+            packageAuthentication: PluginPackageAuthentication,
+            updateInfoURL: URL? = nil,
+            installWarnings: [String] = [],
+            archiveData: Data = Data()
+        ) -> PluginInstallPreview {
+            PluginInstallPreview(
+                sourceType: sourceType,
+                manifest: manifest,
+                packageAuthentication: packageAuthentication,
+                updateInfoURL: updateInfoURL,
+                installWarnings: installWarnings,
+                payload: .package(archiveData: archiveData)
+            )
+        }
+    }
+#endif
+
+enum PluginInstallRouting {
+    case install
+    case update(pluginID: UUID, signerMismatch: Bool)
 }
 
 struct PluginDefinition: Identifiable, Codable, Equatable {
@@ -77,12 +107,13 @@ struct PluginDefinition: Identifiable, Codable, Equatable {
     var manifestLink: String?
     var manifestSupportedAreas: [PluginDisplayArea]?
     var manifestID: String
+    var packageAuthentication: PluginPackageAuthentication
 
     init(
         id: UUID,
         name: String,
         isEnabled: Bool = true,
-        sourceType: PluginSourceType = .localFile,
+        sourceType: PluginSourceType = .kppx,
         resourceBasePath: String = "",
         resourceBookmark: Data? = nil,
         resourceHash: String? = nil,
@@ -93,6 +124,7 @@ struct PluginDefinition: Identifiable, Codable, Equatable {
         manifestLink: String? = nil,
         manifestSupportedAreas: [PluginDisplayArea]? = nil,
         manifestID: String,
+        packageAuthentication: PluginPackageAuthentication = .unsigned
     ) {
         self.id = id
         self.name = name
@@ -108,6 +140,7 @@ struct PluginDefinition: Identifiable, Codable, Equatable {
         self.manifestLink = manifestLink
         self.manifestSupportedAreas = manifestSupportedAreas
         self.manifestID = manifestID
+        self.packageAuthentication = packageAuthentication
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -125,6 +158,7 @@ struct PluginDefinition: Identifiable, Codable, Equatable {
         case manifestLink
         case manifestSupportedAreas
         case manifestID
+        case packageAuthentication
     }
 
     init(from decoder: any Decoder) throws {
@@ -133,7 +167,7 @@ struct PluginDefinition: Identifiable, Codable, Equatable {
         name = try container.decode(String.self, forKey: .name)
         isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
         sourceType =
-            try container.decodeIfPresent(PluginSourceType.self, forKey: .sourceType) ?? .localFile
+            try container.decodeIfPresent(PluginSourceType.self, forKey: .sourceType) ?? .kppx
         resourceBasePath = try container.decode(String.self, forKey: .resourceBasePath)
         resourceBookmark = try container.decodeIfPresent(Data.self, forKey: .resourceBookmark)
         resourceHash = try container.decodeIfPresent(String.self, forKey: .resourceHash)
@@ -145,6 +179,11 @@ struct PluginDefinition: Identifiable, Codable, Equatable {
         manifestSupportedAreas = try container.decodeIfPresent(
             [PluginDisplayArea].self, forKey: .manifestSupportedAreas)
         manifestID = try container.decode(String.self, forKey: .manifestID)
+        packageAuthentication =
+            try container.decodeIfPresent(
+                PluginPackageAuthentication.self,
+                forKey: .packageAuthentication
+            ) ?? .unsigned
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -165,11 +204,21 @@ struct PluginDefinition: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(manifestLink, forKey: .manifestLink)
         try container.encodeIfPresent(manifestSupportedAreas, forKey: .manifestSupportedAreas)
         try container.encode(manifestID, forKey: .manifestID)
+        try container.encode(packageAuthentication, forKey: .packageAuthentication)
     }
 
     func supports(area: PluginDisplayArea) -> Bool {
         guard let supported = manifestSupportedAreas else { return true }
         return supported.contains(area)
+    }
+
+    var canCheckForUpdates: Bool {
+        guard sourceType != .localFolder,
+            manifestUpdateURL != nil
+        else {
+            return false
+        }
+        return packageAuthentication.isSigned
     }
 }
 
@@ -189,10 +238,90 @@ private struct GeckoUpdateManifestAddon: Decodable {
 private struct GeckoUpdateManifestEntry: Decodable {
     let version: String?
     let updateLink: String
+    let updateHash: String?
+    let updateInfoURL: String?
+    let applications: GeckoUpdateManifestApplications?
 
     private enum CodingKeys: String, CodingKey {
         case version
         case updateLink = "update_link"
+        case updateHash = "update_hash"
+        case updateInfoURL = "update_info_url"
+        case applications
+    }
+}
+
+private struct GeckoUpdateManifestApplications: Decodable {
+    let kiririn: GeckoUpdateManifestKiririnApplication?
+}
+
+private struct GeckoUpdateManifestKiririnApplication: Decodable {
+    let strictMinVersion: String?
+    let strictMaxVersion: String?
+    let advisoryMaxVersion: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case strictMinVersion = "strict_min_version"
+        case strictMaxVersion = "strict_max_version"
+        case advisoryMaxVersion = "advisory_max_version"
+    }
+}
+
+private struct GeckoUpdateHash {
+    private static let hexadecimalCharacters = CharacterSet(
+        charactersIn: "0123456789abcdefABCDEF"
+    )
+
+    enum Algorithm {
+        case sha256
+        case sha512
+    }
+
+    let algorithm: Algorithm
+    let expectedHex: String
+
+    init?(_ rawValue: String?) {
+        guard
+            let rawValue = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !rawValue.isEmpty
+        else {
+            return nil
+        }
+
+        let parts = rawValue.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return nil }
+
+        let normalizedHex = parts[1].lowercased()
+        guard
+            !normalizedHex.isEmpty,
+            normalizedHex.unicodeScalars.allSatisfy(Self.hexadecimalCharacters.contains)
+        else {
+            return nil
+        }
+
+        switch parts[0].lowercased() {
+        case "sha256":
+            guard normalizedHex.count == 64 else { return nil }
+            algorithm = .sha256
+        case "sha512":
+            guard normalizedHex.count == 128 else { return nil }
+            algorithm = .sha512
+        default:
+            return nil
+        }
+
+        expectedHex = normalizedHex
+    }
+
+    func matches(data: Data) -> Bool {
+        let actualHex: String
+        switch algorithm {
+        case .sha256:
+            actualHex = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        case .sha512:
+            actualHex = SHA512.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        }
+        return actualHex == expectedHex
     }
 }
 
@@ -201,8 +330,13 @@ class PluginStore {
     private let defaults: UserDefaults
     private let fileManager: FileManager
     private let pluginsKey = "kiririn.plugin.definitions"
+    private let developerModeKey = "kiririn.plugin.developer_mode_enabled"
     private let pluginDirectoryName = "Plugins"
     private static let extensionManifestFileName = "manifest.json"
+    private static let currentAppVersion =
+        trimmedNonEmpty(
+            Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+        ?? "0"
     private static let localManifestReloadEvents: DispatchSource.FileSystemEvent = [
         .write,
         .delete,
@@ -213,6 +347,7 @@ class PluginStore {
         "storage",
         "unlimitedStorage",
     ]
+    private static let packageSignatureRequirement: PluginPackageSignatureRequirement = .optional
     private static let prohibitedExtensionManifestKeys: Set<String> = [
         "content_scripts",
         "commands",
@@ -220,9 +355,11 @@ class PluginStore {
         "browser_action",
         "page_action",
     ]
+    private let packageSignatureVerifier: PluginPackageSignatureVerifier
 
     var fileReadErrorMessage: String?
     var droppedPluginAlertMessage: String?
+    var isDeveloperModeEnabled: Bool
     @ObservationIgnored var onLocalFolderManifestChanged: ((UUID) -> Void)?
 
     private var resolvedManifestCache: [UUID: ExtensionPluginManifest] = [:]
@@ -238,9 +375,15 @@ class PluginStore {
         }
     }
 
-    init(defaults: UserDefaults = .standard, fileManager: FileManager = .default) {
+    init(
+        defaults: UserDefaults = .standard,
+        fileManager: FileManager = .default,
+        packageSignatureVerifier: PluginPackageSignatureVerifier = .shared
+    ) {
         self.defaults = defaults
         self.fileManager = fileManager
+        self.packageSignatureVerifier = packageSignatureVerifier
+        self.isDeveloperModeEnabled = defaults.bool(forKey: developerModeKey)
         self.plugins = []
 
         try? ensurePluginDirectoryExists()
@@ -266,6 +409,7 @@ class PluginStore {
 
         self.plugins = initialPlugins
         refreshPluginsFromFiles()
+        enforceDeveloperModeRestrictionsIfNeeded()
         syncLocalManifestWatchers()
         if !droppedStoredPlugins.isEmpty {
             appendDroppedPluginAlertMessage(
@@ -308,10 +452,52 @@ class PluginStore {
         plugins.first { $0.manifestID == manifestID }
     }
 
-    func setEnabled(_ enabled: Bool, for id: UUID) {
+    func installRouting(for preview: PluginInstallPreview) throws -> PluginInstallRouting {
+        guard let previous = plugin(manifestID: preview.manifest.manifestID) else {
+            return .install
+        }
+        return try updateRouting(replacing: previous, with: preview)
+    }
+
+    func updateRouting(replacing previous: PluginDefinition, with preview: PluginInstallPreview)
+        throws
+        -> PluginInstallRouting
+    {
+        guard preview.manifest.manifestID == previous.manifestID else {
+            throw PluginManifestValidationError(messages: [
+                "IDが一致しません。別のプラグインパッケージのため更新を中止しました"
+            ])
+        }
+
+        let signerMismatch = !signerMatchesForUpdate(previous: previous, preview: preview)
+        if signerMismatch, !isDeveloperModeEnabled {
+            throw PluginManifestValidationError(messages: [
+                "開発者モードが無効なため、署名元が一致しないkppxへの更新は利用できません"
+            ])
+        }
+
+        return .update(pluginID: previous.id, signerMismatch: signerMismatch)
+    }
+
+    func setDeveloperModeEnabled(_ enabled: Bool) {
+        guard isDeveloperModeEnabled != enabled else { return }
+        isDeveloperModeEnabled = enabled
+        defaults.set(enabled, forKey: developerModeKey)
+        enforceDeveloperModeRestrictionsIfNeeded()
+    }
+
+    func setEnabled(_ enabled: Bool, for id: UUID) throws {
         guard let index = plugins.firstIndex(where: { $0.id == id }) else { return }
         if enabled, plugins[index].isBlocked {
             return
+        }
+
+        if enabled {
+            try validateDeveloperModeRequirement(
+                plugins[index].packageAuthentication,
+                sourceType: plugins[index].sourceType,
+                actionLabel: "有効化"
+            )
         }
         plugins[index].isEnabled = enabled
     }
@@ -372,7 +558,7 @@ class PluginStore {
         if !blockedPluginNames.isEmpty {
             let pluginList = blockedPluginNames.joined(separator: "、")
             appendDroppedPluginAlertMessage(
-                "内容確認が必要なプラグインをブロックしました: \(pluginList)。内容を確認し、問題なければ再有効化してください。")
+                "内容確認が必要なプラグインをブロックしました: \(pluginList)。内容を確認し、問題なければ再有効化してください")
         }
         fileReadErrorMessage = nil
     }
@@ -393,7 +579,7 @@ class PluginStore {
     }
 
     private func blockedPluginAlertMessage(for pluginName: String) -> String {
-        "プラグイン「\(pluginName)」は内容確認が必要なためブロックしました。内容を確認し、問題なければ再有効化してください。"
+        "プラグイン「\(pluginName)」は内容確認が必要なためブロックしました。内容を確認し、問題なければ再有効化してください"
     }
 
     func previewStoredPlugin(for id: UUID) throws -> PluginInstallPreview {
@@ -411,10 +597,16 @@ class PluginStore {
             throw PluginManifestValidationError(messages: ["プラグインが見つかりません"])
         }
 
+        try validateDeveloperModeRequirement(
+            preview.packageAuthentication,
+            sourceType: preview.sourceType,
+            actionLabel: "有効化"
+        )
+
         let plugin = plugins[index]
         guard preview.manifest.manifestID == plugin.manifestID else {
             throw PluginManifestValidationError(messages: [
-                "browser_specific_settings.kiririn.id が一致しません。再登録してください（既存: \(plugin.manifestID) / マニフェスト: \(preview.manifest.manifestID)）"
+                "IDが一致しません。再登録してください（既存: \(plugin.manifestID) / マニフェスト: \(preview.manifest.manifestID)）"
             ])
         }
 
@@ -431,7 +623,7 @@ class PluginStore {
         case .localFolder(let url, let bookmarkData):
             guard plugin.sourceType == .localFolder else {
                 throw PluginManifestValidationError(messages: [
-                    "保存済みの package を読み込めませんでした"
+                    "保存済みのパッケージを読み込めませんでした"
                 ])
             }
             updated.resourceBasePath = url.path(percentEncoded: false)
@@ -624,7 +816,7 @@ class PluginStore {
 
         guard manifest.manifestID == plugin.manifestID else {
             throw PluginManifestValidationError(messages: [
-                "browser_specific_settings.kiririn.id が一致しません。再登録してください（既存: \(plugin.manifestID) / マニフェスト: \(manifest.manifestID)）"
+                "IDが一致しません。再登録してください（既存: \(plugin.manifestID) / マニフェスト: \(manifest.manifestID)）"
             ])
         }
 
@@ -688,37 +880,62 @@ class PluginStore {
         sourceType: PluginSourceType
     ) throws -> PluginInstallPreview {
         let package = try PluginDecoder.decode(data: packageData)
+        let packageAuthentication = try packageSignatureVerifier.verify(
+            packageData: package.archiveData
+        )
+        try validatePackageSignatureRequirement(
+            packageAuthentication,
+            sourceType: sourceType
+        )
+        try validateDeveloperModeRequirement(
+            packageAuthentication,
+            sourceType: sourceType,
+            actionLabel: "追加"
+        )
         let manifest = try Self.parseExtensionManifest(
             inArchive: package
         )
+        let installWarnings = try validateManifestRuntimeCompatibility(manifest)
 
         return PluginInstallPreview(
             sourceType: sourceType,
             manifest: manifest,
+            packageAuthentication: packageAuthentication,
+            updateInfoURL: nil,
+            installWarnings: installWarnings,
             payload: .package(archiveData: package.archiveData)
         )
     }
 
     func previewPlugin(localFolderURL: URL, bookmarkData: Data?) throws -> PluginInstallPreview {
+        try validateDeveloperModeRequirement(
+            .unsigned,
+            sourceType: .localFolder,
+            actionLabel: "追加"
+        )
         let manifest = try Self.parseExtensionManifest(
             atResourceURL: localFolderURL,
             fileManager: fileManager
         )
+        let installWarnings = try validateManifestRuntimeCompatibility(manifest)
 
         return PluginInstallPreview(
             sourceType: .localFolder,
             manifest: manifest,
+            packageAuthentication: .unsigned,
+            updateInfoURL: nil,
+            installWarnings: installWarnings,
             payload: .localFolder(url: localFolderURL, bookmarkData: bookmarkData)
         )
     }
 
     func previewPlugin(fromRemoteURL url: URL) async throws -> PluginInstallPreview {
         guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) else {
-            throw PluginManifestValidationError(messages: ["URL は http(s) である必要があります"])
+            throw PluginManifestValidationError(messages: ["URLはhttp(s)である必要があります"])
         }
 
-        let (data, _) = try await URLSession.kiririnShared.data(from: url)
-        return try previewPlugin(packageData: data, sourceType: .remoteUrl)
+        let data = try await fetchDataIgnoringCache(from: url)
+        return try previewPlugin(packageData: data, sourceType: .kppx)
     }
 
     @discardableResult
@@ -728,7 +945,8 @@ class PluginStore {
             let plugin = try installPluginPackage(
                 archiveData: archiveData,
                 manifest: preview.manifest,
-                sourceType: preview.sourceType
+                sourceType: preview.sourceType,
+                packageAuthentication: preview.packageAuthentication
             )
             upsertPlugin(plugin)
             return plugin
@@ -748,7 +966,8 @@ class PluginStore {
                 manifestAuthor: preview.manifest.author,
                 manifestLink: preview.manifest.homepageURL,
                 manifestSupportedAreas: preview.manifest.displayAreas,
-                manifestID: preview.manifest.manifestID
+                manifestID: preview.manifest.manifestID,
+                packageAuthentication: .unsigned
             )
             resolvedManifestCache[plugin.id] = preview.manifest
             upsertPlugin(plugin)
@@ -779,37 +998,113 @@ class PluginStore {
         withPackageData packageData: Data,
         sourceType: PluginSourceType
     ) throws {
-        let package = try PluginDecoder.decode(data: packageData)
-        let manifest = try Self.parseExtensionManifest(
-            inArchive: package
-        )
-        guard manifest.manifestID == previous.manifestID else {
+        let preview = try previewPlugin(packageData: packageData, sourceType: sourceType)
+        _ = try updateRouting(replacing: previous, with: preview)
+        _ = try overwritePlugin(previous, with: preview)
+    }
+
+    @discardableResult
+    func overwritePlugin(_ previous: PluginDefinition, with preview: PluginInstallPreview) throws
+        -> PluginDefinition
+    {
+        guard preview.manifest.manifestID == previous.manifestID else {
             throw PluginManifestValidationError(messages: [
-                "browser_specific_settings.kiririn.id が一致しません。別のプラグイン package のため更新を中止しました"
+                "IDが一致しません。別のプラグインパッケージのため更新を中止しました"
             ])
         }
-        let plugin = try installPluginPackage(
-            archiveData: package.archiveData,
-            manifest: manifest,
-            sourceType: sourceType,
-            replacing: previous
+
+        switch preview.payload {
+        case .package(let archiveData):
+            let plugin = try installPluginPackage(
+                archiveData: archiveData,
+                manifest: preview.manifest,
+                sourceType: preview.sourceType,
+                packageAuthentication: preview.packageAuthentication,
+                replacing: previous
+            )
+            upsertPlugin(plugin)
+            return plugin
+        case .localFolder:
+            throw PluginManifestValidationError(messages: [
+                "更新モードではローカルフォルダを利用できません"
+            ])
+        }
+    }
+
+    func previewPlugin(fromUpdateManifestURL url: URL, previous: PluginDefinition) async throws
+        -> PluginInstallPreview
+    {
+        guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) else {
+            throw PluginManifestValidationError(messages: ["URLはhttp(s)である必要があります"])
+        }
+        guard previous.packageAuthentication.isSigned else {
+            throw PluginManifestValidationError(messages: [
+                "未署名パッケージはアップデートによる更新を利用できません"
+            ])
+        }
+
+        let entry = try await resolveUpdateEntry(fromUpdateManifestURL: url, plugin: previous)
+        guard let packageURL = URL(string: entry.updateLink) else {
+            throw PluginManifestValidationError(messages: [
+                "アップデートのダウンロードURLが有効ではありません"
+            ])
+        }
+        let updateHash = try parseUpdateHash(entry.updateHash)
+        let data = try await fetchDataIgnoringCache(from: packageURL)
+        if let updateHash, !updateHash.matches(data: data) {
+            throw PluginManifestValidationError(messages: [
+                "アップデート検証用ハッシュがダウンロードしたkppxと一致しません"
+            ])
+        }
+
+        let basePreview = try previewPlugin(packageData: data, sourceType: .kppx)
+        let preview = PluginInstallPreview(
+            sourceType: basePreview.sourceType,
+            manifest: basePreview.manifest,
+            packageAuthentication: basePreview.packageAuthentication,
+            updateInfoURL: Self.trimmedNonEmpty(entry.updateInfoURL).flatMap(URL.init(string:)),
+            installWarnings: basePreview.installWarnings,
+            payload: basePreview.payload
         )
-        upsertPlugin(plugin)
+        try validateResolvedUpdateVersion(
+            entryVersion: entry.version,
+            packageVersion: preview.manifest.version
+        )
+        guard preview.packageAuthentication.isSigned else {
+            throw PluginManifestValidationError(messages: [
+                "アップデートで取得したパッケージに署名がありません"
+            ])
+        }
+        guard
+            matchingSignerKeyHashes(
+                lhs: previous.packageAuthentication.signerKeyHashes,
+                rhs: preview.packageAuthentication.signerKeyHashes
+            )
+        else {
+            throw PluginManifestValidationError(messages: [
+                "アップデートで取得したパッケージの署名鍵が既存パッケージと一致しません"
+            ])
+        }
+        guard case .package = preview.payload else {
+            throw PluginManifestValidationError(messages: ["プラグインパッケージの読み込みに失敗しました"])
+        }
+        guard preview.manifest.manifestID == previous.manifestID else {
+            throw PluginManifestValidationError(messages: [
+                "プラグインIDが一致しません。別のプラグインパッケージのため更新を中止しました"
+            ])
+        }
+
+        try validateUpdateVersion(
+            currentVersion: previous.manifestVersion,
+            candidateVersion: preview.manifest.version
+        )
+
+        return preview
     }
 
     func overwritePlugin(fromUpdateManifestURL url: URL, previous: PluginDefinition) async throws {
-        guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) else {
-            throw PluginManifestValidationError(messages: ["URL は http(s) である必要があります"])
-        }
-
-        let packageURL = try await resolvePackageURL(fromUpdateManifestURL: url, plugin: previous)
-        let (data, _) = try await URLSession.kiririnShared.data(from: packageURL)
-
-        try overwritePlugin(
-            previous,
-            withPackageData: data,
-            sourceType: .remoteUrl
-        )
+        let preview = try await previewPlugin(fromUpdateManifestURL: url, previous: previous)
+        _ = try overwritePlugin(previous, with: preview)
     }
 
     func overwritePlugin(
@@ -817,6 +1112,11 @@ class PluginStore {
         withLocalFolderURL localFolderURL: URL,
         bookmarkData: Data?
     ) throws {
+        guard isDeveloperModeEnabled else {
+            throw PluginManifestValidationError(messages: [
+                "開発者モードが無効なため、ローカルフォルダの差し替えは利用できません"
+            ])
+        }
         let manifest = try Self.parseExtensionManifest(
             atResourceURL: localFolderURL,
             fileManager: fileManager
@@ -824,7 +1124,7 @@ class PluginStore {
 
         guard manifest.manifestID == previous.manifestID else {
             throw PluginManifestValidationError(messages: [
-                "browser_specific_settings.kiririn.id が一致しません。別のローカルフォルダのため更新を中止しました"
+                "プラグインIDが一致しません。別のローカルフォルダのため更新を中止しました"
             ])
         }
 
@@ -890,7 +1190,7 @@ class PluginStore {
 
         guard manifest.manifestID == plugin.manifestID else {
             throw PluginManifestValidationError(messages: [
-                "browser_specific_settings.kiririn.id が一致しません。再登録してください（既存: \(plugin.manifestID) / マニフェスト: \(manifest.manifestID)）"
+                "IDが一致しません。再登録してください（既存: \(plugin.manifestID) / マニフェスト: \(manifest.manifestID)）"
             ])
         }
 
@@ -906,6 +1206,7 @@ class PluginStore {
         updated.manifestUpdateURL = manifest.manifestUpdateURL
 
         if plugin.sourceType == .localFolder {
+            updated.packageAuthentication = .unsigned
             updated.resourceHash = nil
             if updated.isBlocked {
                 updated.isEnabled = false
@@ -936,6 +1237,7 @@ class PluginStore {
         archiveData: Data,
         manifest: ExtensionPluginManifest,
         sourceType: PluginSourceType,
+        packageAuthentication: PluginPackageAuthentication,
         replacing previous: PluginDefinition? = nil
     ) throws -> PluginDefinition {
         try ensureUniqueManifestID(manifest.manifestID, excluding: previous)
@@ -966,58 +1268,200 @@ class PluginStore {
             manifestAuthor: manifest.author,
             manifestLink: manifest.homepageURL,
             manifestSupportedAreas: manifest.displayAreas,
-            manifestID: manifest.manifestID
+            manifestID: manifest.manifestID,
+            packageAuthentication: packageAuthentication
         )
 
         resolvedManifestCache[plugin.id] = manifest
         return plugin
     }
 
-    private func resolvePackageURL(fromUpdateManifestURL url: URL, plugin: PluginDefinition)
+    private func resolveUpdateEntry(fromUpdateManifestURL url: URL, plugin: PluginDefinition)
         async throws
-        -> URL
+        -> GeckoUpdateManifestEntry
     {
         guard !plugin.manifestID.isEmpty else {
             throw PluginManifestValidationError(messages: [
-                "browser_specific_settings.kiririn.id が設定されていないため更新先を解決できません"
+                "IDが設定されていないため更新先を解決できません"
             ])
         }
 
-        let (data, _) = try await URLSession.kiririnShared.data(from: url)
+        let data = try await fetchDataIgnoringCache(from: url)
 
         let updateManifest: GeckoUpdateManifest
         do {
             updateManifest = try JSONDecoder().decode(GeckoUpdateManifest.self, from: data)
         } catch {
             throw PluginManifestValidationError(messages: [
-                "update manifest の JSON を読み取れません: \(error.localizedDescription)"
+                "アップデートマニフェストのJSONを読み取れません: \(error.localizedDescription)"
             ])
         }
 
         guard let addon = updateManifest.addons[plugin.manifestID] else {
             throw PluginManifestValidationError(messages: [
-                "update manifest に browser_specific_settings.kiririn.id \"\(plugin.manifestID)\" の定義がありません"
+                "アップデートマニフェストにID \"\(plugin.manifestID)\" の定義がありません"
             ])
         }
 
-        let entry = addon.updates
+        let compatibleEntries = addon.updates.filter(isCompatibleUpdateEntry)
+        guard !compatibleEntries.isEmpty else {
+            throw PluginManifestValidationError(messages: [
+                "このバージョンのKiririnに対応した更新候補がありません"
+            ])
+        }
+
+        let entry =
+            compatibleEntries
             .sorted {
                 ($0.version ?? "").compare($1.version ?? "", options: .numeric)
                     == .orderedDescending
             }
-            .first {
-                URL(string: $0.updateLink).map {
-                    ($0.scheme?.lowercased() ?? "") == "https"
-                } == true
-            }
+            .first(where: supportsUpdateDownload)
 
-        guard let entry, let packageURL = URL(string: entry.updateLink) else {
+        guard let entry else {
             throw PluginManifestValidationError(messages: [
-                "update manifest に有効な https の update_link がありません"
+                "アップデートマニフェストに利用できるダウンロードURLがありません"
             ])
         }
 
-        return packageURL
+        try validateUpdateVersion(
+            currentVersion: plugin.manifestVersion,
+            candidateVersion: entry.version
+        )
+
+        return entry
+    }
+
+    private func isCompatibleUpdateEntry(_ entry: GeckoUpdateManifestEntry) -> Bool {
+        guard let applications = entry.applications else {
+            return true
+        }
+        guard let kiririn = applications.kiririn else {
+            return false
+        }
+
+        let currentVersion = Self.currentAppVersion
+        if let minVersion = Self.trimmedNonEmpty(kiririn.strictMinVersion),
+            currentVersion.compare(minVersion, options: .numeric) == .orderedAscending
+        {
+            return false
+        }
+        if let maxVersion = Self.trimmedNonEmpty(kiririn.strictMaxVersion),
+            maxVersion != "*",
+            currentVersion.compare(maxVersion, options: .numeric) == .orderedDescending
+        {
+            return false
+        }
+
+        return true
+    }
+
+    private func supportsUpdateDownload(_ entry: GeckoUpdateManifestEntry) -> Bool {
+        guard
+            let url = URL(string: entry.updateLink),
+            let scheme = url.scheme?.lowercased(),
+            ["http", "https"].contains(scheme)
+        else {
+            return false
+        }
+
+        return scheme == "https" || Self.trimmedNonEmpty(entry.updateHash) != nil
+    }
+
+    private func fetchDataIgnoringCache(from url: URL) async throws -> Data {
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue("no-cache", forHTTPHeaderField: "Pragma")
+
+        let (data, _) = try await URLSession.kiririnShared.data(for: request)
+        return data
+    }
+
+    private func validateUpdateVersion(currentVersion: String?, candidateVersion: String?) throws {
+        guard
+            let currentVersion = Self.trimmedNonEmpty(currentVersion),
+            let candidateVersion = Self.trimmedNonEmpty(candidateVersion)
+        else {
+            return
+        }
+
+        switch candidateVersion.compare(currentVersion, options: .numeric) {
+        case .orderedDescending:
+            return
+        case .orderedSame:
+            throw PluginManifestValidationError(messages: [
+                "候補バージョン（\(candidateVersion)）は現在のバージョン（\(currentVersion)）と同じです。更新はありません"
+            ])
+        case .orderedAscending:
+            throw PluginManifestValidationError(messages: [
+                "アップデートマニフェストの最新版（\(candidateVersion)）は現在のバージョン（\(currentVersion)）より古いため更新できません"
+            ])
+        }
+    }
+
+    private func validateResolvedUpdateVersion(entryVersion: String?, packageVersion: String?)
+        throws
+    {
+        guard
+            let entryVersion = Self.trimmedNonEmpty(entryVersion),
+            let packageVersion = Self.trimmedNonEmpty(packageVersion),
+            entryVersion != packageVersion
+        else {
+            return
+        }
+
+        throw PluginManifestValidationError(messages: [
+            "アップデートマニフェストのバージョン（\(entryVersion)）と取得したkppxのマニフェストバージョン（\(packageVersion)）が一致しません。update.jsonだけでなくkppx側のmanifest.jsonも更新してください"
+        ])
+    }
+
+    private func validateManifestRuntimeCompatibility(_ manifest: ExtensionPluginManifest) throws
+        -> [String]
+    {
+        var violations: [String] = []
+        let currentVersion = Self.currentAppVersion
+
+        if let minVersion = Self.trimmedNonEmpty(manifest.strictMinVersion),
+            currentVersion.compare(minVersion, options: .numeric) == .orderedAscending
+        {
+            violations.append(
+                "インストールに必要な最小バージョン（\(minVersion)）を満たしていません（現在: \(currentVersion)）"
+            )
+        }
+
+        if let maxVersion = Self.trimmedNonEmpty(manifest.strictMaxVersion),
+            maxVersion != "*",
+            currentVersion.compare(maxVersion, options: .numeric) == .orderedDescending
+        {
+            violations.append(
+                "インストール可能な最大バージョン（\(maxVersion)）を超えています（現在: \(currentVersion)）"
+            )
+        }
+
+        guard !violations.isEmpty else {
+            return []
+        }
+
+        if isDeveloperModeEnabled {
+            return violations
+        }
+
+        throw PluginManifestValidationError(
+            messages: [
+                "このプラグインは現在のアプリバージョンと互換性がありません。強制的に有効にするには開発者モードを有効にしてください"
+            ] + violations)
+    }
+
+    private func parseUpdateHash(_ rawValue: String?) throws -> GeckoUpdateHash? {
+        guard let rawValue = Self.trimmedNonEmpty(rawValue) else {
+            return nil
+        }
+        guard let updateHash = GeckoUpdateHash(rawValue) else {
+            throw PluginManifestValidationError(messages: [
+                "アップデート検証用ハッシュの形式が不正です。sha256:またはsha512:で始まる16進ハッシュを指定してください"
+            ])
+        }
+        return updateHash
     }
 
     private func upsertPlugin(_ plugin: PluginDefinition) {
@@ -1047,16 +1491,118 @@ class PluginStore {
                 localFolderURL: localFolderURL,
                 bookmarkData: plugin.resourceBookmark
             )
-        case .localFile, .remoteUrl:
+        case .kppx:
             let archiveData = try archiveData(for: plugin)
             preview = try previewPlugin(packageData: archiveData, sourceType: plugin.sourceType)
         }
         guard preview.manifest.manifestID == plugin.manifestID else {
             throw PluginManifestValidationError(messages: [
-                "browser_specific_settings.kiririn.id が一致しません。再登録してください（既存: \(plugin.manifestID) / マニフェスト: \(preview.manifest.manifestID)）"
+                "プラグインIDが一致しません。再登録してください（既存: \(plugin.manifestID) / 追加中: \(preview.manifest.manifestID)）"
             ])
         }
         return preview
+    }
+
+    private func validatePackageSignatureRequirement(
+        _ authentication: PluginPackageAuthentication,
+        sourceType: PluginSourceType
+    ) throws {
+        guard sourceType != .localFolder else { return }
+        guard Self.packageSignatureRequirement == .required, !authentication.isSigned else {
+            return
+        }
+        throw PluginManifestValidationError(messages: [
+            "このビルドでは署名付きkppxパッケージのみ追加できます"
+        ])
+    }
+
+    private func validateDeveloperModeRequirement(
+        _ authentication: PluginPackageAuthentication,
+        sourceType: PluginSourceType,
+        actionLabel: String
+    ) throws {
+        guard
+            isDeveloperModeEnabled || isStandardModeAllowed(authentication, sourceType: sourceType)
+        else {
+            throw PluginManifestValidationError(messages: [
+                developerModeRestrictionMessage(
+                    for: authentication,
+                    sourceType: sourceType,
+                    actionLabel: actionLabel
+                )
+            ])
+        }
+    }
+
+    func signerMatchesForUpdate(previous: PluginDefinition, preview: PluginInstallPreview) -> Bool {
+        guard previous.packageAuthentication.isSigned,
+            preview.packageAuthentication.isSigned
+        else {
+            return false
+        }
+        return matchingSignerKeyHashes(
+            lhs: previous.packageAuthentication.signerKeyHashes,
+            rhs: preview.packageAuthentication.signerKeyHashes
+        )
+    }
+
+    private func matchingSignerKeyHashes(lhs: [String], rhs: [String]) -> Bool {
+        lhs.sorted() == rhs.sorted()
+    }
+
+    private func isStandardModeAllowed(
+        _ authentication: PluginPackageAuthentication,
+        sourceType: PluginSourceType
+    ) -> Bool {
+        guard sourceType != .localFolder else {
+            return false
+        }
+        return authentication.state == .verified
+    }
+
+    private func developerModeRestrictionMessage(
+        for authentication: PluginPackageAuthentication,
+        sourceType: PluginSourceType,
+        actionLabel: String
+    ) -> String {
+        if sourceType == .localFolder {
+            return "ローカルフォルダのプラグインを\(actionLabel)できません。\(actionLabel)するには開発者モードを有効にしてください"
+        }
+
+        switch authentication.state {
+        case .unsigned:
+            return "未署名のkppxを\(actionLabel)できません。\(actionLabel)するには開発者モードを有効にしてください"
+        case .selfSigned:
+            return "自己署名のkppxを\(actionLabel)できません。\(actionLabel)するには開発者モードを有効にしてください"
+        case .revoked:
+            return "失効済み署名のkppxを\(actionLabel)できません。\(actionLabel)するには開発者モードを有効にしてください"
+        case .verified:
+            return "不明なエラー。認証済み署名のkppxを\(actionLabel)できません"
+        }
+    }
+
+    private func enforceDeveloperModeRestrictionsIfNeeded() {
+        guard !isDeveloperModeEnabled else { return }
+
+        var updatedPlugins = plugins
+        var changed = false
+        for index in updatedPlugins.indices {
+            guard updatedPlugins[index].isEnabled else { continue }
+            guard
+                !isStandardModeAllowed(
+                    updatedPlugins[index].packageAuthentication,
+                    sourceType: updatedPlugins[index].sourceType
+                )
+            else {
+                continue
+            }
+            updatedPlugins[index].isEnabled = false
+            changed = true
+        }
+
+        if changed {
+            plugins = updatedPlugins
+        }
     }
 
     private func archiveData(for plugin: PluginDefinition) throws -> Data {
@@ -1065,7 +1611,7 @@ class PluginStore {
             return try Data(contentsOf: resourceURL)
         } catch {
             throw PluginManifestValidationError(messages: [
-                "プラグイン package の読み込みに失敗しました: \(error.localizedDescription)"
+                "プラグインパッケージの読み込みに失敗しました: \(error.localizedDescription)"
             ])
         }
     }
@@ -1075,7 +1621,7 @@ class PluginStore {
             return resourceHash(forArchiveData: try Data(contentsOf: archiveURL))
         } catch {
             throw PluginManifestValidationError(messages: [
-                "プラグイン package の読み込みに失敗しました: \(error.localizedDescription)"
+                "プラグインパッケージの読み込みに失敗しました: \(error.localizedDescription)"
             ])
         }
     }
@@ -1108,7 +1654,7 @@ class PluginStore {
             throw error
         } catch {
             throw PluginManifestValidationError(messages: [
-                "プラグイン package の読み込みに失敗しました: \(error.localizedDescription)"
+                "プラグインパッケージの読み込みに失敗しました: \(error.localizedDescription)"
             ])
         }
     }
@@ -1119,7 +1665,7 @@ class PluginStore {
         guard
             let manifestData = try archive.fileData(named: extensionManifestFileName)
         else {
-            throw PluginManifestValidationError(messages: ["manifest.json が見つかりません"])
+            throw PluginManifestValidationError(messages: ["manifest.jsonが見つかりません"])
         }
 
         return try parseExtensionManifest(
@@ -1136,7 +1682,7 @@ class PluginStore {
     ) throws -> ExtensionPluginManifest {
         let manifestURL = directoryURL.appending(path: extensionManifestFileName)
         guard fileManager.fileExists(atPath: manifestURL.path(percentEncoded: false)) else {
-            throw PluginManifestValidationError(messages: ["manifest.json が見つかりません"])
+            throw PluginManifestValidationError(messages: ["manifest.jsonが見つかりません"])
         }
 
         let data: Data
@@ -1144,7 +1690,7 @@ class PluginStore {
             data = try Data(contentsOf: manifestURL)
         } catch {
             throw PluginManifestValidationError(messages: [
-                "manifest.json の読み込みに失敗しました: \(error.localizedDescription)"
+                "manifest.jsonの読み込みに失敗しました: \(error.localizedDescription)"
             ])
         }
 
@@ -1165,37 +1711,37 @@ class PluginStore {
         let root: [String: Any]
         do {
             guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                throw PluginManifestValidationError(messages: ["manifest.json の形式が不正です"])
+                throw PluginManifestValidationError(messages: ["manifest.jsonの形式が不正です"])
             }
             root = object
         } catch let error as PluginManifestValidationError {
             throw error
         } catch {
             throw PluginManifestValidationError(messages: [
-                "manifest.json の JSON を読み取れません: \(error.localizedDescription)"
+                "manifest.jsonのJSONを読み取れません: \(error.localizedDescription)"
             ])
         }
 
         var errors: [String] = []
         for prohibitedKey in prohibitedExtensionManifestKeys where root[prohibitedKey] != nil {
-            errors.append("\(prohibitedKey) はサポートしていません")
+            errors.append("\(prohibitedKey)はサポートしていません")
         }
 
         let displayName = trimmedNonEmpty(root["name"] as? String)
         if displayName == nil {
-            errors.append("name が指定されていません")
+            errors.append("nameが指定されていません")
         }
 
         let version = trimmedNonEmpty(root["version"] as? String)
         if version == nil {
-            errors.append("version が指定されていません")
+            errors.append("versionが指定されていません")
         }
 
         let browserSpecificSettings = root["browser_specific_settings"] as? [String: Any]
         let kiririn = browserSpecificSettings?["kiririn"] as? [String: Any]
         let manifestID = trimmedNonEmpty(kiririn?["id"] as? String)
         if manifestID == nil {
-            errors.append("browser_specific_settings.kiririn.id が指定されていません")
+            errors.append("プラグインマニフェストにIDが指定されていません")
         }
 
         let optionsUI = root["options_ui"] as? [String: Any]
@@ -1240,7 +1786,7 @@ class PluginStore {
             errors: &errors
         )
 
-        // WKWebExtension がサポートする background キー
+        // WKWebExtensionがサポートするbackgroundキー
         let supportedBackgroundKeys: Set<String> = [
             "page", "scripts", "service_worker", "persistent", "preferred_environment",
         ]
@@ -1250,25 +1796,38 @@ class PluginStore {
                 .sorted()
             if !unsupportedKeys.isEmpty {
                 errors.append(
-                    "サポートしていない background 設定があります: \(unsupportedKeys.joined(separator: ", "))"
+                    "サポートしていないバックグラウンド設定があります: \(unsupportedKeys.joined(separator: ", "))"
                 )
             }
         }
 
         let manifestUpdateURL = trimmedNonEmpty(kiririn?["update_url"] as? String)
+        let strictMinVersion = trimmedNonEmpty(kiririn?["strict_min_version"] as? String)
+        let strictMaxVersion = trimmedNonEmpty(kiririn?["strict_max_version"] as? String)
+
+        if let strictMinVersion,
+            let strictMaxVersion,
+            strictMaxVersion != "*",
+            strictMinVersion.compare(strictMaxVersion, options: .numeric) == .orderedDescending
+        {
+            errors.append(
+                "インストールに必要な最小バージョンは最大バージョン以下である必要があります"
+            )
+        }
+
         if let manifestUpdateURL,
             URL(string: manifestUpdateURL).map({
                 ["http", "https"].contains($0.scheme?.lowercased() ?? "")
             }) != true
         {
-            errors.append("browser_specific_settings.kiririn.update_url は http(s) URL である必要があります")
+            errors.append("アップデート用URLはhttp(s)URLである必要があります")
         }
 
         let permissions = (root["permissions"] as? [String]) ?? []
         let invalidPermissions = permissions.filter { !allowedExtensionPermissions.contains($0) }
         if !invalidPermissions.isEmpty {
             errors.append(
-                "許可されていない permissions があります: \(invalidPermissions.joined(separator: ", "))")
+                "permissionsに許可されていない値があります: \(invalidPermissions.joined(separator: ", "))")
         }
 
         let hostPermissions = (root["host_permissions"] as? [String]) ?? []
@@ -1285,7 +1844,7 @@ class PluginStore {
         }
         if displayAreas.isEmpty {
             errors.append(
-                "browser_specific_settings.kiririn.views.overlay.page, browser_specific_settings.kiririn.views.panel.page, options_ui.page の少なくとも1つが必要です"
+                "表示ページはオーバーレイ、パネル、設定画面の少なくとも1つが必要です"
             )
         }
 
@@ -1305,6 +1864,8 @@ class PluginStore {
             panelPage: panelPage,
             optionsPage: optionsPage,
             isBackgroundExists: background != nil,
+            strictMinVersion: strictMinVersion,
+            strictMaxVersion: strictMaxVersion,
             manifestUpdateURL: manifestUpdateURL,
             requestedPermissions: permissions,
             requestedHostPermissions: hostPermissions

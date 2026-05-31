@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 struct PluginInstallConfirmationRequest: Identifiable {
     enum Kind {
         case install
+        case update(pluginID: UUID, signerMismatch: Bool)
         case reenable(pluginID: UUID)
     }
 
@@ -15,10 +16,29 @@ struct PluginInstallConfirmationRequest: Identifiable {
     let preview: PluginInstallPreview
     let kind: Kind
 
+    init(preview: PluginInstallPreview, kind: Kind) {
+        self.preview = preview
+        self.kind = kind
+    }
+
+    init(preview: PluginInstallPreview, routing: PluginInstallRouting) {
+        switch routing {
+        case .install:
+            self.init(preview: preview, kind: .install)
+        case .update(let pluginID, let signerMismatch):
+            self.init(
+                preview: preview,
+                kind: .update(pluginID: pluginID, signerMismatch: signerMismatch)
+            )
+        }
+    }
+
     var title: String {
         switch kind {
         case .install:
             return "プラグインを追加"
+        case .update:
+            return "プラグインを更新"
         case .reenable:
             return "プラグインを再有効化"
         }
@@ -27,9 +47,14 @@ struct PluginInstallConfirmationRequest: Identifiable {
     var descriptionText: String {
         switch kind {
         case .install:
-            return "以下の内容を確認してから追加してください。"
+            return "以下のプラグインをインストールしますか？"
+        case .update(_, let signerMismatch):
+            if signerMismatch {
+                return "既存プラグインと署名元が一致しません。内容を確認してから更新してください"
+            }
+            return "プラグインを以下の内容で更新しますか？"
         case .reenable:
-            return "内容確認が必要なためブロック中です。内容を確認してから再有効化してください。"
+            return "内容確認が必要なためブロック中です。内容を確認してから再有効化してください"
         }
     }
 
@@ -37,9 +62,15 @@ struct PluginInstallConfirmationRequest: Identifiable {
         switch kind {
         case .install:
             return "追加"
+        case .update:
+            return "更新"
         case .reenable:
             return "再有効化"
         }
+    }
+
+    var warningMessages: [String] {
+        preview.installWarnings
     }
 }
 
@@ -51,6 +82,7 @@ struct PluginsSettingsView: View {
     @State private var showingImportMethodChooser = false
     @State private var showingPackageImporter = false
     @State private var showingRemoteURLSheet = false
+    @State private var showingPluginSettingsSheet = false
     @State private var importErrorMessage: String?
     @State private var selectedPluginID: UUID?
     @State private var editingPlugin: PluginDefinition?
@@ -133,6 +165,15 @@ struct PluginsSettingsView: View {
                 }
             )
         }
+        .sheet(isPresented: $showingPluginSettingsSheet) {
+            PluginSettingsSheet(
+                appModel: appModel,
+                pluginStore: pluginStore,
+                onDismiss: {
+                    showingPluginSettingsSheet = false
+                }
+            )
+        }
         .toolbar {
             settingsToolbar
         }
@@ -142,11 +183,11 @@ struct PluginsSettingsView: View {
                 isPresented: $showingImportMethodChooser,
                 titleVisibility: .visible
             ) {
-                Button("URL から追加") {
+                Button("URLから追加") {
                     showingRemoteURLSheet = true
                 }
 
-                Button("ファイルから追加 (.kppx)") {
+                Button("kppxファイルを追加") {
                     showingPackageImporter = true
                 }
 
@@ -160,7 +201,7 @@ struct PluginsSettingsView: View {
         ) {
             deleteConfirmationButtons
         } message: {
-            Text("この操作は取り消せません。")
+            Text("この操作は取り消せません")
         }
         #if !os(macOS)
             .fileImporter(
@@ -214,16 +255,18 @@ struct PluginsSettingsView: View {
             ToolbarItem(placement: .automatic) {
                 #if os(macOS)
                     Menu {
-                        Button("URL から追加") {
+                        Button("URLから追加") {
                             showingRemoteURLSheet = true
                         }
 
-                        Button("ファイルから追加 (.kppx)") {
+                        Button("kppxファイルを追加") {
                             importPackagesFromOpenPanel()
                         }
 
-                        Button("ローカルフォルダを参照") {
-                            importLocalFolderFromOpenPanel()
+                        if pluginStore.isDeveloperModeEnabled {
+                            Button("ローカルフォルダを参照") {
+                                importLocalFolderFromOpenPanel()
+                            }
                         }
                     } label: {
                         Image(systemName: "plus")
@@ -237,19 +280,18 @@ struct PluginsSettingsView: View {
                 #endif
             }
             #if !os(macOS)
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        showingPluginSettingsSheet = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+
                     EditButton()
                 }
             #endif
             #if os(macOS)
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button {
-                        NSWorkspace.shared.open(pluginStore.pluginDirectoryURL)
-                    } label: {
-                        Image(systemName: "folder")
-                    }
-                    .help("プラグインフォルダを開く")
-
                     Button {
                         if let id = selectedPluginID {
                             openWindow(id: AppWindowID.plugin.rawValue, value: id)
@@ -310,6 +352,13 @@ struct PluginsSettingsView: View {
                     }
                     .help("選択したプラグインを削除")
                     .disabled(selectedPluginID == nil)
+
+                    Button {
+                        showingPluginSettingsSheet = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .help("プラグイン設定")
                 }
             #endif
         }
@@ -364,10 +413,15 @@ struct PluginsSettingsView: View {
         }
 
         if !pendingInstallPreviews.isEmpty {
-            activeInstallConfirmation = PluginInstallConfirmationRequest(
-                preview: pendingInstallPreviews.removeFirst(),
-                kind: .install
-            )
+            let preview = pendingInstallPreviews.removeFirst()
+            do {
+                activeInstallConfirmation = try PluginInstallConfirmationRequest(
+                    preview: preview,
+                    routing: pluginStore.installRouting(for: preview)
+                )
+            } catch {
+                importErrorMessage = error.localizedDescription
+            }
         } else if !deferredImportErrorMessages.isEmpty {
             importErrorMessage = deferredImportErrorMessages.joined(separator: "\n")
             deferredImportErrorMessages = []
@@ -382,9 +436,16 @@ struct PluginsSettingsView: View {
     private func confirmInstallConfirmation(_ request: PluginInstallConfirmationRequest) {
         do {
             let plugin: PluginDefinition
+            var replacedPlugin: PluginDefinition?
             switch request.kind {
             case .install:
                 plugin = try pluginStore.installPlugin(from: request.preview)
+            case .update(let pluginID, _):
+                guard let previous = pluginStore.plugin(id: pluginID) else {
+                    throw PluginManifestValidationError(messages: ["プラグインが見つかりません"])
+                }
+                replacedPlugin = previous
+                plugin = try pluginStore.overwritePlugin(previous, with: request.preview)
             case .reenable(let pluginID):
                 plugin = try pluginStore.reenableBlockedPlugin(
                     id: pluginID,
@@ -393,7 +454,14 @@ struct PluginsSettingsView: View {
             }
             selectedPluginID = plugin.id
             activeInstallConfirmation = nil
-            appModel.reloadPluginsInAllPlayerStates()
+            if let replacedPlugin {
+                Task { @MainActor in
+                    await PluginWebsiteDataStore.unregisterServiceWorkers(for: replacedPlugin)
+                    appModel.reloadPluginsInAllPlayerStates()
+                }
+            } else {
+                appModel.reloadPluginsInAllPlayerStates()
+            }
             presentNextInstallPreviewIfPossible()
         } catch {
             activeInstallConfirmation = nil
@@ -403,7 +471,11 @@ struct PluginsSettingsView: View {
 
     private func handleToggle(_ plugin: PluginDefinition, _ enabled: Bool) {
         guard enabled, plugin.isBlocked else {
-            pluginStore.setEnabled(enabled, for: plugin.id)
+            do {
+                try pluginStore.setEnabled(enabled, for: plugin.id)
+            } catch {
+                importErrorMessage = error.localizedDescription
+            }
             return
         }
 
@@ -435,7 +507,7 @@ struct PluginsSettingsView: View {
                     let data = try Data(contentsOf: url)
                     let preview = try pluginStore.previewPlugin(
                         packageData: data,
-                        sourceType: .localFile
+                        sourceType: .kppx
                     )
                     previews.append(preview)
                 } catch {
@@ -446,7 +518,7 @@ struct PluginsSettingsView: View {
             if previews.isEmpty {
                 importErrorMessage =
                     errors.isEmpty
-                    ? "kkpxの読み込みに失敗しました。形式を確認してください。"
+                    ? "kppxの読み込みに失敗しました。形式を確認してください"
                     : errors.joined(separator: "\n")
                 return
             }
@@ -518,7 +590,7 @@ struct PluginsSettingsView: View {
         guard !isImportingFromRemoteURL else { return }
         let trimmedURL = remoteURLString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmedURL), !trimmedURL.isEmpty else {
-            importErrorMessage = "有効な URL を入力してください。"
+            importErrorMessage = "有効なURLを入力してください"
             return
         }
 
@@ -540,6 +612,52 @@ struct PluginsSettingsView: View {
     }
 }
 
+private struct PluginSettingsSheet: View {
+    let appModel: AppModel
+    let pluginStore: PluginStore
+    let onDismiss: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                #if os(macOS)
+                    Section("保存先") {
+                        Button("プラグイン保存フォルダを開く") {
+                            NSWorkspace.shared.open(pluginStore.pluginDirectoryURL)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                #endif
+
+                Section("開発") {
+                    Toggle(
+                        "開発者モードを有効にする",
+                        isOn: Binding(
+                            get: { pluginStore.isDeveloperModeEnabled },
+                            set: { newValue in
+                                pluginStore.setDeveloperModeEnabled(newValue)
+                                appModel.reloadPluginsInAllPlayerStates()
+                            }
+                        )
+                    )
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("プラグイン設定")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("閉じる") {
+                        onDismiss()
+                    }
+                }
+            }
+        }
+        #if os(macOS)
+            .frame(minWidth: 420, minHeight: 220)
+        #endif
+    }
+}
+
 private struct RemotePluginImportSheet: View {
     @Binding var urlString: String
     let isImporting: Bool
@@ -549,18 +667,16 @@ private struct RemotePluginImportSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("URL") {
-                    TextField("https://example.com/plugin.kppx", text: $urlString)
-                        #if !os(macOS)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.URL)
-                            .textContentType(.URL)
-                        #endif
-                }
+                TextField("URL", text: $urlString)
+                    #if !os(macOS)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .textContentType(.URL)
+                    #endif
             }
             .formStyle(.grouped)
-            .navigationTitle("URL から追加")
+            .navigationTitle("kppxを追加")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("キャンセル") { onCancel() }
@@ -580,7 +696,7 @@ private struct RemotePluginImportSheet: View {
             }
         }
         #if os(macOS)
-            .frame(minWidth: 420, minHeight: 160)
+            .frame(minWidth: 420, minHeight: 140)
         #endif
     }
 }
@@ -603,6 +719,19 @@ struct PluginInstallConfirmationSheet: View {
                         Text(request.descriptionText)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                    }
+                }
+
+                if !request.warningMessages.isEmpty {
+                    Section("警告") {
+                        ForEach(request.warningMessages, id: \.self) { warning in
+                            Label {
+                                Text(warning)
+                            } icon: {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                            }
+                            .foregroundStyle(.orange)
+                        }
                     }
                 }
 

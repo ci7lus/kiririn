@@ -393,9 +393,28 @@ struct ContentView: View {
 
     private func confirmExternalInstall(_ request: PluginInstallConfirmationRequest) {
         do {
-            _ = try pluginStore.installPlugin(from: request.preview)
+            var replacedPlugin: PluginDefinition?
+            switch request.kind {
+            case .install:
+                _ = try pluginStore.installPlugin(from: request.preview)
+            case .update(let pluginID, _):
+                guard let previous = pluginStore.plugin(id: pluginID) else {
+                    throw PluginManifestValidationError(messages: ["プラグインが見つかりません"])
+                }
+                replacedPlugin = previous
+                _ = try pluginStore.overwritePlugin(previous, with: request.preview)
+            case .reenable(let pluginID):
+                _ = try pluginStore.reenableBlockedPlugin(id: pluginID, with: request.preview)
+            }
             externalInstallConfirmation = nil
-            appModel.reloadPluginsInAllPlayerStates()
+            if let replacedPlugin {
+                Task { @MainActor in
+                    await PluginWebsiteDataStore.unregisterServiceWorkers(for: replacedPlugin)
+                    appModel.reloadPluginsInAllPlayerStates()
+                }
+            } else {
+                appModel.reloadPluginsInAllPlayerStates()
+            }
             #if os(macOS)
                 selectedMacTab = .settings
             #endif

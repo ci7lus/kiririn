@@ -226,7 +226,7 @@ final class AppModel {
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
         do {
             let data = try Data(contentsOf: url)
-            let preview = try pluginStore.previewPlugin(packageData: data, sourceType: .localFile)
+            let preview = try pluginStore.previewPlugin(packageData: data, sourceType: .kppx)
             pendingPluginInstallPreviews.append(preview)
         } catch {
             logger.warning("queuePluginInstall failed: \(error.localizedDescription)")
@@ -237,7 +237,15 @@ final class AppModel {
     func consumeNextPendingPluginInstallPreview() -> PluginInstallConfirmationRequest? {
         guard !pendingPluginInstallPreviews.isEmpty else { return nil }
         let preview = pendingPluginInstallPreviews.removeFirst()
-        return PluginInstallConfirmationRequest(preview: preview, kind: .install)
+        do {
+            return try PluginInstallConfirmationRequest(
+                preview: preview,
+                routing: pluginStore.installRouting(for: preview)
+            )
+        } catch {
+            pendingPluginInstallErrorMessage = error.localizedDescription
+            return nil
+        }
     }
 
     func consumePendingPluginOpenURLs(manifestID: String) -> [URL] {

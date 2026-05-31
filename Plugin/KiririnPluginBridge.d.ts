@@ -1,5 +1,5 @@
 /**
- * Kiririn のプラグインページで利用できる app-specific bridge です。
+ * kiririn のプラグインページで利用できる app-specific bridge です。
  *
  * このファイルが説明するのは `window.kiririn` だけです。
  * WebExtension 標準 API は WebKit が提供するものを利用してください。

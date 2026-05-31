@@ -1,14 +1,16 @@
-# Kiririn Plugin Spec
+# kiririn Plugin Spec
 
-Kiririn の新しいプラグインは、WKWebExtension ベースの extension bundle として読み込まれます。
+kiririn の新しいプラグインは、WKWebExtension ベースの extension bundle として読み込まれます。
 アプリ固有の機能は `window.kiririn` で公開し、標準の WebExtension API は WebKit が提供する実装を使います。
 
 ## 配布形式
 
 - 配布用パッケージは `.kppx` です。
-- `.kppx` は Valid な ZIP archive 形式ですが、配布用に署名されたものには Android APK Signature Scheme v2/v3 と同様に Central Directory の前領域に署名領域が存在します。
-- Kiririn は `.kppx` archive の URL を `WKWebExtension` に渡して読み込みます。
+- `.kppx` は Valid な ZIP archive 形式ですが、配布用に署名されたものには Android APK Signature Scheme v2 / v3 / v3.1 と同様に Central Directory の前領域に署名領域が存在します。
+- kiririn は `.kppx` archive の URL を `WKWebExtension` に渡して読み込みます。
 - macOS の開発用途では、署名なしの local folder import も利用できます。
+- 署名付き package は同梱の PKI (`trusted_chain.pem`) で検証されます。
+- 開発者モードを有効にすると未署名・自己署名のパッケージも追加できます。
 
 ## ディレクトリ例
 
@@ -64,10 +66,16 @@ MyPlugin/
 - `browser_specific_settings.kiririn.views.panel.page`: パネル用ページ
 - `options_ui.page`: 設定画面用ページ
 - `browser_specific_settings.kiririn.update_url`: アップデート検出用ファイルの URL。定義は Firefox Addon のアップデート定義ファイルと同じフォーマットを利用する。
+- `browser_specific_settings.kiririn.strict_min_version`: このプラグインが要求する kiririn の最小バージョン。任意。
+- `browser_specific_settings.kiririn.strict_max_version`: このプラグインが対応する kiririn の最大バージョン。任意。`*` も利用可能。
 - `permissions`: 現状は `storage` のみ許可
 - `host_permissions`: 外部通信先 URL パターン
 
 少なくとも `browser_specific_settings.kiririn.views.overlay.page`、`browser_specific_settings.kiririn.views.panel.page`、`options_ui.page` のいずれか 1 つが必要です。
+
+`strict_min_version` / `strict_max_version` の判定はアプリの `CFBundleShortVersionString` と数値比較で行います。
+通常モードでは互換性を満たさないプラグインは追加・更新できません。
+開発者モードでは警告を表示したうえで追加・更新できます。
 
 ## 表示面
 
@@ -78,7 +86,7 @@ MyPlugin/
 `window.kiririn.getRuntimeInfo().displayAreaType` の値は `overlay` / `panel` / `options` です。
 `window.kiririn.getRuntimeInfo().playerID` は `overlay` のときだけ対応するプレイヤー ID を返し、`panel` / `options` では `null` を返します。
 
-`panel` は Kiririn 固有の表示面です。`action.default_popup` は使用しません。
+`panel` は kiririn 固有の表示面です。`action.default_popup` は使用しません。
 
 ## 現在の制限
 
@@ -92,7 +100,7 @@ MyPlugin/
 
 ## Bridge API
 
-型定義は `KiririnPluginBridge.d.ts` にあります。
+型定義は `kiririnPluginBridge.d.ts` にあります。
 
 主要 API:
 
@@ -142,6 +150,18 @@ kiririn://plugins/{browser_specific_settings.kiririn.id}?url={encoded url}
 
 ## Import / Update
 
-- `.kppx` ファイル import
-- remote URL import
+- `.kppx` ファイル/URL import
 - macOS の local folder import
+- `update_url` による手動アップデートは、インストール済み package と更新先 package の両方が署名付きであり、Leaf 証明書の公開鍵 (SPKI SHA-256) が一致する場合のみ利用できます。
+- 未署名 package は `update_url` を定義していてもアップデート操作を利用できません。
+- 自動アップデートはありません。署名付き `.kppx` で導入されたプラグインだけが詳細画面で「アップデートを確認する」を表示します。
+
+`update_url` の update manifest では以下をサポートします。
+
+- `update_link`: `https` または `http`。`http` の場合は `update_hash` が必須。
+- `update_hash`: 任意。`sha256:` または `sha512:` で始まる形式を受け付けます。指定された場合は `https` でも必ず検証し、不一致なら更新を中止します。
+- `update_info_url`: 任意。アップデート完了後の sheet から開けます。
+- `applications.gecko`: 任意。省略時は互換とみなします。指定する場合は `gecko` を含めてください。
+- `applications.gecko.strict_min_version` / `strict_max_version`: アプリの `CFBundleShortVersionString` と照合し、互換性がある更新候補だけを対象にします。
+
+更新候補は `version` の数値比較で降順に選定します。
