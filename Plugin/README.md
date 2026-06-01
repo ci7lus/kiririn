@@ -148,6 +148,19 @@ kiririn://plugins/{browser_specific_settings.kiririn.id}?url={encoded url}
 - `displayAreaType`: `overlay` / `panel` / `options`
 - `playerID`: `overlay` に紐づくプレイヤー ID。`panel` / `options` では `null`
 
+Bridge は表示領域でUIと重ならないための余白(px相当)を CSS カスタムプロパティとして自動注入します。
+
+- `--kiririn-safe-area-inset-top`
+- `--kiririn-safe-area-inset-right`
+- `--kiririn-safe-area-inset-bottom`
+- `--kiririn-safe-area-inset-left`
+
+`env(safe-area-inset-*)` 自体は上書きできないため、必要に応じて次のように合算してください。
+
+```css
+padding-bottom: calc(env(safe-area-inset-bottom) + var(--kiririn-safe-area-inset-bottom, 0px));
+```
+
 ## Import / Update
 
 - `.kppx` ファイル/URL import

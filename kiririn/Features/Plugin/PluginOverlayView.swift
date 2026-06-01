@@ -23,6 +23,24 @@ enum PluginDisplayArea: String, Codable, CaseIterable, Sendable {
     }
 }
 
+struct PluginSafeAreaInsets: Sendable, Equatable {
+    let top: CGFloat
+    let right: CGFloat
+    let bottom: CGFloat
+    let left: CGFloat
+
+    static let zero = PluginSafeAreaInsets(top: 0, right: 0, bottom: 0, left: 0)
+
+    var asDictionary: [String: Double] {
+        [
+            "top": Double(top),
+            "right": Double(right),
+            "bottom": Double(bottom),
+            "left": Double(left),
+        ]
+    }
+}
+
 enum ExtensionPluginContextConfiguration {
     private static let errorDomain = "PluginRuntime"
     private static let baseURLScheme = "webkit-extension"
@@ -410,19 +428,22 @@ struct PluginOverlayView: View {
     let reloadToken: Int
     let displayArea: PluginDisplayArea
     let playerID: String?
+    let safeAreaInsets: PluginSafeAreaInsets
 
     init(
         pluginDefinition: PluginDefinition,
         appModel: AppModel,
         reloadToken: Int,
         displayArea: PluginDisplayArea,
-        playerID: String? = nil
+        playerID: String? = nil,
+        safeAreaInsets: PluginSafeAreaInsets = .zero
     ) {
         self.pluginDefinition = pluginDefinition
         self.appModel = appModel
         self.reloadToken = reloadToken
         self.displayArea = displayArea
         self.playerID = playerID
+        self.safeAreaInsets = safeAreaInsets
     }
 
     @State private var isCrashed = false
@@ -448,6 +469,7 @@ struct PluginOverlayView: View {
                     reloadToken: reloadToken,
                     displayArea: displayArea,
                     playerID: playerID,
+                    safeAreaInsets: safeAreaInsets,
                     deepLinkURL: pendingOpenURL,
                     deepLinkToken: openURLToken,
                     stateHash: stateHash,
@@ -641,6 +663,7 @@ private struct PluginWebView: PluginWebViewRepresentable {
     let reloadToken: Int
     let displayArea: PluginDisplayArea
     let playerID: String?
+    let safeAreaInsets: PluginSafeAreaInsets
     let deepLinkURL: URL?
     let deepLinkToken: Int
     let stateHash: String
@@ -824,7 +847,7 @@ private struct PluginWebView: PluginWebViewRepresentable {
             "appVersion": appVersion ?? NSNull(),
             "buildVersion": buildVersion,
             "bundleIdentifier": bundle.bundleIdentifier ?? NSNull(),
-            "bridgeVersion": 2,
+            "bridgeVersion": 3,
             "displayAreaType": displayArea.rawValue,
             "playerID": runtimePlayerID,
         ]
@@ -970,6 +993,13 @@ private struct PluginWebView: PluginWebViewRepresentable {
             return "window.kiririn = {};"
         }
 
+        let safeAreaInsetsString =
+            (try? JSONSerialization.data(
+                withJSONObject: safeAreaInsets.asDictionary,
+                options: [.sortedKeys]
+            )).flatMap { String(data: $0, encoding: .utf8) }
+            ?? #"{"bottom":0,"left":0,"right":0,"top":0}"#
+
         return """
             window.kiririn = {
                 _playables: \(playablesJson),
@@ -980,6 +1010,7 @@ private struct PluginWebView: PluginWebViewRepresentable {
                 _focusedPlayerIDListeners: [],
                 _playerClosedListeners: [],
                 _runtimeInfo: \(runtimeInfoString),
+                _safeAreaInsets: \(safeAreaInsetsString),
                 _openURLListeners: [],
                 _captureTakenListeners: [],
                 _captureBlobResolvers: Object.create(null),
@@ -1024,6 +1055,17 @@ private struct PluginWebView: PluginWebViewRepresentable {
                 },
 
                 getRuntimeInfo: function() { return this._runtimeInfo; },
+
+                _applySafeAreaInsetsToCSS: function() {
+                    if (!this._safeAreaInsets) { return; }
+                    const insets = this._safeAreaInsets;
+                    const root = document.documentElement;
+                    if (!root || !root.style) { return; }
+                    root.style.setProperty('--kiririn-safe-area-inset-top', String(insets.top) + 'px');
+                    root.style.setProperty('--kiririn-safe-area-inset-right', String(insets.right) + 'px');
+                    root.style.setProperty('--kiririn-safe-area-inset-bottom', String(insets.bottom) + 'px');
+                    root.style.setProperty('--kiririn-safe-area-inset-left', String(insets.left) + 'px');
+                },
 
                 onOpenURL: function(callback) { this._openURLListeners.push(callback); },
                 _emitOpenURL: function(payload) {
@@ -1129,6 +1171,8 @@ private struct PluginWebView: PluginWebViewRepresentable {
                     });
                 };
             })();
+
+            window.kiririn._applySafeAreaInsetsToCSS();
 
             // Logging interception
             (function() {

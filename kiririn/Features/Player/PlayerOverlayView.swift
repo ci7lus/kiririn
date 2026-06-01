@@ -1974,6 +1974,8 @@
         @State var playerState: PlayerState
         let appModel: AppModel
         @Binding var selectedPluginID: UUID?
+        private let pluginSwitcherHeight: CGFloat = 52
+        private let pluginSwitcherBottomPadding: CGFloat = 52
 
         private var enabledPlugins: [PluginDefinition] {
             pluginStore.plugins.filter { $0.isEnabled && $0.supports(area: .panel) }
@@ -1984,30 +1986,52 @@
         }
 
         var body: some View {
-            ZStack {
-                if let plugin = selectedPlugin {
-                    LowerContextPluginPanel(
-                        plugin: plugin, playerState: playerState, appModel: appModel
-                    )
-                    .id(plugin.id)
-                } else {
-                    ContentUnavailableView(
-                        "有効なプラグインなし",
-                        systemImage: "puzzlepiece.extension",
-                        description: Text("設定からプラグインを追加または有効にしてください")
-                    )
-                }
+            GeometryReader { geo in
+                ZStack {
+                    if let plugin = selectedPlugin {
+                        LowerContextPluginPanel(
+                            plugin: plugin,
+                            playerState: playerState,
+                            appModel: appModel,
+                            safeAreaInsets: panelSafeAreaInsets(
+                                containerSafeAreaInsets: geo.safeAreaInsets)
+                        )
+                        .id(plugin.id)
+                    } else {
+                        ContentUnavailableView(
+                            "有効なプラグインなし",
+                            systemImage: "puzzlepiece.extension",
+                            description: Text("設定からプラグインを追加または有効にしてください")
+                        )
+                    }
 
-                if enabledPlugins.count > 1 {
-                    VStack {
-                        Spacer()
-                        pluginSwitcher
-                            .padding(.horizontal)
-                            .padding(.bottom, 20)
+                    if enabledPlugins.count > 1 {
+                        VStack {
+                            Spacer()
+                            pluginSwitcher
+                                .padding(.horizontal)
+                                .padding(.bottom, pluginSwitcherBottomPadding)
+                        }
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .navigationTitle("")
+        }
+
+        private func panelSafeAreaInsets(containerSafeAreaInsets: EdgeInsets)
+            -> PluginSafeAreaInsets
+        {
+            var bottomInset = containerSafeAreaInsets.bottom
+            if enabledPlugins.count > 1 {
+                bottomInset += pluginSwitcherHeight + pluginSwitcherBottomPadding
+            }
+            return PluginSafeAreaInsets(
+                top: containerSafeAreaInsets.top,
+                right: containerSafeAreaInsets.trailing,
+                bottom: bottomInset,
+                left: containerSafeAreaInsets.leading
+            )
         }
 
         private var pluginSwitcher: some View {
@@ -2026,7 +2050,7 @@
                 .tint(.primary)
             }
             .padding(.horizontal, 18)
-            .frame(height: 52)
+            .frame(height: pluginSwitcherHeight)
             .background(.ultraThinMaterial, in: Capsule())
             .overlay {
                 Capsule()
@@ -2040,6 +2064,7 @@
         let plugin: PluginDefinition
         @State var playerState: PlayerState
         let appModel: AppModel
+        let safeAreaInsets: PluginSafeAreaInsets
 
         var body: some View {
             PluginOverlayView(
@@ -2048,10 +2073,12 @@
                 reloadToken: playerState.pluginReloadToken
                     + playerState.perPluginReloadTokens[plugin.id.uuidString, default: 0],
                 displayArea: .panel,
-                playerID: playerState.id
+                playerID: playerState.id,
+                safeAreaInsets: safeAreaInsets
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.kiririnSecondarySystemBackground)
+            .ignoresSafeArea(edges: .bottom)
         }
     }
 #endif
