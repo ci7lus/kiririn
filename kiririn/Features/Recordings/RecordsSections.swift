@@ -128,11 +128,9 @@ struct BackendRecordsView: View {
         }
         .task {
             viewModel.searchText = searchText
-            let needsLoad = viewModel.records.isEmpty
-            if needsLoad {
-                await loadRecords(reset: true)
-            }
-            if needsLoad, let cacheStore = AppModel.shared.cacheStore {
+            guard !hasCompletedInitialLoad else { return }
+            await loadRecords(reset: true)
+            if !viewModel.records.isEmpty, let cacheStore = AppModel.shared.cacheStore {
                 await viewModel.loadPlaybackPositions(
                     for: viewModel.records, cacheStore: cacheStore)
             }

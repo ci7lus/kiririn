@@ -162,15 +162,13 @@ class RecordsViewModel {
                 return
             }
             if reset {
-                records = previousRecords
-                thumbnailDataByRecordKey = previousThumbnailDataByRecordKey
-                loadingThumbnailKeys = previousLoadingThumbnailKeys
-                failedThumbnailKeys = previousFailedThumbnailKeys
-                pageToken = previousPageToken
-                hasMore = previousHasMore
-            } else {
-                hasMore = false
+                records = []
+                thumbnailDataByRecordKey = [:]
+                loadingThumbnailKeys = []
+                failedThumbnailKeys = []
+                pageToken = nil
             }
+            hasMore = false
             errorMessage = error.localizedDescription
         }
         isLoading = false
