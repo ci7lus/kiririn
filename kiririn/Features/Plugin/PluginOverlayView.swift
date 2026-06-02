@@ -847,7 +847,7 @@ private struct PluginWebView: PluginWebViewRepresentable {
             "appVersion": appVersion ?? NSNull(),
             "buildVersion": buildVersion,
             "bundleIdentifier": bundle.bundleIdentifier ?? NSNull(),
-            "bridgeVersion": 3,
+            "bridgeVersion": 2,
             "displayAreaType": displayArea.rawValue,
             "playerID": runtimePlayerID,
         ]
