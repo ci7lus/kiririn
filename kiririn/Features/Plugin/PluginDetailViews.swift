@@ -805,15 +805,24 @@ private struct PluginOptionsScreen: View {
     @State var playerState: PlayerState
 
     var body: some View {
-        PluginOverlayView(
-            pluginDefinition: plugin,
-            appModel: appModel,
-            reloadToken: playerState.pluginReloadToken
-                + playerState.perPluginReloadTokens[plugin.id.uuidString, default: 0],
-            displayArea: .options
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.kiririnSecondarySystemBackground)
+        GeometryReader { geometry in
+            PluginOverlayView(
+                pluginDefinition: plugin,
+                appModel: appModel,
+                reloadToken: playerState.pluginReloadToken
+                    + playerState.perPluginReloadTokens[plugin.id.uuidString, default: 0],
+                displayArea: .options,
+                safeAreaInsets: PluginSafeAreaInsets(
+                    top: geometry.safeAreaInsets.top,
+                    right: geometry.safeAreaInsets.trailing,
+                    bottom: geometry.safeAreaInsets.bottom,
+                    left: geometry.safeAreaInsets.leading
+                )
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.kiririnSecondarySystemBackground)
+        }
+        .ignoresSafeArea(edges: .bottom)
         .navigationTitle("\(plugin.name) 設定")
         #if !os(macOS)
             .navigationBarTitleDisplayMode(.inline)
