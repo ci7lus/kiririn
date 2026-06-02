@@ -16,6 +16,7 @@ struct CaptureListView: View {
     @State private var previewURL: URL?
     @State private var isSelectionMode = false
     @State private var selectedIDs: Set<String> = []
+    @State private var showDeleteConfirmation = false
     @State private var captureScrollProxy: ScrollViewProxy?
     @State private var isAtScrollTop = true
     #if os(macOS)
@@ -148,7 +149,7 @@ struct CaptureListView: View {
                 if isSelectionMode, !selectedIDs.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
                         Button(role: .destructive) {
-                            Task { await deleteSelectedItems() }
+                            showDeleteConfirmation = true
                         } label: {
                             Label("削除", systemImage: "trash")
                         }
@@ -195,6 +196,18 @@ struct CaptureListView: View {
             selectedIDs = selectedIDs.intersection(ids)
         }
         .quickLookPreview($previewURL)
+        .confirmationDialog(
+            "選択した項目を削除しますか？",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("削除", role: .destructive) {
+                Task { await deleteSelectedItems() }
+            }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("\(selectedIDs.count)件の項目を削除します")
+        }
         .task {
             await loadInitial()
         }
