@@ -151,6 +151,9 @@ struct RecordsListView: View {
                     viewModel: AppModel.shared.recordingsViewModel(for: backendId)
                 )
                 .id(backendId)
+                .refreshable {
+                    refreshTrigger += 1
+                }
             }
         } else {
             ContentUnavailableView("録画バックエンドなし", systemImage: "internaldrive")
