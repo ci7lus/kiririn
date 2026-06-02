@@ -1107,8 +1107,8 @@ private struct PluginWebView: PluginWebViewRepresentable {
                     window.webkit.messageHandlers.kiririn.postMessage({type: 'player:seek', data: {position: position, playerID: playerID || null}});
                 },
 
-                getCaptureBlob: function(ref) {
-                    return this._performCaptureBlobRequest(ref);
+                getCaptureBlob: function(captureID, variant) {
+                    return this._performCaptureBlobRequest(captureID, variant);
                 },
 
                 _resolveCaptureBlob: function(requestID, payload) {
