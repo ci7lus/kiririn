@@ -107,7 +107,7 @@ MyPlugin/
 - `window.kiririn.getPlayables()`
 - `window.kiririn.getPlayerStatuses()`
 - `window.kiririn.getRuntimeInfo()`
-- `window.kiririn.onOpenURL(...)`
+- `window.kiririn.onDeeplinkOpened(...)`
 - `window.kiririn.onCaptureTaken(...)`
 - `window.kiririn.play()` / `pause()` / `togglePlayPause()` / `seek()`
 - `window.kiririn.getCaptureBlob(...)`
@@ -132,10 +132,10 @@ Blob の取得は `getCaptureBlob(captureID, variant)` を使います。`varian
 Deep Link は次の形式です。
 
 ```text
-kiririn://plugins/{browser_specific_settings.kiririn.id}?url={encoded url}
+kiririn://plugins/{browser_specific_settings.kiririn.id}
 ```
 
-該当プラグインのページには `onOpenURL({ url })` が配送されます。
+該当プラグインのページには Deep Link URL 全体が `onDeeplinkOpened({ url })` として配送されます。
 
 `getRuntimeInfo()` では次の情報を取得できます。
 

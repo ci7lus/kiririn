@@ -449,8 +449,8 @@ struct PluginOverlayView: View {
     @State private var isCrashed = false
     @State private var lastError: String?
     @State private var isDetailsExpanded = false
-    @State private var pendingOpenURL: URL?
-    @State private var openURLToken = 0
+    @State private var pendingDeeplinkURL: URL?
+    @State private var deeplinkToken = 0
     @State private var extensionRuntime: ExtensionPluginRuntime?
 
     var body: some View {
@@ -470,8 +470,8 @@ struct PluginOverlayView: View {
                     displayArea: displayArea,
                     playerID: playerID,
                     safeAreaInsets: safeAreaInsets,
-                    deepLinkURL: pendingOpenURL,
-                    deepLinkToken: openURLToken,
+                    deeplinkURL: pendingDeeplinkURL,
+                    deeplinkToken: deeplinkToken,
                     stateHash: stateHash,
                     onCrash: {
                         isDetailsExpanded = false
@@ -497,38 +497,38 @@ struct PluginOverlayView: View {
             releaseExtensionRuntime()
         }
         .onAppear {
-            consumeQueuedOpenURLIfNeeded()
+            consumeQueuedDeeplinkIfNeeded()
         }
         .task(id: runtimeLoadKey) {
             await loadExtensionRuntime()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .pluginOpenURLRequested)) {
+        .onReceive(NotificationCenter.default.publisher(for: .pluginDeeplinkOpened)) {
             notification in
             let manifestPluginID = pluginDefinition.manifestID
             guard let userInfo = notification.userInfo,
                 let targetManifestID = userInfo["manifestID"] as? String,
                 targetManifestID == manifestPluginID,
-                let urlString = userInfo["url"] as? String,
+                let urlString = userInfo["deeplinkURL"] as? String,
                 let url = URL(string: urlString)
             else {
                 return
             }
-            queueOpenURLEvent(url)
+            queueDeeplinkEvent(url)
         }
     }
 
-    private func consumeQueuedOpenURLIfNeeded() {
+    private func consumeQueuedDeeplinkIfNeeded() {
         let manifestPluginID = pluginDefinition.manifestID
-        let queuedURLs = appModel.consumePendingPluginOpenURLs(manifestID: manifestPluginID)
+        let queuedURLs = appModel.consumePendingPluginDeeplinks(manifestID: manifestPluginID)
         guard !queuedURLs.isEmpty else { return }
         for queuedURL in queuedURLs {
-            queueOpenURLEvent(queuedURL)
+            queueDeeplinkEvent(queuedURL)
         }
     }
 
-    private func queueOpenURLEvent(_ url: URL) {
-        pendingOpenURL = url
-        openURLToken += 1
+    private func queueDeeplinkEvent(_ url: URL) {
+        pendingDeeplinkURL = url
+        deeplinkToken += 1
     }
 
     private var runtimeLoadKey: String {
@@ -664,8 +664,8 @@ private struct PluginWebView: PluginWebViewRepresentable {
     let displayArea: PluginDisplayArea
     let playerID: String?
     let safeAreaInsets: PluginSafeAreaInsets
-    let deepLinkURL: URL?
-    let deepLinkToken: Int
+    let deeplinkURL: URL?
+    let deeplinkToken: Int
     let stateHash: String
     let onCrash: @MainActor () -> Void
     private let logger = Logging.Logger(label: "PluginWebView")
@@ -761,10 +761,10 @@ private struct PluginWebView: PluginWebViewRepresentable {
                 self.loadPluginPage(into: webView)
             }
         }
-        if context.coordinator.lastInjectedOpenURLToken != deepLinkToken {
-            context.coordinator.lastInjectedOpenURLToken = deepLinkToken
-            if let deepLinkURL {
-                context.coordinator.queueOpenURLEvent(deepLinkURL)
+        if context.coordinator.lastInjectedDeeplinkToken != deeplinkToken {
+            context.coordinator.lastInjectedDeeplinkToken = deeplinkToken
+            if let deeplinkURL {
+                context.coordinator.queueDeeplinkEvent(deeplinkURL)
             }
         }
         injectAllStates(into: webView, coordinator: context.coordinator)
@@ -1011,7 +1011,7 @@ private struct PluginWebView: PluginWebViewRepresentable {
                 _playerClosedListeners: [],
                 _runtimeInfo: \(runtimeInfoString),
                 _safeAreaInsets: \(safeAreaInsetsString),
-                _openURLListeners: [],
+                _deeplinkOpenedListeners: [],
                 _captureTakenListeners: [],
                 _captureBlobResolvers: Object.create(null),
                 _captureEventsSubscribed: false,
@@ -1067,9 +1067,9 @@ private struct PluginWebView: PluginWebViewRepresentable {
                     root.style.setProperty('--kiririn-safe-area-inset-left', String(insets.left) + 'px');
                 },
 
-                onOpenURL: function(callback) { this._openURLListeners.push(callback); },
-                _emitOpenURL: function(payload) {
-                    this._openURLListeners.forEach(function(cb) { try { cb(payload); } catch(e) {} });
+                onDeeplinkOpened: function(callback) { this._deeplinkOpenedListeners.push(callback); },
+                _emitDeeplinkOpened: function(payload) {
+                    this._deeplinkOpenedListeners.forEach(function(cb) { try { cb(payload); } catch(e) {} });
                 },
 
                 onCaptureTaken: function(callback) {
@@ -1200,10 +1200,10 @@ private struct PluginWebView: PluginWebViewRepresentable {
         var lastInjectedStatusesJson: String?
         var lastInjectedFocusedPlayerID: String?
         var lastInjectedPlayerIDs: Set<String>?
-        var lastInjectedOpenURLToken: Int = 0
+        var lastInjectedDeeplinkToken: Int = 0
         var isPageReady = false
         var wantsCaptureEvents = false
-        var pendingOpenURLEvents: [URL] = []
+        var pendingDeeplinkEvents: [URL] = []
         var announcedCaptureEvents: [String: PluginCaptureEvent] = [:]
         var captureEventCancellable: AnyCancellable?
         let onCrash: @MainActor () -> Void
@@ -1351,19 +1351,19 @@ private struct PluginWebView: PluginWebViewRepresentable {
             )
         }
 
-        func queueOpenURLEvent(_ url: URL) {
-            pendingOpenURLEvents.append(url)
-            flushOpenURLEventsIfPossible()
+        func queueDeeplinkEvent(_ url: URL) {
+            pendingDeeplinkEvents.append(url)
+            flushDeeplinkEventsIfPossible()
         }
 
-        private func flushOpenURLEventsIfPossible() {
+        private func flushDeeplinkEventsIfPossible() {
             guard isPageReady else { return }
-            while !pendingOpenURLEvents.isEmpty {
-                let url = pendingOpenURLEvents.removeFirst()
+            while !pendingDeeplinkEvents.isEmpty {
+                let url = pendingDeeplinkEvents.removeFirst()
                 guard let payloadLiteral = Self.javaScriptObjectLiteral(["url": url.absoluteString])
                 else { continue }
                 evaluateJavaScript(
-                    "if (window.kiririn && window.kiririn._emitOpenURL) { window.kiririn._emitOpenURL(\(payloadLiteral)); }"
+                    "if (window.kiririn && window.kiririn._emitDeeplinkOpened) { window.kiririn._emitDeeplinkOpened(\(payloadLiteral)); }"
                 )
             }
         }
@@ -1538,7 +1538,7 @@ private struct PluginWebView: PluginWebViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             isPageReady = true
-            flushOpenURLEventsIfPossible()
+            flushDeeplinkEventsIfPossible()
             // キャッシュをリセットした直後の reload 完了後に、改めて全状態を注入する
             parent?.injectAllStates(into: webView, coordinator: self, force: true)
         }

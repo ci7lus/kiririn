@@ -58,7 +58,7 @@ final class AppModel {
         private var globalCaptureHotKeyManager: GlobalCaptureHotKeyManager?
     #endif
     @ObservationIgnored
-    private var pendingPluginOpenURLs: [String: [URL]] = [:]
+    private var pendingPluginDeeplinks: [String: [URL]] = [:]
 
     private static func configureLoggingIfNeeded() {
         _ = loggingBootstrapToken
@@ -248,9 +248,9 @@ final class AppModel {
         }
     }
 
-    func consumePendingPluginOpenURLs(manifestID: String) -> [URL] {
-        defer { pendingPluginOpenURLs.removeValue(forKey: manifestID) }
-        return pendingPluginOpenURLs[manifestID] ?? []
+    func consumePendingPluginDeeplinks(manifestID: String) -> [URL] {
+        defer { pendingPluginDeeplinks.removeValue(forKey: manifestID) }
+        return pendingPluginDeeplinks[manifestID] ?? []
     }
 
     private func handleOpenDeepLink(components: URLComponents) {
@@ -268,25 +268,26 @@ final class AppModel {
             logger.warning("deep link plugins rejected: missing manifest id")
             return
         }
-        guard let mediaURL = parseMediaURL(from: components) else {
-            logger.warning("deep link plugins rejected: invalid media url")
-            return
-        }
         guard let plugin = pluginStore.plugin(manifestID: manifestID) else {
             logger.warning("deep link plugins rejected: plugin not found manifestID=\(manifestID)")
             return
         }
 
-        pendingPluginOpenURLs[manifestID, default: []].append(mediaURL)
+        guard let callbackURL = components.url else {
+            logger.warning("deep link plugins rejected: could not determine callback url")
+            return
+        }
+
+        pendingPluginDeeplinks[manifestID, default: []].append(callbackURL)
         #if os(macOS)
             NotificationCenter.default.post(name: .requestOpenPluginWindow, object: plugin.id)
         #endif
         NotificationCenter.default.post(
-            name: .pluginOpenURLRequested,
+            name: .pluginDeeplinkOpened,
             object: nil,
             userInfo: [
                 "manifestID": manifestID,
-                "url": mediaURL.absoluteString,
+                "deeplinkURL": callbackURL.absoluteString,
             ]
         )
         logger.info("deep link plugin callback queued: manifestID=\(manifestID)")

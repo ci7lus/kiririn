@@ -5,7 +5,7 @@ extension Notification.Name {
     static let requestOpenFile = Notification.Name("requestOpenFile")
     static let requestOpenPlayable = Notification.Name("requestOpenPlayable")
     static let requestOpenPluginWindow = Notification.Name("requestOpenPluginWindow")
-    static let pluginOpenURLRequested = Notification.Name("pluginOpenURLRequested")
+    static let pluginDeeplinkOpened = Notification.Name("pluginDeeplinkOpened")
 }
 
 #if canImport(UIKit) && !os(macOS)

@@ -10,8 +10,8 @@
  * - `options_ui.page`
  *
  * Deep Link:
- * - `kiririn://plugins/{browser_specific_settings.kiririn.id}?url={encoded url}`
- *   `onOpenURL({ url })` に配送されます。
+ * - `kiririn://plugins/{browser_specific_settings.kiririn.id}`
+ *   Deep Link URL 全体が `onDeeplinkOpened({ url })` に配送されます。
  */
 
 export interface Genre {
@@ -81,7 +81,7 @@ export interface KiririnRuntimeInfo {
     playerID: string | null;
 }
 
-export interface OpenURLPayload {
+export interface DeeplinkOpenedPayload {
     url: string;
 }
 
@@ -117,7 +117,7 @@ export interface KiririnPluginBridge {
 
     getRuntimeInfo(): KiririnRuntimeInfo;
 
-    onOpenURL(callback: (payload: OpenURLPayload) => void): void;
+    onDeeplinkOpened(callback: (payload: DeeplinkOpenedPayload) => void): void;
     onCaptureTaken(callback: (payload: CaptureTakenPayload) => void): void;
 
     play(playerID?: string): void;
