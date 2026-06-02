@@ -13,30 +13,39 @@
         let onOpenWindow: (UUID) -> Void
 
         var body: some View {
-            List(selection: $selectedID) {
-                ForEach(pluginStore.plugins) { plugin in
-                    PluginRowView(
-                        plugin: plugin,
-                        onToggle: { enabled in
-                            onToggleEnabled(plugin, enabled)
-                        },
-                        onEdit: {
-                            editingPlugin = plugin
+            if pluginStore.plugins.isEmpty {
+                ContentUnavailableView(
+                    "プラグインなし",
+                    systemImage: "puzzlepiece.extension",
+                    description: Text("プラグインがインストールされていません")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(selection: $selectedID) {
+                    ForEach(pluginStore.plugins) { plugin in
+                        PluginRowView(
+                            plugin: plugin,
+                            onToggle: { enabled in
+                                onToggleEnabled(plugin, enabled)
+                            },
+                            onEdit: {
+                                editingPlugin = plugin
+                            }
+                        )
+                        .tag(plugin.id)
+                        .contextMenu {
+                            contextMenuItems(for: plugin)
                         }
-                    )
-                    .tag(plugin.id)
-                    .contextMenu {
-                        contextMenuItems(for: plugin)
+                    }
+                    .onMove { from, to in
+                        pluginStore.movePlugins(from: from, to: to)
+                        appModel.reloadPluginsInAllPlayerStates()
                     }
                 }
-                .onMove { from, to in
-                    pluginStore.movePlugins(from: from, to: to)
-                    appModel.reloadPluginsInAllPlayerStates()
-                }
-            }
-            .onChange(of: pluginStore.plugins.map(\.id)) { _, ids in
-                if let selectedID, !ids.contains(selectedID) {
-                    self.selectedID = nil
+                .onChange(of: pluginStore.plugins.map(\.id)) { _, ids in
+                    if let selectedID, !ids.contains(selectedID) {
+                        self.selectedID = nil
+                    }
                 }
             }
         }
