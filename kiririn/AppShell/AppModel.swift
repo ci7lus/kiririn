@@ -225,8 +225,7 @@ final class AppModel {
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
         do {
-            let data = try Data(contentsOf: url)
-            let preview = try pluginStore.previewPlugin(packageData: data, sourceType: .kppx)
+            let preview = try pluginStore.previewPlugin(packageURL: url, sourceType: .kppx)
             pendingPluginInstallPreviews.append(preview)
         } catch {
             logger.warning("queuePluginInstall failed: \(error.localizedDescription)")

@@ -108,8 +108,8 @@ final class PluginPackageSignatureVerifier {
         self.now = now
     }
 
-    func verify(packageData: Data) throws -> PluginPackageAuthentication {
-        guard let container = try APKSignatureContainer.parse(from: packageData) else {
+    func verify(packageURL: URL) throws -> PluginPackageAuthentication {
+        guard let container = try APKSignatureContainer.parse(from: packageURL) else {
             return .unsigned
         }
 
@@ -214,7 +214,8 @@ final class PluginPackageSignatureVerifier {
         } else {
             let computed = try computeContentDigest(
                 algorithm: signatureRecord.algorithm.contentDigestAlgorithm,
-                packageData: container.packageData,
+                packageURL: container.packageURL,
+                fileSize: container.fileSize,
                 signingBlockOffset: container.signingBlockOffset,
                 centralDirectoryOffset: container.centralDirectoryOffset,
                 eocdOffset: container.eocdOffset
@@ -671,16 +672,22 @@ private struct APKSignatureContainer {
     static let v31BlockID: UInt32 = 0x1b93_ad61
     static let magic = Data("APK Sig Block 42".utf8)
 
-    let packageData: Data
+    let fileSize: Int
+    let packageURL: URL
     let scheme: PluginPackageSignatureScheme
     let schemeBlockData: Data
     let signingBlockOffset: Int
     let centralDirectoryOffset: Int
     let eocdOffset: Int
 
-    static func parse(from data: Data) throws -> APKSignatureContainer? {
-        let eocdOffset = try ZIPParser.findEndOfCentralDirectory(in: data)
-        let eocd = data.subdata(in: eocdOffset..<data.count)
+    static func parse(from url: URL) throws -> APKSignatureContainer? {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let fileSize = Int(try handle.seekToEnd())
+        let reader = FileRandomAccessReader(handle: handle, fileSize: fileSize)
+
+        let eocdOffset = try ZIPParser.findEndOfCentralDirectory(using: reader)
+        let eocd = try reader.readData(at: UInt64(eocdOffset), count: fileSize - eocdOffset)
         let centralDirectoryOffset = Int(try ZIPParser.readUInt32LE(in: eocd, at: 16))
         let centralDirectorySize = Int(try ZIPParser.readUInt32LE(in: eocd, at: 12))
         guard centralDirectoryOffset + centralDirectorySize == eocdOffset else {
@@ -693,22 +700,26 @@ private struct APKSignatureContainer {
         }
 
         let footerOffset = centralDirectoryOffset - 24
-        let magicRange = (footerOffset + 8)..<centralDirectoryOffset
-        guard magicRange.lowerBound >= 0, data.subdata(in: magicRange) == magic else {
+        let magicData = try reader.readData(at: UInt64(footerOffset + 8), count: 16)
+        guard magicData == magic else {
             return nil
         }
 
-        let blockSize = Int(try ZIPParser.readUInt64LE(in: data, at: footerOffset))
+        let blockSize = Int(try reader.readUInt64LE(at: UInt64(footerOffset)))
         let blockOffset = centralDirectoryOffset - (blockSize + 8)
         guard blockOffset >= 0 else {
             throw PluginPackageSignatureError.invalidArchive("APK Signing Block の位置が不正です")
         }
-        let headerSize = Int(try ZIPParser.readUInt64LE(in: data, at: blockOffset))
+        let headerSize = Int(try reader.readUInt64LE(at: UInt64(blockOffset)))
         guard headerSize == blockSize else {
             throw PluginPackageSignatureError.invalidArchive("APK Signing Block のサイズが一致しません")
         }
 
-        var pairsReader = ByteReader(data: data.subdata(in: (blockOffset + 8)..<footerOffset))
+        let pairsData = try reader.readData(
+            at: UInt64(blockOffset + 8),
+            count: footerOffset - (blockOffset + 8)
+        )
+        var pairsReader = ByteReader(data: pairsData)
         var pairs: [UInt32: Data] = [:]
         while !pairsReader.isAtEnd {
             let pairLength = Int(try pairsReader.readUInt64())
@@ -720,35 +731,27 @@ private struct APKSignatureContainer {
             pairs[identifier] = try pairReader.readToEnd()
         }
 
-        if let blockData = pairs[v31BlockID] {
-            return APKSignatureContainer(
-                packageData: data,
-                scheme: .v31,
+        let containerFor = {
+            (scheme: PluginPackageSignatureScheme, blockData: Data) -> APKSignatureContainer in
+            APKSignatureContainer(
+                fileSize: fileSize,
+                packageURL: url,
+                scheme: scheme,
                 schemeBlockData: blockData,
                 signingBlockOffset: blockOffset,
                 centralDirectoryOffset: centralDirectoryOffset,
                 eocdOffset: eocdOffset
             )
+        }
+
+        if let blockData = pairs[v31BlockID] {
+            return containerFor(.v31, blockData)
         }
         if let blockData = pairs[v3BlockID] {
-            return APKSignatureContainer(
-                packageData: data,
-                scheme: .v3,
-                schemeBlockData: blockData,
-                signingBlockOffset: blockOffset,
-                centralDirectoryOffset: centralDirectoryOffset,
-                eocdOffset: eocdOffset
-            )
+            return containerFor(.v3, blockData)
         }
         if let blockData = pairs[v2BlockID] {
-            return APKSignatureContainer(
-                packageData: data,
-                scheme: .v2,
-                schemeBlockData: blockData,
-                signingBlockOffset: blockOffset,
-                centralDirectoryOffset: centralDirectoryOffset,
-                eocdOffset: eocdOffset
-            )
+            return containerFor(.v2, blockData)
         }
 
         if !pairs.isEmpty {
@@ -758,25 +761,49 @@ private struct APKSignatureContainer {
     }
 }
 
+private struct FileRandomAccessReader {
+    let handle: FileHandle
+    let fileSize: Int
+
+    func readData(at offset: UInt64, count: Int) throws -> Data {
+        guard offset + UInt64(count) <= UInt64(fileSize) else {
+            throw PluginPackageSignatureError.invalidArchive("ZIP 読み取り範囲が不正です")
+        }
+        try handle.seek(toOffset: offset)
+        guard let data = try handle.read(upToCount: count), data.count == count else {
+            throw PluginPackageSignatureError.invalidArchive("ZIP 読み取り範囲が不正です")
+        }
+        return data
+    }
+
+    func readUInt64LE(at offset: UInt64) throws -> UInt64 {
+        let data = try readData(at: offset, count: 8)
+        return data.withUnsafeBytes { UInt64(littleEndian: $0.load(as: UInt64.self)) }
+    }
+}
+
 private struct ZIPParser {
     static let eocdSignature: UInt32 = 0x0605_4b50
     static let maxCommentLength = 65_535
 
-    static func findEndOfCentralDirectory(in data: Data) throws -> Int {
-        guard data.count >= 22 else {
+    static func findEndOfCentralDirectory(using reader: FileRandomAccessReader) throws -> Int {
+        guard reader.fileSize >= 22 else {
             throw PluginPackageSignatureError.invalidArchive("ZIP EOCD が見つかりません")
         }
 
-        let lowerBound = max(0, data.count - (22 + maxCommentLength))
-        let upperBound = data.count - 22
-        for offset in stride(from: upperBound, through: lowerBound, by: -1) {
-            if try readUInt32LE(in: data, at: offset) != eocdSignature {
+        let lowerBound = max(0, reader.fileSize - (22 + maxCommentLength))
+        let bufferSize = reader.fileSize - lowerBound
+        let buffer = try reader.readData(at: UInt64(lowerBound), count: bufferSize)
+
+        let upperBound = buffer.count - 22
+        for offset in stride(from: upperBound, through: 0, by: -1) {
+            if try readUInt32LE(in: buffer, at: offset) != eocdSignature {
                 continue
             }
 
-            let commentLength = Int(try readUInt16LE(in: data, at: offset + 20))
-            if offset + 22 + commentLength == data.count {
-                return offset
+            let commentLength = Int(try readUInt16LE(in: buffer, at: offset + 20))
+            if lowerBound + offset + 22 + commentLength == reader.fileSize {
+                return lowerBound + offset
             }
         }
 

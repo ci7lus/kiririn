@@ -442,42 +442,69 @@ private func parseCRLDistributionPoints(der: Data) throws -> [URL] {
 
 func computeContentDigest(
     algorithm: ContentDigestAlgorithm,
-    packageData: Data,
+    packageURL: URL,
+    fileSize: Int,
     signingBlockOffset: Int,
     centralDirectoryOffset: Int,
     eocdOffset: Int
 ) throws -> Data {
+    let handle = try FileHandle(forReadingFrom: packageURL)
+    defer { try? handle.close() }
     let chunkSize = 1 << 20
-    let section1 = packageData.subdata(in: 0..<signingBlockOffset)
-    let section3 = packageData.subdata(in: centralDirectoryOffset..<eocdOffset)
-    var section4 = packageData.subdata(in: eocdOffset..<packageData.count)
-    let offsetData = withUnsafeBytes(of: UInt32(signingBlockOffset).littleEndian) { Data($0) }
-    section4.replaceSubrange(16..<20, with: offsetData)
 
-    let sections = [section1, section3, section4]
-    let chunkCount = sections.reduce(0) { partialResult, section in
-        guard !section.isEmpty else {
-            return partialResult
+    func hashChunk(_ chunk: Data) -> Data {
+        var chunkInput = Data([0xa5])
+        chunkInput.append(littleEndianData(UInt32(chunk.count)))
+        chunkInput.append(chunk)
+        return algorithm.hash(chunkInput)
+    }
+
+    var hashes: [Data] = []
+
+    func readAndHashSection(seekToOffset: Int, totalSize: Int) throws {
+        guard totalSize > 0 else { return }
+        try handle.seek(toOffset: UInt64(seekToOffset))
+        var remaining = totalSize
+        while remaining > 0 {
+            let length = min(chunkSize, remaining)
+            guard let chunk = try handle.read(upToCount: length), chunk.count == length else {
+                throw PluginPackageSignatureError.invalidArchive("パッケージデータの読み取りに失敗しました")
+            }
+            hashes.append(hashChunk(chunk))
+            remaining -= length
         }
-        return partialResult + Int(ceil(Double(section.count) / Double(chunkSize)))
+    }
+
+    try readAndHashSection(seekToOffset: 0, totalSize: signingBlockOffset)
+
+    try readAndHashSection(
+        seekToOffset: centralDirectoryOffset,
+        totalSize: eocdOffset - centralDirectoryOffset
+    )
+
+    let section4Size = fileSize - eocdOffset
+    if section4Size > 0 {
+        try handle.seek(toOffset: UInt64(eocdOffset))
+        guard var section4Data = try handle.read(upToCount: section4Size),
+            section4Data.count == section4Size
+        else {
+            throw PluginPackageSignatureError.invalidArchive("パッケージデータの読み取りに失敗しました")
+        }
+        let offsetData = withUnsafeBytes(of: UInt32(signingBlockOffset).littleEndian) { Data($0) }
+        section4Data.replaceSubrange(16..<20, with: offsetData)
+
+        var offset = 0
+        while offset < section4Size {
+            let length = min(chunkSize, section4Size - offset)
+            hashes.append(hashChunk(section4Data.subdata(in: offset..<(offset + length))))
+            offset += length
+        }
     }
 
     var concatenated = Data([0x5a])
-    concatenated.append(littleEndianData(UInt32(chunkCount)))
-
-    for section in sections {
-        guard !section.isEmpty else { continue }
-
-        var offset = 0
-        while offset < section.count {
-            let length = min(chunkSize, section.count - offset)
-            let chunk = section.subdata(in: offset..<(offset + length))
-            var chunkInput = Data([0xa5])
-            chunkInput.append(littleEndianData(UInt32(length)))
-            chunkInput.append(chunk)
-            concatenated.append(algorithm.hash(chunkInput))
-            offset += length
-        }
+    concatenated.append(littleEndianData(UInt32(hashes.count)))
+    for h in hashes {
+        concatenated.append(h)
     }
 
     return algorithm.hash(concatenated)

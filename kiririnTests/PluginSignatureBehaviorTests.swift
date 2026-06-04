@@ -7,8 +7,10 @@ struct PluginSignatureBehaviorTests {
 
     @Test func packageSignatureVerifierTreatsUnsignedArchiveAsUnsigned() throws {
         let verifier = PluginPackageSignatureVerifier(trustedChainPEMData: nil)
+        let tempURL = try tempFileForTest(data: emptyZIPData())
+        defer { try? FileManager.default.removeItem(at: tempURL) }
 
-        let authentication = try verifier.verify(packageData: emptyZIPData())
+        let authentication = try verifier.verify(packageURL: tempURL)
 
         #expect(authentication.state == .unsigned)
         #expect(!authentication.isSigned)
@@ -28,8 +30,10 @@ struct PluginSignatureBehaviorTests {
             manifestID: "com.example.unsigned",
             updateURL: "https://example.com/plugins/sample/update.json"
         )
+        let tempURL = try tempFileForTest(data: packageData)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
 
-        let preview = try store.previewPlugin(packageData: packageData, sourceType: .kppx)
+        let preview = try store.previewPlugin(packageURL: tempURL, sourceType: .kppx)
         let plugin = try store.installPlugin(from: preview)
 
         #expect(preview.packageAuthentication.state == .unsigned)
@@ -378,6 +382,13 @@ private func littleEndian(_ value: UInt16) -> Data {
 
 private func littleEndian(_ value: UInt32) -> Data {
     withUnsafeBytes(of: value.littleEndian) { Data($0) }
+}
+
+private func tempFileForTest(data: Data, suffix: String = "kppx") throws -> URL {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "test_\(UUID().uuidString).\(suffix)")
+    try data.write(to: url)
+    return url
 }
 
 private func crc32(_ data: Data) -> UInt32 {

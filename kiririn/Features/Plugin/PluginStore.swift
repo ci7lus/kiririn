@@ -50,7 +50,7 @@ struct ExtensionPluginManifest: Equatable {
 
 struct PluginInstallPreview: Identifiable {
     fileprivate enum Payload {
-        case package(archiveData: Data)
+        case package(archiveURL: URL)
         case localFolder(url: URL, bookmarkData: Data?)
     }
 
@@ -73,7 +73,7 @@ struct PluginInstallPreview: Identifiable {
             packageAuthentication: PluginPackageAuthentication,
             updateInfoURL: URL? = nil,
             installWarnings: [String] = [],
-            archiveData: Data = Data()
+            archiveURL: URL = URL(fileURLWithPath: "/dev/null")
         ) -> PluginInstallPreview {
             PluginInstallPreview(
                 sourceType: sourceType,
@@ -81,7 +81,7 @@ struct PluginInstallPreview: Identifiable {
                 packageAuthentication: packageAuthentication,
                 updateInfoURL: updateInfoURL,
                 installWarnings: installWarnings,
-                payload: .package(archiveData: archiveData)
+                payload: .package(archiveURL: archiveURL)
             )
         }
     }
@@ -408,6 +408,7 @@ class PluginStore {
         }
 
         self.plugins = initialPlugins
+        cleanupOrphanedFiles()
         refreshPluginsFromFiles()
         enforceDeveloperModeRestrictionsIfNeeded()
         syncLocalManifestWatchers()
@@ -571,6 +572,17 @@ class PluginStore {
         droppedPluginAlertMessage = nil
     }
 
+    private func stagePackageCopyIfNeeded(from sourceURL: URL) throws -> URL {
+        if sourceURL.path.hasPrefix(pluginDirectoryURL.path) {
+            return sourceURL
+        }
+        try ensurePluginDirectoryExists()
+        let stagingName = "staging_\(UUID().uuidString).kppx"
+        let stagingURL = pluginDirectoryURL.appending(path: stagingName)
+        try fileManager.copyItem(at: sourceURL, to: stagingURL)
+        return stagingURL
+    }
+
     private func markPluginBlocked(_ plugin: PluginDefinition) -> PluginDefinition {
         var updated = plugin
         updated.isBlocked = true
@@ -613,13 +625,13 @@ class PluginStore {
         var updated = plugin
 
         switch preview.payload {
-        case .package(let archiveData):
+        case .package(let archiveURL):
             guard plugin.sourceType != .localFolder else {
                 throw PluginManifestValidationError(messages: [
                     "保存済みのローカルフォルダを読み込めませんでした"
                 ])
             }
-            updated.resourceHash = Self.resourceHash(forArchiveData: archiveData)
+            updated.resourceHash = try Self.resourceHash(forArchiveURL: archiveURL)
         case .localFolder(let url, let bookmarkData):
             guard plugin.sourceType == .localFolder else {
                 throw PluginManifestValidationError(messages: [
@@ -826,6 +838,34 @@ class PluginStore {
 
     private func ensurePluginDirectoryExists() throws {
         try fileManager.createDirectory(at: pluginDirectoryURL, withIntermediateDirectories: true)
+        var resourceValues = URLResourceValues()
+        resourceValues.isExcludedFromBackup = true
+        var url = pluginDirectoryURL
+        try? url.setResourceValues(resourceValues)
+    }
+
+    private func cleanupOrphanedFiles() {
+        let knownBaseNames = Set(
+            plugins.compactMap { plugin -> String? in
+                guard plugin.sourceType != .localFolder,
+                    !plugin.resourceBasePath.isEmpty
+                else { return nil }
+                return plugin.resourceBasePath
+            }
+        )
+
+        guard
+            let files = try? fileManager.contentsOfDirectory(
+                at: pluginDirectoryURL,
+                includingPropertiesForKeys: nil
+            )
+        else {
+            return
+        }
+
+        for fileURL in files where !knownBaseNames.contains(fileURL.lastPathComponent) {
+            try? fileManager.removeItem(at: fileURL)
+        }
     }
 
     private func removePluginResourceIfNeeded(_ plugin: PluginDefinition) {
@@ -876,35 +916,45 @@ class PluginStore {
     }
 
     func previewPlugin(
-        packageData: Data,
+        packageURL: URL,
         sourceType: PluginSourceType
     ) throws -> PluginInstallPreview {
-        let package = try PluginDecoder.decode(data: packageData)
-        let packageAuthentication = try packageSignatureVerifier.verify(
-            packageData: package.archiveData
-        )
-        try validatePackageSignatureRequirement(
-            packageAuthentication,
-            sourceType: sourceType
-        )
-        try validateDeveloperModeRequirement(
-            packageAuthentication,
-            sourceType: sourceType,
-            actionLabel: "追加"
-        )
-        let manifest = try Self.parseExtensionManifest(
-            inArchive: package
-        )
-        let installWarnings = try validateManifestRuntimeCompatibility(manifest)
+        let workingURL = try stagePackageCopyIfNeeded(from: packageURL)
+        let isStaged = (workingURL != packageURL)
 
-        return PluginInstallPreview(
-            sourceType: sourceType,
-            manifest: manifest,
-            packageAuthentication: packageAuthentication,
-            updateInfoURL: nil,
-            installWarnings: installWarnings,
-            payload: .package(archiveData: package.archiveData)
-        )
+        do {
+            let package = try PluginDecoder.decode(url: workingURL)
+            let packageAuthentication = try packageSignatureVerifier.verify(
+                packageURL: workingURL
+            )
+            try validatePackageSignatureRequirement(
+                packageAuthentication,
+                sourceType: sourceType
+            )
+            try validateDeveloperModeRequirement(
+                packageAuthentication,
+                sourceType: sourceType,
+                actionLabel: "追加"
+            )
+            let manifest = try Self.parseExtensionManifest(
+                inArchive: package
+            )
+            let installWarnings = try validateManifestRuntimeCompatibility(manifest)
+
+            return PluginInstallPreview(
+                sourceType: sourceType,
+                manifest: manifest,
+                packageAuthentication: packageAuthentication,
+                updateInfoURL: nil,
+                installWarnings: installWarnings,
+                payload: .package(archiveURL: workingURL)
+            )
+        } catch {
+            if isStaged {
+                try? fileManager.removeItem(at: workingURL)
+            }
+            throw error
+        }
     }
 
     func previewPlugin(localFolderURL: URL, bookmarkData: Data?) throws -> PluginInstallPreview {
@@ -934,16 +984,19 @@ class PluginStore {
             throw PluginManifestValidationError(messages: ["URLはhttp(s)である必要があります"])
         }
 
-        let data = try await fetchDataIgnoringCache(from: url)
-        return try previewPlugin(packageData: data, sourceType: .kppx)
+        let tempURL = try await downloadPackage(from: url)
+        defer {
+            try? fileManager.removeItem(at: tempURL)
+        }
+        return try previewPlugin(packageURL: tempURL, sourceType: .kppx)
     }
 
     @discardableResult
     func installPlugin(from preview: PluginInstallPreview) throws -> PluginDefinition {
         switch preview.payload {
-        case .package(let archiveData):
+        case .package(let archiveURL):
             let plugin = try installPluginPackage(
-                archiveData: archiveData,
+                archiveURL: archiveURL,
                 manifest: preview.manifest,
                 sourceType: preview.sourceType,
                 packageAuthentication: preview.packageAuthentication
@@ -976,10 +1029,10 @@ class PluginStore {
     }
 
     func addPlugin(
-        packageData: Data,
+        packageURL: URL,
         sourceType: PluginSourceType
     ) throws {
-        let preview = try previewPlugin(packageData: packageData, sourceType: sourceType)
+        let preview = try previewPlugin(packageURL: packageURL, sourceType: sourceType)
         try installPlugin(from: preview)
     }
 
@@ -995,10 +1048,10 @@ class PluginStore {
 
     func overwritePlugin(
         _ previous: PluginDefinition,
-        withPackageData packageData: Data,
+        withPackageURL packageURL: URL,
         sourceType: PluginSourceType
     ) throws {
-        let preview = try previewPlugin(packageData: packageData, sourceType: sourceType)
+        let preview = try previewPlugin(packageURL: packageURL, sourceType: sourceType)
         _ = try updateRouting(replacing: previous, with: preview)
         _ = try overwritePlugin(previous, with: preview)
     }
@@ -1014,9 +1067,9 @@ class PluginStore {
         }
 
         switch preview.payload {
-        case .package(let archiveData):
+        case .package(let archiveURL):
             let plugin = try installPluginPackage(
-                archiveData: archiveData,
+                archiveURL: archiveURL,
                 manifest: preview.manifest,
                 sourceType: preview.sourceType,
                 packageAuthentication: preview.packageAuthentication,
@@ -1050,14 +1103,20 @@ class PluginStore {
             ])
         }
         let updateHash = try parseUpdateHash(entry.updateHash)
-        let data = try await fetchDataIgnoringCache(from: packageURL)
-        if let updateHash, !updateHash.matches(data: data) {
-            throw PluginManifestValidationError(messages: [
-                "アップデート検証用ハッシュがダウンロードしたkppxと一致しません"
-            ])
+        let tempURL = try await downloadPackage(from: packageURL)
+        defer {
+            try? fileManager.removeItem(at: tempURL)
+        }
+        if let updateHash {
+            let fileData = try Data(contentsOf: tempURL)
+            guard updateHash.matches(data: fileData) else {
+                throw PluginManifestValidationError(messages: [
+                    "アップデート検証用ハッシュがダウンロードしたkppxと一致しません"
+                ])
+            }
         }
 
-        let basePreview = try previewPlugin(packageData: data, sourceType: .kppx)
+        let basePreview = try previewPlugin(packageURL: tempURL, sourceType: .kppx)
         let preview = PluginInstallPreview(
             sourceType: basePreview.sourceType,
             manifest: basePreview.manifest,
@@ -1234,7 +1293,7 @@ class PluginStore {
     }
 
     private func installPluginPackage(
-        archiveData: Data,
+        archiveURL: URL,
         manifest: ExtensionPluginManifest,
         sourceType: PluginSourceType,
         packageAuthentication: PluginPackageAuthentication,
@@ -1252,7 +1311,13 @@ class PluginStore {
         {
             removePluginResourceIfNeeded(previous)
         }
-        try archiveData.write(to: installedArchiveURL, options: .atomic)
+
+        if archiveURL != installedArchiveURL {
+            if fileManager.fileExists(atPath: installedArchiveURL.path) {
+                try fileManager.removeItem(at: installedArchiveURL)
+            }
+            try fileManager.moveItem(at: archiveURL, to: installedArchiveURL)
+        }
 
         let plugin = PluginDefinition(
             id: previous?.id ?? UUID(),
@@ -1261,7 +1326,7 @@ class PluginStore {
             sourceType: sourceType,
             resourceBasePath: archiveFileName,
             resourceBookmark: nil,
-            resourceHash: Self.resourceHash(forArchiveData: archiveData),
+            resourceHash: try Self.resourceHash(forArchiveURL: installedArchiveURL),
             isBlocked: false,
             manifestUpdateURL: manifest.manifestUpdateURL,
             manifestVersion: manifest.version,
@@ -1366,6 +1431,32 @@ class PluginStore {
         }
 
         return scheme == "https" || Self.trimmedNonEmpty(entry.updateHash) != nil
+    }
+
+    func downloadPackage(
+        from url: URL,
+        progressHandler: @escaping (Int64, Int64) -> Void = { _, _ in }
+    ) async throws -> URL {
+        let delegate = PackageDownloadDelegate(progressHandler: progressHandler)
+        let session = URLSession(
+            configuration: .default, delegate: delegate, delegateQueue: .main)
+        defer { session.invalidateAndCancel() }
+
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue("no-cache", forHTTPHeaderField: "Pragma")
+
+        let task = session.downloadTask(with: request)
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                delegate.continuation = continuation
+                task.resume()
+            }
+        } onCancel: {
+            task.cancel()
+            session.invalidateAndCancel()
+        }
     }
 
     private func fetchDataIgnoringCache(from url: URL) async throws -> Data {
@@ -1492,8 +1583,8 @@ class PluginStore {
                 bookmarkData: plugin.resourceBookmark
             )
         case .kppx:
-            let archiveData = try archiveData(for: plugin)
-            preview = try previewPlugin(packageData: archiveData, sourceType: plugin.sourceType)
+            let resourceURL = try archiveURL(for: plugin)
+            preview = try previewPlugin(packageURL: resourceURL, sourceType: plugin.sourceType)
         }
         guard preview.manifest.manifestID == plugin.manifestID else {
             throw PluginManifestValidationError(messages: [
@@ -1605,29 +1696,19 @@ class PluginStore {
         }
     }
 
-    private func archiveData(for plugin: PluginDefinition) throws -> Data {
-        let resourceURL = try resourceBaseURL(for: plugin)
-        do {
-            return try Data(contentsOf: resourceURL)
-        } catch {
-            throw PluginManifestValidationError(messages: [
-                "プラグインパッケージの読み込みに失敗しました: \(error.localizedDescription)"
-            ])
-        }
+    private func archiveURL(for plugin: PluginDefinition) throws -> URL {
+        try resourceBaseURL(for: plugin)
     }
 
     private static func resourceHash(forArchiveURL archiveURL: URL) throws -> String {
         do {
-            return resourceHash(forArchiveData: try Data(contentsOf: archiveURL))
+            let data = try Data(contentsOf: archiveURL)
+            return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         } catch {
             throw PluginManifestValidationError(messages: [
                 "プラグインパッケージの読み込みに失敗しました: \(error.localizedDescription)"
             ])
         }
-    }
-
-    private static func resourceHash(forArchiveData archiveData: Data) -> String {
-        SHA256.hash(data: archiveData).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func parseExtensionManifest(
@@ -1646,7 +1727,7 @@ class PluginStore {
         }
 
         do {
-            let package = try PluginDecoder.decode(data: try Data(contentsOf: resourceURL))
+            let package = try PluginDecoder.decode(url: resourceURL)
             return try parseExtensionManifest(
                 inArchive: package
             )
@@ -1903,4 +1984,61 @@ class PluginStore {
         return trimmed
     }
 
+}
+
+private final class PackageDownloadDelegate: NSObject, URLSessionDownloadDelegate {
+    let progressHandler: (Int64, Int64) -> Void
+    var continuation: CheckedContinuation<URL, Error>?
+    private var savedError: Error?
+    private var downloadedFileURL: URL?
+
+    init(progressHandler: @escaping (Int64, Int64) -> Void) {
+        self.progressHandler = progressHandler
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        progressHandler(totalBytesWritten, totalBytesExpectedToWrite)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        do {
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("plugin_download_\(UUID().uuidString).kppx")
+            try FileManager.default.moveItem(at: location, to: tempURL)
+            downloadedFileURL = tempURL
+        } catch {
+            savedError = error
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        guard let c = continuation else { return }
+        continuation = nil
+        if let error = error ?? savedError {
+            c.resume(throwing: error)
+        } else if let url = downloadedFileURL {
+            c.resume(returning: url)
+        } else {
+            downloadedFileURL.map { try? FileManager.default.removeItem(at: $0) }
+            c.resume(
+                throwing: PluginManifestValidationError(
+                    messages: ["ダウンロードに失敗しました"]
+                )
+            )
+        }
+    }
 }

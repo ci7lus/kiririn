@@ -649,9 +649,8 @@ private struct PluginDetailView: View {
                 }
             }
             do {
-                let data = try Data(contentsOf: url)
                 let preview = try pluginStore.previewPlugin(
-                    packageData: data, sourceType: .kppx)
+                    packageURL: url, sourceType: .kppx)
                 activeInstallConfirmation = try PluginInstallConfirmationRequest(
                     preview: preview,
                     routing: pluginStore.updateRouting(replacing: plugin, with: preview)

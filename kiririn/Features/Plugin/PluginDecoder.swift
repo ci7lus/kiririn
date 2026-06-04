@@ -2,13 +2,13 @@ import Foundation
 import ZIPFoundation
 
 struct PluginPackage {
-    let archiveData: Data
+    let packageURL: URL
 
     private let archive: Archive
 
-    init(data: Data) throws {
-        self.archiveData = data
-        self.archive = try Self.archive(from: data)
+    init(url: URL) throws {
+        self.packageURL = url
+        self.archive = try Self.archive(from: url)
         try Self.validateEntries(in: archive)
     }
 
@@ -33,9 +33,9 @@ struct PluginPackage {
         return output
     }
 
-    private static func archive(from data: Data) throws -> Archive {
+    private static func archive(from url: URL) throws -> Archive {
         do {
-            return try Archive(data: data, accessMode: .read)
+            return try Archive(url: url, accessMode: .read)
         } catch {
             throw PluginDecoderError.invalidArchive
         }
@@ -71,7 +71,7 @@ enum PluginDecoderError: LocalizedError {
 }
 
 struct PluginDecoder {
-    static func decode(data: Data) throws -> PluginPackage {
-        try PluginPackage(data: data)
+    static func decode(url: URL) throws -> PluginPackage {
+        try PluginPackage(url: url)
     }
 }

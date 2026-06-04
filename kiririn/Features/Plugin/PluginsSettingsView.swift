@@ -80,15 +80,19 @@ struct PluginsSettingsView: View {
     @State var playerState: PlayerState
 
     @State private var showingPackageImporter = false
-    @State private var showingRemoteURLSheet = false
+    @State private var showingURLInput = false
     @State private var showingPluginSettingsSheet = false
     @State private var importErrorMessage: String?
     @State private var selectedPluginID: UUID?
     @State private var editingPlugin: PluginDefinition?
     @State private var showingDeleteConfirmation = false
     @State private var pluginIDsToDelete: [UUID] = []
-    @State private var remoteURLString = ""
-    @State private var isImportingFromRemoteURL = false
+    @State private var urlInputText = ""
+    @State private var downloadProgress = 0.0
+    @State private var downloadedBytes: Int64 = 0
+    @State private var totalBytes: Int64 = -1
+    @State private var downloadError: String?
+    @State private var downloadTask: Task<Void, Never>?
     @State private var pendingInstallPreviews: [PluginInstallPreview] = []
     @State private var activeInstallConfirmation: PluginInstallConfirmationRequest?
     @State private var deferredImportErrorMessages: [String] = []
@@ -149,19 +153,13 @@ struct PluginsSettingsView: View {
                 }
             )
         }
-        .sheet(isPresented: $showingRemoteURLSheet) {
-            RemotePluginImportSheet(
-                urlString: $remoteURLString,
-                isImporting: isImportingFromRemoteURL,
-                onCancel: {
-                    remoteURLString = ""
-                    showingRemoteURLSheet = false
-                },
-                onImport: {
-                    Task {
-                        await importPluginFromRemoteURL()
-                    }
-                }
+        .sheet(isPresented: downloadSheetBinding) {
+            PluginDownloadProgressSheet(
+                progress: downloadProgress,
+                downloadedBytes: downloadedBytes,
+                totalBytes: totalBytes,
+                error: downloadError,
+                onCancel: { cancelDownload() }
             )
         }
         .sheet(isPresented: $showingPluginSettingsSheet) {
@@ -194,6 +192,21 @@ struct PluginsSettingsView: View {
                 importPackages(from: result)
             }
         #endif
+        .alert("URLから追加", isPresented: $showingURLInput) {
+            TextField("https://...", text: $urlInputText)
+                .autocorrectionDisabled()
+                #if !os(macOS)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    .textContentType(.URL)
+                #endif
+            Button("追加") {
+                startRemotePluginImport()
+            }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("kppxのURLを入力してください")
+        }
         .alert(
             "読み込みエラー",
             isPresented: Binding(
@@ -237,12 +250,12 @@ struct PluginsSettingsView: View {
             ToolbarItem(placement: .automatic) {
                 #if os(macOS)
                     Menu {
-                        Button("URLから追加") {
-                            showingRemoteURLSheet = true
+                        Button("kppxファイルから追加") {
+                            importPackagesFromOpenPanel()
                         }
 
-                        Button("kppxファイルを追加") {
-                            importPackagesFromOpenPanel()
+                        Button("URLから追加") {
+                            showingURLInput = true
                         }
 
                         if pluginStore.isDeveloperModeEnabled {
@@ -255,12 +268,12 @@ struct PluginsSettingsView: View {
                     }
                 #else
                     Menu {
-                        Button("URLから追加") {
-                            showingRemoteURLSheet = true
+                        Button("kppxファイルから追加") {
+                            showingPackageImporter = true
                         }
 
-                        Button("kppxファイルを追加") {
-                            showingPackageImporter = true
+                        Button("URLから追加") {
+                            showingURLInput = true
                         }
                     } label: {
                         Image(systemName: "plus")
@@ -490,9 +503,8 @@ struct PluginsSettingsView: View {
                     }
                 }
                 do {
-                    let data = try Data(contentsOf: url)
                     let preview = try pluginStore.previewPlugin(
-                        packageData: data,
+                        packageURL: url,
                         sourceType: .kppx
                     )
                     previews.append(preview)
@@ -572,25 +584,54 @@ struct PluginsSettingsView: View {
     #endif
 
     @MainActor
-    private func importPluginFromRemoteURL() async {
-        guard !isImportingFromRemoteURL else { return }
-        let trimmedURL = remoteURLString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmedURL), !trimmedURL.isEmpty else {
+    private func startRemotePluginImport() {
+        let trimmed = urlInputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let url = URL(string: trimmed) else {
             importErrorMessage = "有効なURLを入力してください"
             return
         }
 
-        isImportingFromRemoteURL = true
-        defer { isImportingFromRemoteURL = false }
+        urlInputText = ""
+        downloadProgress = 0
+        downloadedBytes = 0
+        totalBytes = -1
+        downloadError = nil
 
-        do {
-            let preview = try await pluginStore.previewPlugin(fromRemoteURL: url)
-            remoteURLString = ""
-            showingRemoteURLSheet = false
-            queueInstallPreviews([preview])
-        } catch {
-            importErrorMessage = error.localizedDescription
+        downloadTask = Task { @MainActor [url] in
+            do {
+                let tempURL = try await pluginStore.downloadPackage(from: url) {
+                    totalWritten, totalExpected in
+                    downloadedBytes = totalWritten
+                    totalBytes = totalExpected
+                    if totalExpected > 0 {
+                        downloadProgress = Double(totalWritten) / Double(totalExpected)
+                    }
+                }
+                try Task.checkCancellation()
+                let preview = try pluginStore.previewPlugin(
+                    packageURL: tempURL, sourceType: .kppx)
+                try? FileManager.default.removeItem(at: tempURL)
+
+                downloadTask = nil
+                queueInstallPreviews([preview])
+            } catch is CancellationError {
+                downloadTask = nil
+            } catch {
+                downloadError = error.localizedDescription
+            }
         }
+    }
+
+    private func cancelDownload() {
+        downloadTask?.cancel()
+        downloadTask = nil
+    }
+
+    private var downloadSheetBinding: Binding<Bool> {
+        Binding(
+            get: { downloadTask != nil },
+            set: { if !$0 { cancelDownload() } }
+        )
     }
 
     private func syncPluginsToPlayerState() {
@@ -606,15 +647,6 @@ private struct PluginSettingsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                #if os(macOS)
-                    Section("保存先") {
-                        Button("プラグイン保存フォルダを開く") {
-                            NSWorkspace.shared.open(pluginStore.pluginDirectoryURL)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                #endif
-
                 Section("開発") {
                     Toggle(
                         "開発者モードを有効にする",
@@ -644,46 +676,75 @@ private struct PluginSettingsSheet: View {
     }
 }
 
-private struct RemotePluginImportSheet: View {
-    @Binding var urlString: String
-    let isImporting: Bool
+private struct PluginDownloadProgressSheet: View {
+    let progress: Double
+    let downloadedBytes: Int64
+    let totalBytes: Int64
+    let error: String?
     let onCancel: () -> Void
-    let onImport: () -> Void
 
     var body: some View {
         NavigationStack {
-            Form {
-                TextField("URL", text: $urlString)
-                    #if !os(macOS)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                        .textContentType(.URL)
-                    #endif
+            VStack(spacing: 12) {
+                if let error {
+                    Spacer()
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.orange)
+                    Text("プラグインの追加に失敗しました")
+                        .font(.headline)
+                    Text(error)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Spacer()
+                } else {
+                    Spacer()
+                    ProgressView(value: totalBytes > 0 ? progress : 0, total: 1.0) {
+                        Text("ダウンロード中")
+                    } currentValueLabel: {
+                        Text(progressLabel)
+                            .font(.subheadline.monospacedDigit())
+                    }
+                    .progressViewStyle(.linear)
+                    .padding(.horizontal, 40)
+
+                    Text(downloadSpeedLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
             }
-            .formStyle(.grouped)
-            .navigationTitle("kppxを追加")
+            .frame(minHeight: 200)
+            .navigationTitle("プラグインを追加")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("キャンセル") { onCancel() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        onImport()
-                    } label: {
-                        if isImporting {
-                            ProgressView()
-                        } else {
-                            Text("追加")
-                        }
+                    Button("キャンセル") {
+                        onCancel()
                     }
-                    .disabled(isImporting)
                 }
             }
         }
         #if os(macOS)
-            .frame(minWidth: 420, minHeight: 140)
+            .frame(minWidth: 400, minHeight: 220)
         #endif
+    }
+
+    private var progressLabel: String {
+        let written = ByteCountFormatter.string(
+            fromByteCount: downloadedBytes, countStyle: .file)
+        if totalBytes > 0 {
+            let total = ByteCountFormatter.string(
+                fromByteCount: totalBytes, countStyle: .file)
+            return "\(written) / \(total)"
+        }
+        return written
+    }
+
+    private var downloadSpeedLabel: String {
+        guard totalBytes > 0 else { return "" }
+        let percentage = Int(progress * 100)
+        return "\(percentage)% 完了"
     }
 }
 
