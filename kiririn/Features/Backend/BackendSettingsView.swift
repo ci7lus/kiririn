@@ -54,52 +54,53 @@ struct BackendSettingsView: View {
     }
 
     private var macosList: some View {
-        List(configStore.configurations, id: \.self.id, selection: $selectedBackendID) { config in
-            BackendRowView(
-                config: config,
-                state: manager.connectionStates[config.id],
-                isEnabled: configStore.isEnabled(config.id),
-                onToggle: { enabled in
-                    configStore.setEnabled(enabled, for: config.id)
-                    manager.connectionStates[config.id]?.isEnabled = enabled
-                    if enabled {
+        List(selection: $selectedBackendID) {
+            ForEach(configStore.configurations) { config in
+                BackendRowView(
+                    config: config,
+                    state: manager.connectionStates[config.id],
+                    isEnabled: configStore.isEnabled(config.id),
+                    onToggle: { enabled in
+                        configStore.setEnabled(enabled, for: config.id)
+                        manager.connectionStates[config.id]?.isEnabled = enabled
+                        if enabled {
+                            Task { await manager.connect(backendId: config.id) }
+                        } else {
+                            manager.connectionStates[config.id]?.status = .disconnected
+                            manager.backendAvailabilityDidChange()
+                        }
+                    },
+                    onReconnect: {
                         Task { await manager.connect(backendId: config.id) }
-                    } else {
-                        manager.connectionStates[config.id]?.status = .disconnected
-                        manager.backendAvailabilityDidChange()
+                    },
+                    onEdit: {
+                        editingConfig = config
                     }
-                },
-                onReconnect: {
-                    Task { await manager.connect(backendId: config.id) }
-                },
-                onEdit: {
-                    editingConfig = config
-                }
-            )
-            .tag(config.id)
-            .contextMenu {
+                )
+                .tag(config.id)
+            }
+            .onMove(perform: moveConfigs)
+        }
+        .contextMenu(forSelectionType: String.self) { selectedIDs in
+            if let firstID = selectedIDs.first,
+                let config = configStore.configurations.first(where: { $0.id == firstID })
+            {
                 Button("編集") {
                     editingConfig = config
                 }
 
                 Divider()
 
-                Button("上へ移動") {
-                    moveConfig(id: config.id, delta: -1)
-                }
-                .disabled(!canMove(id: config.id, delta: -1))
-
-                Button("下へ移動") {
-                    moveConfig(id: config.id, delta: 1)
-                }
-                .disabled(!canMove(id: config.id, delta: 1))
-
-                Divider()
-
                 Button("削除", role: .destructive) {
-                    backendIDsToDelete = [config.id]
+                    backendIDsToDelete = [firstID]
                     showingDeleteConfirmation = true
                 }
+            }
+        } primaryAction: { selectedIDs in
+            if let firstID = selectedIDs.first,
+                let config = configStore.configurations.first(where: { $0.id == firstID })
+            {
+                editingConfig = config
             }
         }
         .navigationTitle("バックエンド")
@@ -134,18 +135,6 @@ struct BackendSettingsView: View {
                         Button("編集") {
                             editingConfig = config
                         }
-
-                        Divider()
-
-                        Button("上へ移動") {
-                            moveConfig(id: config.id, delta: -1)
-                        }
-                        .disabled(!canMove(id: config.id, delta: -1))
-
-                        Button("下へ移動") {
-                            moveConfig(id: config.id, delta: 1)
-                        }
-                        .disabled(!canMove(id: config.id, delta: 1))
 
                         Divider()
 
@@ -184,50 +173,6 @@ struct BackendSettingsView: View {
                     EditButton()
                 }
             #endif
-            #if os(macOS)
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button {
-                        if let id = selectedBackendID {
-                            editingConfig = configStore.configurations.first { $0.id == id }
-                        }
-                    } label: {
-                        Image(systemName: "info.circle")
-                    }
-                    .help("選択したバックエンドを編集")
-                    .disabled(selectedBackendID == nil)
-
-                    Button {
-                        if let id = selectedBackendID {
-                            moveConfig(id: id, delta: -1)
-                        }
-                    } label: {
-                        Image(systemName: "arrow.up")
-                    }
-                    .help("選択したバックエンドを上へ移動")
-                    .disabled(!canMoveSelected(delta: -1))
-
-                    Button {
-                        if let id = selectedBackendID {
-                            moveConfig(id: id, delta: 1)
-                        }
-                    } label: {
-                        Image(systemName: "arrow.down")
-                    }
-                    .help("選択したバックエンドを下へ移動")
-                    .disabled(!canMoveSelected(delta: 1))
-
-                    Button(role: .destructive) {
-                        if let id = selectedBackendID {
-                            backendIDsToDelete = [id]
-                            showingDeleteConfirmation = true
-                        }
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .help("選択したバックエンドを削除")
-                    .disabled(selectedBackendID == nil)
-                }
-            #endif
         }
     }
 
@@ -250,25 +195,6 @@ struct BackendSettingsView: View {
         if selectedBackendID == id {
             selectedBackendID = nil
         }
-    }
-
-    private func canMoveSelected(delta: Int) -> Bool {
-        guard let id = selectedBackendID else { return false }
-        return canMove(id: id, delta: delta)
-    }
-
-    private func canMove(id: String, delta: Int) -> Bool {
-        guard let index = configStore.configurations.firstIndex(where: { $0.id == id }) else {
-            return false
-        }
-        let newIndex = index + delta
-        return newIndex >= 0 && newIndex < configStore.configurations.count
-    }
-
-    private func moveConfig(id: String, delta: Int) {
-        guard configStore.moveConfiguration(id: id, delta: delta) else { return }
-        manager.setupProviders()
-        selectedBackendID = id
     }
 }
 
@@ -298,36 +224,40 @@ struct BackendRowView: View {
                     }
 
                     if let state {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(statusColor(state.status))
-                                .frame(width: 8, height: 8)
-                            Text(statusText(state.status))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(statusColor(state.status))
+                                    .frame(width: 8, height: 8)
+                                Text(statusText(state.status))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                if let error = state.lastError {
+                                    Text(error)
+                                        .font(.caption2)
+                                        .foregroundStyle(
+                                            state.status == .error ? .red : .orange
+                                        )
+                                        .lineLimit(2)
+                                }
+                            }
 
                             if case .oauth2(_, _, let expiryDate) = config.auth,
                                 let expiryDate = expiryDate
                             {
-                                Text("(認証情報期限: \(expiryDate.formatted(.displayDateTimeFull)))")
+                                Text("認証情報期限: \(expiryDate.formatted(.displayDateTimeFull))")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
-
-                            if state.status == .error {
-                                Spacer()
-                                Button("再接続") { onReconnect() }
-                                    .font(.caption)
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.mini)
-                            }
                         }
 
-                        if let error = state.lastError {
-                            Text(error)
-                                .font(.caption2)
-                                .foregroundStyle(state.status == .error ? .red : .orange)
-                                .lineLimit(2)
+                        if state.status == .error {
+                            Spacer()
+                            Button("再接続") { onReconnect() }
+                                .font(.caption)
+                                .buttonStyle(.bordered)
+                                .controlSize(.mini)
                         }
                     }
                 }

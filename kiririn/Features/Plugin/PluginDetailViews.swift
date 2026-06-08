@@ -38,69 +38,66 @@ struct PluginRowView: View {
     let onEdit: () -> Void
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(plugin.name)
+                            .font(.body)
+
+                        if plugin.isBlocked {
+                            blockedBadge
+                        }
+                    }
+
+                    pluginSubtitle
+                }
+
+                Spacer()
+
+                Toggle(
+                    "",
+                    isOn: Binding(
+                        get: { plugin.isEnabled },
+                        set: { onToggle($0) }
+                    )
+                )
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            }
+
+            if plugin.isBlocked {
+                blockedDescription
+            }
+        }
         #if os(macOS)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Text(plugin.name)
-                        .font(.body)
-
-                    if plugin.isBlocked {
-                        blockedBadge
-                    }
-
-                    Spacer()
-
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { plugin.isEnabled },
-                            set: { onToggle($0) }
-                        )
-                    )
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                }
-
-                if plugin.isBlocked {
-                    blockedDescription
-                }
-            }
             .padding(.vertical, 8)
-            .contentShape(Rectangle())
-        #else
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 12) {
-                    Text(plugin.name)
-                        .font(.body)
-
-                    if plugin.isBlocked {
-                        blockedBadge
-                    }
-
-                    Spacer()
-
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { plugin.isEnabled },
-                            set: { onToggle($0) }
-                        )
-                    )
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                }
-
-                if plugin.isBlocked {
-                    blockedDescription
-                }
-            }
-            .contentShape(Rectangle())
+        #endif
+        .contentShape(Rectangle())
+        #if !os(macOS)
             .onTapGesture {
                 onEdit()
             }
         #endif
+    }
+
+    @ViewBuilder
+    private var pluginSubtitle: some View {
+        if let version = plugin.manifestVersion, let author = plugin.manifestAuthor {
+            Text("v\(version) / \(author)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        } else if let version = plugin.manifestVersion {
+            Text("v\(version)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else if let author = plugin.manifestAuthor {
+            Text(author)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var blockedBadge: some View {

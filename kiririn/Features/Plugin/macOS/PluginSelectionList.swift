@@ -33,13 +33,24 @@
                             }
                         )
                         .tag(plugin.id)
-                        .contextMenu {
-                            contextMenuItems(for: plugin)
-                        }
+                        .contentShape(Rectangle())
                     }
                     .onMove { from, to in
                         pluginStore.movePlugins(from: from, to: to)
                         appModel.reloadPluginsInAllPlayerStates()
+                    }
+                }
+                .contextMenu(forSelectionType: UUID.self) { selectedIDs in
+                    if let firstID = selectedIDs.first,
+                        let plugin = pluginStore.plugins.first(where: { $0.id == firstID })
+                    {
+                        contextMenuItems(for: plugin)
+                    }
+                } primaryAction: { selectedIDs in
+                    if let firstID = selectedIDs.first,
+                        let plugin = pluginStore.plugins.first(where: { $0.id == firstID })
+                    {
+                        editingPlugin = plugin
                     }
                 }
                 .onChange(of: pluginStore.plugins.map(\.id)) { _, ids in
@@ -52,7 +63,13 @@
 
         @ViewBuilder
         private func contextMenuItems(for plugin: PluginDefinition) -> some View {
-            Button("別ウィンドウで開く") {
+            Button("編集") {
+                editingPlugin = plugin
+            }
+
+            Divider()
+
+            Button("プラグインウィンドウを開く") {
                 onOpenWindow(plugin.id)
             }
 
@@ -64,42 +81,9 @@
 
             Divider()
 
-            Button("編集") {
-                editingPlugin = plugin
-            }
-
-            Divider()
-
-            Button("上へ移動") {
-                movePlugin(id: plugin.id, delta: -1)
-            }
-            .disabled(!canMove(id: plugin.id, delta: -1))
-
-            Button("下へ移動") {
-                movePlugin(id: plugin.id, delta: 1)
-            }
-            .disabled(!canMove(id: plugin.id, delta: 1))
-
-            Divider()
-
             Button("削除", role: .destructive) {
                 pluginIDsToDelete = [plugin.id]
                 showingDeleteConfirmation = true
-            }
-        }
-
-        private func canMove(id: UUID, delta: Int) -> Bool {
-            guard let index = pluginStore.plugins.firstIndex(where: { $0.id == id }) else {
-                return false
-            }
-            let newIndex = index + delta
-            return newIndex >= 0 && newIndex < pluginStore.plugins.count
-        }
-
-        private func movePlugin(id: UUID, delta: Int) {
-            if pluginStore.movePlugin(id: id, delta: delta) {
-                selectedID = id
-                appModel.reloadPluginsInAllPlayerStates()
             }
         }
     }
