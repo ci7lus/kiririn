@@ -167,6 +167,7 @@ struct KiririnApp: App {
             }
             .defaultSize(width: 1280, height: 720)
             .windowStyle(.hiddenTitleBar)
+            .commandsRemoved()
 
             WindowGroup("プラグイン", id: AppWindowID.plugin.rawValue, for: UUID.self) { $pluginID in
                 if let pluginID {
@@ -174,6 +175,7 @@ struct KiririnApp: App {
                 }
             }
             .defaultSize(width: 960, height: 640)
+            .commandsRemoved()
 
             Window("字幕履歴", id: AppWindowID.caption.rawValue) {
                 CaptionWindowView_macOS(appModel: appModel)
