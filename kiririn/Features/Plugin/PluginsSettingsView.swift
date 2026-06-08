@@ -358,6 +358,7 @@ struct PluginsSettingsView: View {
                     routing: pluginStore.installRouting(for: preview)
                 )
             } catch {
+                pluginStore.discardPreviewInstall(preview)
                 importErrorMessage = error.localizedDescription
             }
         } else if !deferredImportErrorMessages.isEmpty {
@@ -367,6 +368,9 @@ struct PluginsSettingsView: View {
     }
 
     private func cancelInstallConfirmation() {
+        if let request = activeInstallConfirmation {
+            pluginStore.discardPreviewInstall(request.preview)
+        }
         activeInstallConfirmation = nil
         presentNextInstallPreviewIfPossible()
     }
@@ -546,10 +550,12 @@ struct PluginsSettingsView: View {
                         downloadProgress = Double(totalWritten) / Double(totalExpected)
                     }
                 }
+                defer {
+                    try? FileManager.default.removeItem(at: tempURL)
+                }
                 try Task.checkCancellation()
                 let preview = try pluginStore.previewPlugin(
                     packageURL: tempURL, sourceType: .kppx)
-                try? FileManager.default.removeItem(at: tempURL)
 
                 downloadTask = nil
                 queueInstallPreviews([preview])

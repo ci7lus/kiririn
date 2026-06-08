@@ -413,6 +413,9 @@ private struct PluginDetailView: View {
             PluginInstallConfirmationSheet(
                 request: request,
                 onCancel: {
+                    if let request = activeInstallConfirmation {
+                        pluginStore.discardPreviewInstall(request.preview)
+                    }
                     activeInstallConfirmation = nil
                 },
                 onConfirm: {
@@ -628,6 +631,10 @@ private struct PluginDetailView: View {
             }
             activeInstallConfirmation = nil
         } catch {
+            if case .reenable = request.kind {
+            } else {
+                pluginStore.discardPreviewInstall(request.preview)
+            }
             activeInstallConfirmation = nil
             manifestErrorMessage = error.localizedDescription
         }
@@ -648,10 +655,15 @@ private struct PluginDetailView: View {
             do {
                 let preview = try pluginStore.previewPlugin(
                     packageURL: url, sourceType: .kppx)
-                activeInstallConfirmation = try PluginInstallConfirmationRequest(
-                    preview: preview,
-                    routing: pluginStore.updateRouting(replacing: plugin, with: preview)
-                )
+                do {
+                    activeInstallConfirmation = try PluginInstallConfirmationRequest(
+                        preview: preview,
+                        routing: pluginStore.updateRouting(replacing: plugin, with: preview)
+                    )
+                } catch {
+                    pluginStore.discardPreviewInstall(preview)
+                    throw error
+                }
             } catch let error as PluginManifestValidationError {
                 manifestErrorMessage = error.errorDescription
             } catch {
@@ -780,10 +792,15 @@ private struct PluginDetailView: View {
                 fromUpdateManifestURL: url,
                 previous: plugin
             )
-            pendingUpdateConfirmation = try PluginInstallConfirmationRequest(
-                preview: preview,
-                routing: pluginStore.updateRouting(replacing: plugin, with: preview)
-            )
+            do {
+                pendingUpdateConfirmation = try PluginInstallConfirmationRequest(
+                    preview: preview,
+                    routing: pluginStore.updateRouting(replacing: plugin, with: preview)
+                )
+            } catch {
+                pluginStore.discardPreviewInstall(preview)
+                throw error
+            }
             showingUpdateCheckSheet = false
         } catch let error as PluginManifestValidationError {
             showingUpdateCheckSheet = false

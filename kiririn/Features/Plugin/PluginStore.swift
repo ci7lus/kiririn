@@ -572,6 +572,14 @@ class PluginStore {
         droppedPluginAlertMessage = nil
     }
 
+    func discardPreviewInstall(_ preview: PluginInstallPreview) {
+        if case .package(let archiveURL) = preview.payload,
+            archiveURL.lastPathComponent.hasPrefix("staging_")
+        {
+            try? fileManager.removeItem(at: archiveURL)
+        }
+    }
+
     private func stagePackageCopyIfNeeded(from sourceURL: URL) throws -> URL {
         if sourceURL.path.hasPrefix(pluginDirectoryURL.path) {
             return sourceURL
@@ -1305,6 +1313,13 @@ class PluginStore {
         let archiveFileName = Self.archiveFileName(for: manifest.manifestID)
         let installedArchiveURL = pluginDirectoryURL.appending(path: archiveFileName)
 
+        let needsStagingCleanup = (archiveURL != installedArchiveURL)
+        defer {
+            if needsStagingCleanup {
+                try? fileManager.removeItem(at: archiveURL)
+            }
+        }
+
         if let previous,
             previous.sourceType != .localFolder,
             previous.resourceBasePath != archiveFileName
@@ -2029,6 +2044,7 @@ private final class PackageDownloadDelegate: NSObject, URLSessionDownloadDelegat
         guard let c = continuation else { return }
         continuation = nil
         if let error = error ?? savedError {
+            downloadedFileURL.map { try? FileManager.default.removeItem(at: $0) }
             c.resume(throwing: error)
         } else if let url = downloadedFileURL {
             c.resume(returning: url)
