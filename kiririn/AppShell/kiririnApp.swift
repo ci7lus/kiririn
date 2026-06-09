@@ -129,6 +129,20 @@ extension Notification.Name {
     }
 #endif
 
+#if os(macOS)
+    import AppKit
+
+    class AppDelegate_macOS: NSObject, NSApplicationDelegate {
+        func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+            let appModel = AppModel.shared
+            for state in appModel.activePlayerStates {
+                state.close()
+            }
+            return .terminateNow
+        }
+    }
+#endif
+
 @main
 struct KiririnApp: App {
     @State private var appModel = AppModel.shared
@@ -137,7 +151,9 @@ struct KiririnApp: App {
         SentryBootstrap.initializeIfAvailable()
     }
 
-    #if canImport(UIKit) && !os(macOS)
+    #if os(macOS)
+        @NSApplicationDelegateAdaptor(AppDelegate_macOS.self) var appDelegate
+    #elseif canImport(UIKit)
         @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     #endif
 
