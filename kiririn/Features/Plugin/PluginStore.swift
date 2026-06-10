@@ -409,6 +409,7 @@ class PluginStore {
 
         self.plugins = initialPlugins
         cleanupOrphanedFiles()
+        cleanupWebKitExtractedArchives()
         refreshPluginsFromFiles()
         enforceDeveloperModeRestrictionsIfNeeded()
         syncLocalManifestWatchers()
@@ -872,6 +873,21 @@ class PluginStore {
         }
 
         for fileURL in files where !knownBaseNames.contains(fileURL.lastPathComponent) {
+            try? fileManager.removeItem(at: fileURL)
+        }
+    }
+
+    private func cleanupWebKitExtractedArchives() {
+        guard
+            let files = try? fileManager.contentsOfDirectory(
+                at: fileManager.temporaryDirectory,
+                includingPropertiesForKeys: nil
+            )
+        else {
+            return
+        }
+
+        for fileURL in files where fileURL.lastPathComponent.hasPrefix("WebKitExtractedArchive-") {
             try? fileManager.removeItem(at: fileURL)
         }
     }
