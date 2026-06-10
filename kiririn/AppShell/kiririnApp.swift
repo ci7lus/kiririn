@@ -133,6 +133,10 @@ extension Notification.Name {
     import AppKit
 
     class AppDelegate_macOS: NSObject, NSApplicationDelegate {
+        func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+            true
+        }
+
         func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
             let appModel = AppModel.shared
             for state in appModel.activePlayerStates {
