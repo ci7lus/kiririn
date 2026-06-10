@@ -60,6 +60,18 @@
 			membershipExceptions = (
 				Info.plist,
 			);
+			platformFiltersByRelativePath = {
+				AppShell/macOS/CaptionWindowView.swift = (macos, );
+				AppShell/macOS/ProgramInfoWindowView.swift = (macos, );
+				Features/Capture/macOS/GlobalCaptureHotKeyManager.swift = (macos, );
+				Features/Capture/macOS/ShortcutRecorderView.swift = (macos, );
+				Features/Player/macOS/DetachedPlayerOverlayView.swift = (macos, );
+				Features/Player/macOS/PlayerWindowView.swift = (macos, );
+				Features/Plugin/iOS/PluginEditableList.swift = (ios, );
+				Features/Plugin/macOS/PluginSelectionList.swift = (macos, );
+				Features/Plugin/macOS/PluginWindowView.swift = (macos, );
+				Shared/UI/macOS/WindowConfigurator.swift = (macos, );
+			};
 			target = 105FC5792E9EAD3100EA8BCF /* kiririn */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
