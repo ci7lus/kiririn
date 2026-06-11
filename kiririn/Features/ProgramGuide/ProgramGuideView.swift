@@ -653,7 +653,8 @@ struct ProgramGuideView: View {
         let sortedTypes = types.sorted { lhs, rhs in
             let li = ordered.firstIndex(of: lhs) ?? ordered.count
             let ri = ordered.firstIndex(of: rhs) ?? ordered.count
-            return li < ri
+            if li != ri { return li < ri }
+            return lhs < rhs
         }
 
         var options: [(id: String, name: String)] = []
