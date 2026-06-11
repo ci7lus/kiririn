@@ -855,7 +855,8 @@ private struct PluginWebView: PluginWebViewRepresentable {
 
     private func makeApplicationNameForUserAgent() -> String {
         let appVersion =
-            (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "1"
+            (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+            ?? "1"
         return "kiririn/\(appVersion)"
     }
 

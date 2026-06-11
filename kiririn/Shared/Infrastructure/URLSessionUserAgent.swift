@@ -6,7 +6,7 @@ enum KiririnUserAgent {
     }
 
     nonisolated(unsafe) private static var appVersion: String {
-        (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "1"
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "1"
     }
 
     nonisolated(unsafe) private static var platformToken: String {
