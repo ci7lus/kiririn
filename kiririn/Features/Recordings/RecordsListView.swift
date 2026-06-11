@@ -46,7 +46,7 @@ struct RecordsListView: View {
                 if isTabActive {
                     if !recordingBackendIds.isEmpty {
                         ToolbarItem(placement: .principal) {
-                            HStack(spacing: 0) {
+                            HStack(spacing: 2) {
                                 Picker("バックエンド", selection: selectedBackendBinding) {
                                     ForEach(recordingBackendIds, id: \.self) { backendId in
                                         if backendId == "local" {
@@ -68,6 +68,7 @@ struct RecordsListView: View {
                                     }
                                 }
                             }
+                            .padding(.horizontal, 2)
                         }
                     }
                     #if os(macOS)
