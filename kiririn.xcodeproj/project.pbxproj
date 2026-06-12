@@ -16,7 +16,8 @@
 		CE47B1AA2F4DC65200680B2E /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CE47B1A92F4DC65200680B2E /* GRDB */; };
 		CE54EBE92FB834D4009AFCBC /* LicenseList in Frameworks */ = {isa = PBXBuildFile; productRef = CE54EBE82FB834D4009AFCBC /* LicenseList */; };
 		CEA5BCC72FC31AB8007D3B10 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = CEA5BCC62FC31AB8007D3B10 /* ZIPFoundation */; };
-		CEA5BDDA2FCB5D95007D3B10 /* X509 in Frameworks */ = {isa = PBXBuildFile; productRef = CEA5BDD92FCB5D95007D3B10 /* X509 */; };
+		CEA761572FDC65F200C55CC4 /* ApkSignatureVerifierKit in Frameworks */ = {isa = PBXBuildFile; productRef = CEA761562FDC65F200C55CC4 /* ApkSignatureVerifierKit */; };
+		CEA761592FDC66F500C55CC4 /* ApkSignatureVerifierKit in Frameworks */ = {isa = PBXBuildFile; productRef = CEA761582FDC66F500C55CC4 /* ApkSignatureVerifierKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -107,11 +108,11 @@
 				CE47B1AA2F4DC65200680B2E /* GRDB in Frameworks */,
 				CE171EEE2F61AE4D008DEA05 /* OrderedCollections in Frameworks */,
 				CE4442812FB87FAD0092C2BF /* VLCKit in Frameworks */,
-				CEA5BDDA2FCB5D95007D3B10 /* X509 in Frameworks */,
 				CE47B1A72F4DC5AA00680B2E /* Logging in Frameworks */,
 				CE3FA1922FDC21880049EEA5 /* HotKey in Frameworks */,
 				CE44428E2FB8B9050092C2BF /* Sentry in Frameworks */,
 				CE21E9412FF10C020007B5F6 /* PronamaAssets in Frameworks */,
+				CEA761572FDC65F200C55CC4 /* ApkSignatureVerifierKit in Frameworks */,
 				CEA5BCC72FC31AB8007D3B10 /* ZIPFoundation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -120,6 +121,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CEA761592FDC66F500C55CC4 /* ApkSignatureVerifierKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -191,8 +193,8 @@
 				CE44428D2FB8B9050092C2BF /* Sentry */,
 				CE21E9402FF10C020007B5F6 /* PronamaAssets */,
 				CEA5BCC62FC31AB8007D3B10 /* ZIPFoundation */,
-				CEA5BDD92FCB5D95007D3B10 /* X509 */,
 				CE3FA1912FDC21880049EEA5 /* HotKey */,
+				CEA761562FDC65F200C55CC4 /* ApkSignatureVerifierKit */,
 			);
 			productName = kiririn;
 			productReference = 105FC57A2E9EAD3100EA8BCF /* kiririn.app */;
@@ -216,6 +218,7 @@
 			);
 			name = kiririnTests;
 			packageProductDependencies = (
+				CEA761582FDC66F500C55CC4 /* ApkSignatureVerifierKit */,
 			);
 			productName = kiririnTests;
 			productReference = 105FC5892E9EAD3200EA8BCF /* kiririnTests.xctest */;
@@ -285,8 +288,8 @@
 				CE44428C2FB8B9050092C2BF /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 				CE21E93F2FF10C020007B5F6 /* XCRemoteSwiftPackageReference "931f454f81e605d08440df93f341a841" */,
 				CEA5BCC52FC31AB8007D3B10 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
-				CEA5BDD82FCB5D95007D3B10 /* XCRemoteSwiftPackageReference "swift-certificates" */,
 				CE3FA1902FDC21880049EEA5 /* XCRemoteSwiftPackageReference "HotKey" */,
+				CEA761552FDC65F200C55CC4 /* XCLocalSwiftPackageReference "Packages/ApkSignatureVerifierKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 105FC57B2E9EAD3100EA8BCF /* Products */;
@@ -748,6 +751,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/VLCKit;
 		};
+		CEA761552FDC65F200C55CC4 /* XCLocalSwiftPackageReference "Packages/ApkSignatureVerifierKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ApkSignatureVerifierKit;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -815,14 +822,6 @@
 				minimumVersion = 0.9.20;
 			};
 		};
-		CEA5BDD82FCB5D95007D3B10 /* XCRemoteSwiftPackageReference "swift-certificates" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/apple/swift-certificates.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.19.1;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -870,10 +869,14 @@
 			package = CEA5BCC52FC31AB8007D3B10 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
 		};
-		CEA5BDD92FCB5D95007D3B10 /* X509 */ = {
+		CEA761562FDC65F200C55CC4 /* ApkSignatureVerifierKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = CEA5BDD82FCB5D95007D3B10 /* XCRemoteSwiftPackageReference "swift-certificates" */;
-			productName = X509;
+			productName = ApkSignatureVerifierKit;
+		};
+		CEA761582FDC66F500C55CC4 /* ApkSignatureVerifierKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CEA761552FDC65F200C55CC4 /* XCLocalSwiftPackageReference "Packages/ApkSignatureVerifierKit" */;
+			productName = ApkSignatureVerifierKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

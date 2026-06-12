@@ -1,3 +1,4 @@
+import ApkSignatureVerifierKit
 import CryptoKit
 import Darwin
 import Foundation
@@ -57,7 +58,7 @@ struct PluginInstallPreview: Identifiable {
     let id = UUID()
     let sourceType: PluginSourceType
     let manifest: ExtensionPluginManifest
-    let packageAuthentication: PluginPackageAuthentication
+    let packageAuthentication: APKAuthentication
     let updateInfoURL: URL?
     let installWarnings: [String]
 
@@ -70,7 +71,7 @@ struct PluginInstallPreview: Identifiable {
         static func testing(
             sourceType: PluginSourceType = .kppx,
             manifest: ExtensionPluginManifest,
-            packageAuthentication: PluginPackageAuthentication,
+            packageAuthentication: APKAuthentication,
             updateInfoURL: URL? = nil,
             installWarnings: [String] = [],
             archiveURL: URL = URL(fileURLWithPath: "/dev/null")
@@ -107,7 +108,7 @@ struct PluginDefinition: Identifiable, Codable, Equatable {
     var manifestLink: String?
     var manifestSupportedAreas: [PluginDisplayArea]?
     var manifestID: String
-    var packageAuthentication: PluginPackageAuthentication
+    var packageAuthentication: APKAuthentication
 
     init(
         id: UUID,
@@ -124,7 +125,7 @@ struct PluginDefinition: Identifiable, Codable, Equatable {
         manifestLink: String? = nil,
         manifestSupportedAreas: [PluginDisplayArea]? = nil,
         manifestID: String,
-        packageAuthentication: PluginPackageAuthentication = .unsigned
+        packageAuthentication: APKAuthentication = .unsigned
     ) {
         self.id = id
         self.name = name
@@ -181,7 +182,7 @@ struct PluginDefinition: Identifiable, Codable, Equatable {
         manifestID = try container.decode(String.self, forKey: .manifestID)
         packageAuthentication =
             try container.decodeIfPresent(
-                PluginPackageAuthentication.self,
+                APKAuthentication.self,
                 forKey: .packageAuthentication
             ) ?? .unsigned
     }
@@ -347,7 +348,7 @@ class PluginStore {
         "storage",
         "unlimitedStorage",
     ]
-    private static let packageSignatureRequirement: PluginPackageSignatureRequirement = .optional
+    private static let packageSignatureRequirement: APKSignatureRequirement = .optional
     private static let prohibitedExtensionManifestKeys: Set<String> = [
         "content_scripts",
         "commands",
@@ -355,7 +356,7 @@ class PluginStore {
         "browser_action",
         "page_action",
     ]
-    private let packageSignatureVerifier: PluginPackageSignatureVerifier
+    private let packageSignatureVerifier: ApkSignatureVerifierKit
 
     var fileReadErrorMessage: String?
     var droppedPluginAlertMessage: String?
@@ -378,7 +379,7 @@ class PluginStore {
     init(
         defaults: UserDefaults = .standard,
         fileManager: FileManager = .default,
-        packageSignatureVerifier: PluginPackageSignatureVerifier = .shared
+        packageSignatureVerifier: ApkSignatureVerifierKit = .shared
     ) {
         self.defaults = defaults
         self.fileManager = fileManager
@@ -1320,7 +1321,7 @@ class PluginStore {
         archiveURL: URL,
         manifest: ExtensionPluginManifest,
         sourceType: PluginSourceType,
-        packageAuthentication: PluginPackageAuthentication,
+        packageAuthentication: APKAuthentication,
         replacing previous: PluginDefinition? = nil
     ) throws -> PluginDefinition {
         try ensureUniqueManifestID(manifest.manifestID, excluding: previous)
@@ -1626,7 +1627,7 @@ class PluginStore {
     }
 
     private func validatePackageSignatureRequirement(
-        _ authentication: PluginPackageAuthentication,
+        _ authentication: APKAuthentication,
         sourceType: PluginSourceType
     ) throws {
         guard sourceType != .localFolder else { return }
@@ -1639,7 +1640,7 @@ class PluginStore {
     }
 
     private func validateDeveloperModeRequirement(
-        _ authentication: PluginPackageAuthentication,
+        _ authentication: APKAuthentication,
         sourceType: PluginSourceType,
         actionLabel: String
     ) throws {
@@ -1673,7 +1674,7 @@ class PluginStore {
     }
 
     private func isStandardModeAllowed(
-        _ authentication: PluginPackageAuthentication,
+        _ authentication: APKAuthentication,
         sourceType: PluginSourceType
     ) -> Bool {
         guard sourceType != .localFolder else {
@@ -1683,7 +1684,7 @@ class PluginStore {
     }
 
     private func developerModeRestrictionMessage(
-        for authentication: PluginPackageAuthentication,
+        for authentication: APKAuthentication,
         sourceType: PluginSourceType,
         actionLabel: String
     ) -> String {

@@ -1,3 +1,4 @@
+import ApkSignatureVerifierKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -128,7 +129,7 @@ struct PluginManifestPresentation {
     let manifestUpdateURL: String?
     let requestedPermissions: [String]
     let requestedHostPermissions: [String]
-    let packageAuthentication: PluginPackageAuthentication
+    let packageAuthentication: APKAuthentication
 
     init(plugin: PluginDefinition, manifest: ExtensionPluginManifest?) {
         sourceLabel = plugin.sourceType.localizedLabel

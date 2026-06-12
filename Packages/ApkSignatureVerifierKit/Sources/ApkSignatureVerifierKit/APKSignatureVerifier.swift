@@ -3,17 +3,17 @@ import Foundation
 import Security
 import SwiftASN1
 
-enum PluginPackageSignatureRequirement {
+public enum APKSignatureRequirement: Sendable {
     case optional
     case required
 }
 
-enum PluginPackageSignatureScheme: String, Codable, Sendable {
+public enum APKSignatureScheme: String, Codable, Sendable {
     case v2
     case v3
     case v31
 
-    var displayName: String {
+    public var displayName: String {
         switch self {
         case .v2:
             return "APK Signature Scheme v2"
@@ -25,13 +25,13 @@ enum PluginPackageSignatureScheme: String, Codable, Sendable {
     }
 }
 
-enum PluginPackageAuthenticationState: String, Codable, Sendable {
+public enum APKAuthenticationState: String, Codable, Sendable {
     case unsigned
     case verified
     case selfSigned
     case revoked
 
-    var localizedTitle: String {
+    public var localizedTitle: String {
         switch self {
         case .unsigned:
             return "未署名"
@@ -45,39 +45,56 @@ enum PluginPackageAuthenticationState: String, Codable, Sendable {
     }
 }
 
-struct PluginPackageSignerSummary: Codable, Equatable, Sendable {
-    let distinguishedName: String
-    let publicKeySHA256: String
+public struct APKSignerSummary: Codable, Equatable, Sendable {
+    public let distinguishedName: String
+    public let publicKeySHA256: String
+
+    public init(distinguishedName: String, publicKeySHA256: String) {
+        self.distinguishedName = distinguishedName
+        self.publicKeySHA256 = publicKeySHA256
+    }
 }
 
-struct PluginPackageAuthentication: Codable, Equatable, Sendable {
-    let scheme: PluginPackageSignatureScheme?
-    let state: PluginPackageAuthenticationState
-    let signers: [PluginPackageSignerSummary]
-    let warnings: [String]
+public struct APKAuthentication: Codable, Equatable, Sendable {
+    public let scheme: APKSignatureScheme?
+    public let state: APKAuthenticationState
+    public let signers: [APKSignerSummary]
+    public let warnings: [String]
 
-    static let unsigned = PluginPackageAuthentication(
+    public static let unsigned = APKAuthentication(
         scheme: nil,
         state: .unsigned,
         signers: [],
         warnings: []
     )
 
-    var isSigned: Bool {
+    public init(
+        scheme: APKSignatureScheme?,
+        state: APKAuthenticationState,
+        signers: [APKSignerSummary],
+        warnings: [String]
+    ) {
+        self.scheme = scheme
+        self.state = state
+        self.signers = signers
+        self.warnings = warnings
+    }
+
+    public var isSigned: Bool {
         scheme != nil && !signers.isEmpty
     }
 
-    var signerKeyHashes: [String] {
+    public var signerKeyHashes: [String] {
         signers.map(\.publicKeySHA256)
     }
 }
 
-enum PluginPackageSignatureError: LocalizedError {
+public enum APKSignatureError: LocalizedError, Sendable {
     case unsupportedSignatureScheme
     case invalidArchive(String)
     case verificationFailed(String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .unsupportedSignatureScheme:
             return "APK Signature Scheme v2/v3/v3.1 の署名が見つかりません。"
@@ -89,37 +106,51 @@ enum PluginPackageSignatureError: LocalizedError {
     }
 }
 
-final class PluginPackageSignatureVerifier {
-    static let shared = PluginPackageSignatureVerifier()
+public final class ApkSignatureVerifierKit: @unchecked Sendable {
+    public static let shared = ApkSignatureVerifierKit()
 
     private let trustedStore: TrustedCertificateStore
     private let networkLoader: CRLNetworkLoader
     private let now: () -> Date
+    private let requirement: APKSignatureRequirement
     private let crlCacheLock = NSLock()
     private var crlCache: [URL: CachedCRL] = [:]
 
-    init(
-        trustedChainPEMData: Data? = PluginPackageSignatureVerifier.loadBundledTrustChain(),
-        session: URLSession = .kiririnShared,
+    public init(
+        trustedChainPEMData: Data? = ApkSignatureVerifierKit.loadBundledTrustChain(),
+        session: URLSession = .shared,
         now: @escaping () -> Date = Date.init
     ) {
         self.trustedStore = TrustedCertificateStore(pemData: trustedChainPEMData)
         self.networkLoader = CRLNetworkLoader(session: session)
         self.now = now
+        self.requirement = .optional
     }
 
-    func verify(packageURL: URL) throws -> PluginPackageAuthentication {
+    init(
+        trustedChainPEMData: Data?,
+        session: URLSession,
+        now: @escaping () -> Date,
+        requirement: APKSignatureRequirement
+    ) {
+        self.trustedStore = TrustedCertificateStore(pemData: trustedChainPEMData)
+        self.networkLoader = CRLNetworkLoader(session: session)
+        self.now = now
+        self.requirement = requirement
+    }
+
+    public func verify(packageURL: URL) throws -> APKAuthentication {
         guard let container = try APKSignatureContainer.parse(from: packageURL) else {
             return .unsigned
         }
 
         let signers = try parseSigners(from: container)
         guard !signers.isEmpty else {
-            throw PluginPackageSignatureError.verificationFailed("署名者が含まれていません")
+            throw APKSignatureError.verificationFailed("署名者が含まれていません")
         }
 
         var digestCache: [ContentDigestAlgorithm: Data] = [:]
-        var signerSummaries: [PluginPackageSignerSummary] = []
+        var signerSummaries: [APKSignerSummary] = []
         var warnings: [String] = []
         var allTrusted = true
         var revoked = false
@@ -136,7 +167,7 @@ final class PluginPackageSignatureVerifier {
             revoked = revoked || signerResult.isRevoked
         }
 
-        let state: PluginPackageAuthenticationState
+        let state: APKAuthenticationState
         if revoked {
             state = .revoked
         } else if allTrusted {
@@ -145,7 +176,7 @@ final class PluginPackageSignatureVerifier {
             state = .selfSigned
         }
 
-        return PluginPackageAuthentication(
+        return APKAuthentication(
             scheme: container.scheme,
             state: state,
             signers: signerSummaries,
@@ -159,17 +190,17 @@ final class PluginPackageSignatureVerifier {
         digestCache: inout [ContentDigestAlgorithm: Data]
     ) throws -> SignerVerificationResult {
         guard let leafCertificate = signer.certificates.first else {
-            throw PluginPackageSignatureError.verificationFailed("署名者証明書がありません")
+            throw APKSignatureError.verificationFailed("署名者証明書がありません")
         }
 
         if leafCertificate.subjectPublicKeyInfoDER != signer.publicKeyDER {
-            throw PluginPackageSignatureError.verificationFailed(
+            throw APKSignatureError.verificationFailed(
                 "署名者の公開鍵と証明書の SubjectPublicKeyInfo が一致しません"
             )
         }
 
         guard let signatureRecord = strongestSupportedSignature(in: signer.signatures) else {
-            throw PluginPackageSignatureError.verificationFailed(
+            throw APKSignatureError.verificationFailed(
                 "サポートされている署名アルゴリズムがありません"
             )
         }
@@ -178,19 +209,19 @@ final class PluginPackageSignatureVerifier {
                 $0.algorithmID == signatureRecord.algorithmID
             })
         else {
-            throw PluginPackageSignatureError.verificationFailed(
+            throw APKSignatureError.verificationFailed(
                 "署名に対応するダイジェストが見つかりません"
             )
         }
 
         guard let publicKey = SecCertificateCopyKey(leafCertificate.secCertificate) else {
-            throw PluginPackageSignatureError.verificationFailed("署名者証明書の公開鍵を取得できません")
+            throw APKSignatureError.verificationFailed("署名者証明書の公開鍵を取得できません")
         }
         guard
             SecKeyIsAlgorithmSupported(
                 publicKey, .verify, signatureRecord.algorithm.secKeyAlgorithm)
         else {
-            throw PluginPackageSignatureError.verificationFailed(
+            throw APKSignatureError.verificationFailed(
                 "署名アルゴリズム \(signatureRecord.algorithm.displayName) を検証できません"
             )
         }
@@ -205,7 +236,7 @@ final class PluginPackageSignatureVerifier {
         )
         guard signedDataValid else {
             let message = error?.takeRetainedValue().localizedDescription ?? "signed data の署名が不正です"
-            throw PluginPackageSignatureError.verificationFailed(message)
+            throw APKSignatureError.verificationFailed(message)
         }
 
         let contentDigest: Data
@@ -225,14 +256,14 @@ final class PluginPackageSignatureVerifier {
         }
 
         guard contentDigest == digestRecord.digest else {
-            throw PluginPackageSignatureError.verificationFailed(
+            throw APKSignatureError.verificationFailed(
                 "パッケージ本体のダイジェストが一致しません"
             )
         }
 
         let trustResult = evaluateTrust(for: signer.certificates)
         return SignerVerificationResult(
-            summary: PluginPackageSignerSummary(
+            summary: APKSignerSummary(
                 distinguishedName: leafCertificate.subjectDistinguishedName,
                 publicKeySHA256: sha256Hex(of: signer.publicKeyDER)
             ),
@@ -374,13 +405,13 @@ final class PluginPackageSignatureVerifier {
         }
 
         guard let publicKey = SecCertificateCopyKey(issuer.secCertificate) else {
-            throw PluginPackageSignatureError.verificationFailed("CRL 発行者の公開鍵を取得できません")
+            throw APKSignatureError.verificationFailed("CRL 発行者の公開鍵を取得できません")
         }
         guard let algorithm = crl.signatureAlgorithm.secKeyAlgorithm else {
-            throw PluginPackageSignatureError.verificationFailed("CRL の署名アルゴリズムに対応していません")
+            throw APKSignatureError.verificationFailed("CRL の署名アルゴリズムに対応していません")
         }
         guard SecKeyIsAlgorithmSupported(publicKey, .verify, algorithm) else {
-            throw PluginPackageSignatureError.verificationFailed("CRL の署名アルゴリズムを検証できません")
+            throw APKSignatureError.verificationFailed("CRL の署名アルゴリズムを検証できません")
         }
 
         var error: Unmanaged<CFError>?
@@ -404,13 +435,13 @@ final class PluginPackageSignatureVerifier {
         }
 
         guard reader.isAtEnd else {
-            throw PluginPackageSignatureError.invalidArchive("署名ブロック末尾に余分なデータがあります")
+            throw APKSignatureError.invalidArchive("署名ブロック末尾に余分なデータがあります")
         }
 
         return signers
     }
 
-    private func parseSigner(from reader: ByteReader, scheme: PluginPackageSignatureScheme) throws
+    private func parseSigner(from reader: ByteReader, scheme: APKSignatureScheme) throws
         -> ParsedAPKSigner
     {
         var workingReader = reader
@@ -430,7 +461,7 @@ final class PluginPackageSignatureVerifier {
         let signaturesReader = try workingReader.readLengthPrefixedReader()
         let publicKeyDER = try workingReader.readLengthPrefixedData()
         guard workingReader.isAtEnd else {
-            throw PluginPackageSignatureError.invalidArchive("署名者ブロック末尾に余分なデータがあります")
+            throw APKSignatureError.invalidArchive("署名者ブロック末尾に余分なデータがあります")
         }
 
         var signedDataReader = ByteReader(data: signedData)
@@ -444,7 +475,7 @@ final class PluginPackageSignatureVerifier {
             let signedMinSDK = try signedDataReader.readUInt32()
             let signedMaxSDK = try signedDataReader.readUInt32()
             guard signedMinSDK == minSDK, signedMaxSDK == maxSDK else {
-                throw PluginPackageSignatureError.verificationFailed(
+                throw APKSignatureError.verificationFailed(
                     "v3 署名者の SDK 範囲が一致しません"
                 )
             }
@@ -452,7 +483,7 @@ final class PluginPackageSignatureVerifier {
         }
 
         guard signedDataReader.isAtEnd else {
-            throw PluginPackageSignatureError.invalidArchive("signed data の形式が不正です")
+            throw APKSignatureError.invalidArchive("signed data の形式が不正です")
         }
 
         return ParsedAPKSigner(
@@ -540,7 +571,7 @@ final class PluginPackageSignatureVerifier {
         crlCache[url] = CachedCRL(crl: crl)
     }
 
-    private static func loadBundledTrustChain() -> Data? {
+    public static func loadBundledTrustChain() -> Data? {
         if let url = Bundle.main.url(forResource: "trusted_chain", withExtension: "pem"),
             let data = try? Data(contentsOf: url)
         {
@@ -561,7 +592,7 @@ final class PluginPackageSignatureVerifier {
 private final class BundleToken {}
 
 private struct SignerVerificationResult {
-    let summary: PluginPackageSignerSummary
+    let summary: APKSignerSummary
     let isTrusted: Bool
     let isRevoked: Bool
     let warnings: [String]
@@ -607,7 +638,7 @@ private struct CRLNetworkLoader {
     func data(from url: URL) throws -> Data {
         let semaphore = DispatchSemaphore(value: 0)
         let lock = NSLock()
-        var result: Result<Data, Error>?
+        let box = ResultBox()
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
 
@@ -619,34 +650,38 @@ private struct CRLNetworkLoader {
             }
 
             if let error {
-                result = .failure(error)
+                box.result = .failure(error)
                 return
             }
             guard let httpResponse = response as? HTTPURLResponse,
                 200..<300 ~= httpResponse.statusCode,
                 let data
             else {
-                result = .failure(PluginPackageSignatureError.verificationFailed("CRL の取得に失敗しました"))
+                box.result = .failure(APKSignatureError.verificationFailed("CRL の取得に失敗しました"))
                 return
             }
 
-            result = .success(data)
+            box.result = .success(data)
         }
 
         task.resume()
 
         if semaphore.wait(timeout: .now() + timeout + 1) == .timedOut {
             task.cancel()
-            throw PluginPackageSignatureError.verificationFailed("CRL の取得がタイムアウトしました")
+            throw APKSignatureError.verificationFailed("CRL の取得がタイムアウトしました")
         }
 
         return try lock.withLock {
-            guard let result else {
-                throw PluginPackageSignatureError.verificationFailed("CRL の取得結果が不明です")
+            guard let result = box.result else {
+                throw APKSignatureError.verificationFailed("CRL の取得結果が不明です")
             }
             return try result.get()
         }
     }
+}
+
+private final class ResultBox: @unchecked Sendable {
+    var result: Result<Data, Error>?
 }
 
 private struct TrustedCertificateStore {
@@ -674,7 +709,7 @@ private struct APKSignatureContainer {
 
     let fileSize: Int
     let packageURL: URL
-    let scheme: PluginPackageSignatureScheme
+    let scheme: APKSignatureScheme
     let schemeBlockData: Data
     let signingBlockOffset: Int
     let centralDirectoryOffset: Int
@@ -691,7 +726,7 @@ private struct APKSignatureContainer {
         let centralDirectoryOffset = Int(try ZIPParser.readUInt32LE(in: eocd, at: 16))
         let centralDirectorySize = Int(try ZIPParser.readUInt32LE(in: eocd, at: 12))
         guard centralDirectoryOffset + centralDirectorySize == eocdOffset else {
-            throw PluginPackageSignatureError.invalidArchive(
+            throw APKSignatureError.invalidArchive(
                 "ZIP Central Directory の直後に EOCD がありません"
             )
         }
@@ -708,11 +743,11 @@ private struct APKSignatureContainer {
         let blockSize = Int(try reader.readUInt64LE(at: UInt64(footerOffset)))
         let blockOffset = centralDirectoryOffset - (blockSize + 8)
         guard blockOffset >= 0 else {
-            throw PluginPackageSignatureError.invalidArchive("APK Signing Block の位置が不正です")
+            throw APKSignatureError.invalidArchive("APK Signing Block の位置が不正です")
         }
         let headerSize = Int(try reader.readUInt64LE(at: UInt64(blockOffset)))
         guard headerSize == blockSize else {
-            throw PluginPackageSignatureError.invalidArchive("APK Signing Block のサイズが一致しません")
+            throw APKSignatureError.invalidArchive("APK Signing Block のサイズが一致しません")
         }
 
         let pairsData = try reader.readData(
@@ -724,7 +759,7 @@ private struct APKSignatureContainer {
         while !pairsReader.isAtEnd {
             let pairLength = Int(try pairsReader.readUInt64())
             guard pairLength >= 4 else {
-                throw PluginPackageSignatureError.invalidArchive("APK Signing Block のペア長が不正です")
+                throw APKSignatureError.invalidArchive("APK Signing Block のペア長が不正です")
             }
             var pairReader = try pairsReader.readReader(count: pairLength)
             let identifier = try pairReader.readUInt32()
@@ -732,7 +767,7 @@ private struct APKSignatureContainer {
         }
 
         let containerFor = {
-            (scheme: PluginPackageSignatureScheme, blockData: Data) -> APKSignatureContainer in
+            (scheme: APKSignatureScheme, blockData: Data) -> APKSignatureContainer in
             APKSignatureContainer(
                 fileSize: fileSize,
                 packageURL: url,
@@ -755,7 +790,7 @@ private struct APKSignatureContainer {
         }
 
         if !pairs.isEmpty {
-            throw PluginPackageSignatureError.unsupportedSignatureScheme
+            throw APKSignatureError.unsupportedSignatureScheme
         }
         return nil
     }
@@ -767,11 +802,11 @@ private struct FileRandomAccessReader {
 
     func readData(at offset: UInt64, count: Int) throws -> Data {
         guard offset + UInt64(count) <= UInt64(fileSize) else {
-            throw PluginPackageSignatureError.invalidArchive("ZIP 読み取り範囲が不正です")
+            throw APKSignatureError.invalidArchive("ZIP 読み取り範囲が不正です")
         }
         try handle.seek(toOffset: offset)
         guard let data = try handle.read(upToCount: count), data.count == count else {
-            throw PluginPackageSignatureError.invalidArchive("ZIP 読み取り範囲が不正です")
+            throw APKSignatureError.invalidArchive("ZIP 読み取り範囲が不正です")
         }
         return data
     }
@@ -788,7 +823,7 @@ private struct ZIPParser {
 
     static func findEndOfCentralDirectory(using reader: FileRandomAccessReader) throws -> Int {
         guard reader.fileSize >= 22 else {
-            throw PluginPackageSignatureError.invalidArchive("ZIP EOCD が見つかりません")
+            throw APKSignatureError.invalidArchive("ZIP EOCD が見つかりません")
         }
 
         let lowerBound = max(0, reader.fileSize - (22 + maxCommentLength))
@@ -807,12 +842,12 @@ private struct ZIPParser {
             }
         }
 
-        throw PluginPackageSignatureError.invalidArchive("ZIP EOCD が見つかりません")
+        throw APKSignatureError.invalidArchive("ZIP EOCD が見つかりません")
     }
 
     static func readUInt16LE(in data: Data, at offset: Int) throws -> UInt16 {
         guard offset >= 0, offset + 2 <= data.count else {
-            throw PluginPackageSignatureError.invalidArchive("ZIP 読み取り範囲が不正です")
+            throw APKSignatureError.invalidArchive("ZIP 読み取り範囲が不正です")
         }
         return data.subdata(in: offset..<(offset + 2)).withUnsafeBytes {
             UInt16(littleEndian: $0.load(as: UInt16.self))
@@ -821,7 +856,7 @@ private struct ZIPParser {
 
     static func readUInt32LE(in data: Data, at offset: Int) throws -> UInt32 {
         guard offset >= 0, offset + 4 <= data.count else {
-            throw PluginPackageSignatureError.invalidArchive("ZIP 読み取り範囲が不正です")
+            throw APKSignatureError.invalidArchive("ZIP 読み取り範囲が不正です")
         }
         return data.subdata(in: offset..<(offset + 4)).withUnsafeBytes {
             UInt32(littleEndian: $0.load(as: UInt32.self))
@@ -830,7 +865,7 @@ private struct ZIPParser {
 
     static func readUInt64LE(in data: Data, at offset: Int) throws -> UInt64 {
         guard offset >= 0, offset + 8 <= data.count else {
-            throw PluginPackageSignatureError.invalidArchive("ZIP 読み取り範囲が不正です")
+            throw APKSignatureError.invalidArchive("ZIP 読み取り範囲が不正です")
         }
         return data.subdata(in: offset..<(offset + 8)).withUnsafeBytes {
             UInt64(littleEndian: $0.load(as: UInt64.self))
@@ -860,7 +895,7 @@ private struct ByteReader {
 
     mutating func readData(count: Int) throws -> Data {
         guard count >= 0, offset + count <= data.count else {
-            throw PluginPackageSignatureError.invalidArchive("長さ付きデータの範囲が不正です")
+            throw APKSignatureError.invalidArchive("長さ付きデータの範囲が不正です")
         }
         defer { offset += count }
         return data.subdata(in: offset..<(offset + count))

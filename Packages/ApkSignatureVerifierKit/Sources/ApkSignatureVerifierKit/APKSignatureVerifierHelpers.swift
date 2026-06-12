@@ -16,14 +16,14 @@ struct ParsedCertificate {
 
     init(der: Data) throws {
         guard let secCertificate = SecCertificateCreateWithData(nil, der as CFData) else {
-            throw PluginPackageSignatureError.invalidArchive("X.509 証明書を読み取れません")
+            throw APKSignatureError.invalidArchive("X.509 証明書を読み取れません")
         }
 
         let certificate: Certificate
         do {
             certificate = try Certificate(secCertificate)
         } catch {
-            throw PluginPackageSignatureError.invalidArchive("X.509 証明書を読み取れません")
+            throw APKSignatureError.invalidArchive("X.509 証明書を読み取れません")
         }
 
         let distributionPoints: [URL]
@@ -73,7 +73,7 @@ struct X509SignatureAlgorithm: Equatable {
     init(node: ASN1Node) throws {
         let children = try node.children()
         guard !children.isEmpty else {
-            throw PluginPackageSignatureError.invalidArchive("AlgorithmIdentifier の形式が不正です")
+            throw APKSignatureError.invalidArchive("AlgorithmIdentifier の形式が不正です")
         }
         self.oid = try children[0].objectIdentifier()
         self.parameters = children.count > 1 ? children[1].fullData : nil
@@ -130,7 +130,7 @@ private struct CertificateListValue: DERParseable {
     init(derEncoded rootNode: ASN1Node) throws {
         let children = try sequenceChildren(of: rootNode, message: "CRL の構造が不正です")
         guard children.count == 3 else {
-            throw PluginPackageSignatureError.invalidArchive("CRL の構造が不正です")
+            throw APKSignatureError.invalidArchive("CRL の構造が不正です")
         }
 
         let tbs = try TBSCertListValue(derEncoded: children[0])
@@ -138,7 +138,7 @@ private struct CertificateListValue: DERParseable {
         let signature = try children[2].bitStringPayload()
 
         guard tbs.signatureAlgorithm == outerAlgorithm else {
-            throw PluginPackageSignatureError.invalidArchive("CRL の署名アルゴリズムが一致しません")
+            throw APKSignatureError.invalidArchive("CRL の署名アルゴリズムが一致しません")
         }
 
         self.tbsDER = children[0].fullData
@@ -164,7 +164,7 @@ private struct TBSCertListValue: DERParseable {
             index += 1
         }
         guard children.count > index + 2 else {
-            throw PluginPackageSignatureError.invalidArchive("CRL の TBS 部分が不正です")
+            throw APKSignatureError.invalidArchive("CRL の TBS 部分が不正です")
         }
 
         self.signatureAlgorithm = try X509SignatureAlgorithm(node: children[index])
@@ -203,7 +203,7 @@ private struct RevokedCertificateValue: DERParseable {
     init(derEncoded rootNode: ASN1Node) throws {
         let children = try sequenceChildren(of: rootNode, message: "CRL 失効エントリの形式が不正です")
         guard let serialNumber = children.first else {
-            throw PluginPackageSignatureError.invalidArchive("CRL 失効エントリの形式が不正です")
+            throw APKSignatureError.invalidArchive("CRL 失効エントリの形式が不正です")
         }
         self.serialNumberHex = normalizeSerialHex(serialNumber.valueData)
     }
@@ -313,7 +313,7 @@ private struct SubjectPublicKeyInfoValue: DERParseable {
             message: "SubjectPublicKeyInfo の形式が不正です"
         )
         guard children.count == 2 else {
-            throw PluginPackageSignatureError.invalidArchive("SubjectPublicKeyInfo の形式が不正です")
+            throw APKSignatureError.invalidArchive("SubjectPublicKeyInfo の形式が不正です")
         }
 
         self.algorithmOID = try X509SignatureAlgorithm(node: children[0]).oid
@@ -325,18 +325,18 @@ private func sequenceChildren(of node: ASN1Node, message: String) throws -> [ASN
     guard node.identifier == .sequence,
         case .constructed(let children) = node.content
     else {
-        throw PluginPackageSignatureError.invalidArchive(message)
+        throw APKSignatureError.invalidArchive(message)
     }
     return Array(children)
 }
 
 private func explicitSingleChild(of node: ASN1Node, message: String) throws -> ASN1Node {
     guard case .constructed(let children) = node.content else {
-        throw PluginPackageSignatureError.invalidArchive(message)
+        throw APKSignatureError.invalidArchive(message)
     }
     let decodedChildren = Array(children)
     guard decodedChildren.count == 1 else {
-        throw PluginPackageSignatureError.invalidArchive(message)
+        throw APKSignatureError.invalidArchive(message)
     }
     return decodedChildren[0]
 }
@@ -346,7 +346,7 @@ extension ASN1Node {
         do {
             return try DER.parse(Array(data))
         } catch {
-            throw PluginPackageSignatureError.invalidArchive("ASN.1 を解析できません")
+            throw APKSignatureError.invalidArchive("ASN.1 を解析できません")
         }
     }
 
@@ -398,7 +398,7 @@ extension ASN1Node {
         do {
             return String(describing: try ASN1ObjectIdentifier(derEncoded: self))
         } catch {
-            throw PluginPackageSignatureError.invalidArchive("OID の形式が不正です")
+            throw APKSignatureError.invalidArchive("OID の形式が不正です")
         }
     }
 
@@ -408,16 +408,16 @@ extension ASN1Node {
             do {
                 return try date(from: UTCTime(derEncoded: self))
             } catch {
-                throw PluginPackageSignatureError.invalidArchive("時刻を解析できません")
+                throw APKSignatureError.invalidArchive("時刻を解析できません")
             }
         case .generalizedTime:
             do {
                 return try date(from: GeneralizedTime(derEncoded: self))
             } catch {
-                throw PluginPackageSignatureError.invalidArchive("時刻を解析できません")
+                throw APKSignatureError.invalidArchive("時刻を解析できません")
             }
         default:
-            throw PluginPackageSignatureError.invalidArchive("時刻形式が不正です")
+            throw APKSignatureError.invalidArchive("時刻形式が不正です")
         }
     }
 
@@ -425,13 +425,13 @@ extension ASN1Node {
         do {
             let bitString = try ASN1BitString(derEncoded: self)
             guard bitString.paddingBits == 0 else {
-                throw PluginPackageSignatureError.invalidArchive("BIT STRING の形式が不正です")
+                throw APKSignatureError.invalidArchive("BIT STRING の形式が不正です")
             }
             return Data(bitString.bytes)
-        } catch let error as PluginPackageSignatureError {
+        } catch let error as APKSignatureError {
             throw error
         } catch {
-            throw PluginPackageSignatureError.invalidArchive("BIT STRING の形式が不正です")
+            throw APKSignatureError.invalidArchive("BIT STRING の形式が不正です")
         }
     }
 }
@@ -468,7 +468,7 @@ func computeContentDigest(
         while remaining > 0 {
             let length = min(chunkSize, remaining)
             guard let chunk = try handle.read(upToCount: length), chunk.count == length else {
-                throw PluginPackageSignatureError.invalidArchive("パッケージデータの読み取りに失敗しました")
+                throw APKSignatureError.invalidArchive("パッケージデータの読み取りに失敗しました")
             }
             hashes.append(hashChunk(chunk))
             remaining -= length
@@ -488,7 +488,7 @@ func computeContentDigest(
         guard var section4Data = try handle.read(upToCount: section4Size),
             section4Data.count == section4Size
         else {
-            throw PluginPackageSignatureError.invalidArchive("パッケージデータの読み取りに失敗しました")
+            throw APKSignatureError.invalidArchive("パッケージデータの読み取りに失敗しました")
         }
         let offsetData = withUnsafeBytes(of: UInt32(signingBlockOffset).littleEndian) { Data($0) }
         section4Data.replaceSubrange(16..<20, with: offsetData)
@@ -525,7 +525,7 @@ private func rawEd25519PublicKey(from subjectPublicKeyInfoDER: Data) throws -> D
         derEncoded: ASN1Node.singleNode(from: subjectPublicKeyInfoDER)
     )
     guard subjectPublicKeyInfo.algorithmOID == "1.3.101.112" else {
-        throw PluginPackageSignatureError.invalidArchive("Ed25519 の公開鍵ではありません")
+        throw APKSignatureError.invalidArchive("Ed25519 の公開鍵ではありません")
     }
     return subjectPublicKeyInfo.publicKeyBytes
 }
@@ -610,7 +610,7 @@ private func date(
     components.nanosecond = nanosecond
 
     guard let date = components.date else {
-        throw PluginPackageSignatureError.invalidArchive("時刻を解析できません")
+        throw APKSignatureError.invalidArchive("時刻を解析できません")
     }
     return date
 }

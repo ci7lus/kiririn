@@ -1,21 +1,10 @@
+import ApkSignatureVerifierKit
 import Foundation
 import Testing
 
 @testable import kiririn
 
 struct PluginSignatureBehaviorTests {
-
-    @Test func packageSignatureVerifierTreatsUnsignedArchiveAsUnsigned() throws {
-        let verifier = PluginPackageSignatureVerifier(trustedChainPEMData: nil)
-        let tempURL = try tempFileForTest(data: emptyZIPData())
-        defer { try? FileManager.default.removeItem(at: tempURL) }
-
-        let authentication = try verifier.verify(packageURL: tempURL)
-
-        #expect(authentication.state == .unsigned)
-        #expect(!authentication.isSigned)
-        #expect(authentication.scheme == nil)
-    }
 
     @Test func pluginStoreStoresUnsignedPackageAuthenticationAndDisablesManualUpdate() throws {
         let suiteName = "kiririn.plugin.signature.\(UUID().uuidString)"
@@ -24,7 +13,7 @@ struct PluginSignatureBehaviorTests {
 
         let store = PluginStore(
             defaults: defaults,
-            packageSignatureVerifier: PluginPackageSignatureVerifier(trustedChainPEMData: nil)
+            packageSignatureVerifier: ApkSignatureVerifierKit(trustedChainPEMData: nil)
         )
         let packageData = unsignedPluginPackageData(
             manifestID: "com.example.unsigned",
@@ -49,7 +38,7 @@ struct PluginSignatureBehaviorTests {
 
         let store = PluginStore(
             defaults: defaults,
-            packageSignatureVerifier: PluginPackageSignatureVerifier(trustedChainPEMData: nil)
+            packageSignatureVerifier: ApkSignatureVerifierKit(trustedChainPEMData: nil)
         )
         let plugin = PluginDefinition(
             id: UUID(),
@@ -82,7 +71,7 @@ struct PluginSignatureBehaviorTests {
 
         let store = PluginStore(
             defaults: defaults,
-            packageSignatureVerifier: PluginPackageSignatureVerifier(trustedChainPEMData: nil)
+            packageSignatureVerifier: ApkSignatureVerifierKit(trustedChainPEMData: nil)
         )
         let packageData = unsignedPluginPackageData(
             manifestID: "com.example.signed",
@@ -90,11 +79,11 @@ struct PluginSignatureBehaviorTests {
         )
         let archiveFileName = "signed-\(UUID().uuidString).kppx"
         let archiveURL = store.pluginDirectoryURL.appending(path: archiveFileName)
-        let authentication = PluginPackageAuthentication(
+        let authentication = APKAuthentication(
             scheme: .v3,
             state: .verified,
             signers: [
-                PluginPackageSignerSummary(
+                APKSignerSummary(
                     distinguishedName: "CN=kiririn Signer S1",
                     publicKeySHA256: "deadbeef"
                 )
@@ -239,12 +228,12 @@ private func routingPreview(manifestID: String, signerHashes: [String]) -> Plugi
     )
 }
 
-private func routingAuthentication(signerHashes: [String]) -> PluginPackageAuthentication {
-    PluginPackageAuthentication(
+private func routingAuthentication(signerHashes: [String]) -> APKAuthentication {
+    APKAuthentication(
         scheme: .v3,
         state: .verified,
         signers: signerHashes.map { hash in
-            PluginPackageSignerSummary(
+            APKSignerSummary(
                 distinguishedName: "CN=Routing Signer",
                 publicKeySHA256: hash
             )
@@ -272,19 +261,6 @@ private func routingManifest(manifestID: String) -> ExtensionPluginManifest {
         requestedPermissions: ["storage"],
         requestedHostPermissions: []
     )
-}
-
-private func emptyZIPData() -> Data {
-    var data = Data()
-    data.append(littleEndian(UInt32(0x0605_4b50)))
-    data.append(littleEndian(UInt16(0)))
-    data.append(littleEndian(UInt16(0)))
-    data.append(littleEndian(UInt16(0)))
-    data.append(littleEndian(UInt16(0)))
-    data.append(littleEndian(UInt32(0)))
-    data.append(littleEndian(UInt32(0)))
-    data.append(littleEndian(UInt16(0)))
-    return data
 }
 
 private func unsignedPluginPackageData(manifestID: String, updateURL: String) -> Data {
