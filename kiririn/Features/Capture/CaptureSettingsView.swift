@@ -13,7 +13,6 @@ struct CaptureSettingsView: View {
         @AppStorage(GlobalCaptureHotKeyManager.defaultsModifiersKey) private
             var globalCaptureHotKeyModifiers = 0
         @State private var isCapturingGlobalCaptureHotKey = false
-        @State private var hotKeyCaptureErrorMessage: String?
     #endif
 
     var body: some View {
@@ -70,7 +69,7 @@ struct CaptureSettingsView: View {
 
             #if os(macOS)
                 Section("グローバルキャプチャキー") {
-                    LabeledContent("ホットキー") {
+                    LabeledContent("キーコンビネーション") {
                         HStack(spacing: 8) {
                             ShortcutRecorderView(
                                 keyCode: $globalCaptureHotKeyKeyCode,
@@ -89,37 +88,6 @@ struct CaptureSettingsView: View {
                                 .help("ショートカットをクリア")
                             }
                         }
-                    }
-
-                    if globalCaptureHotKeyKeyCode >= 0 {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("グローバルキャプチャキーを使用するには、アクセシビリティ権限が必要です。")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            HStack(spacing: 12) {
-                                Button("権限を確認・要求") {
-                                    _ = GlobalCaptureHotKeyManager.requestAccessibilityPermission()
-                                }
-
-                                Button("システム設定を開く") {
-                                    let url = URL(
-                                        string:
-                                            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-                                    )!
-                                    NSWorkspace.shared.open(url)
-                                }
-                            }
-                            .buttonStyle(.link)
-                            .controlSize(.small)
-                        }
-                        .padding(.top, 4)
-                    }
-
-                    if let hotKeyCaptureErrorMessage {
-                        Text(hotKeyCaptureErrorMessage)
-                            .font(.caption)
-                            .foregroundStyle(.red)
                     }
                 }
             #endif
@@ -171,7 +139,6 @@ struct CaptureSettingsView: View {
         private func clearGlobalCaptureHotKey() {
             globalCaptureHotKeyKeyCode = -1
             globalCaptureHotKeyModifiers = 0
-            hotKeyCaptureErrorMessage = nil
             isCapturingGlobalCaptureHotKey = false
         }
     #endif

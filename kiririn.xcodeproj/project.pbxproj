@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		CE171EEE2F61AE4D008DEA05 /* OrderedCollections in Frameworks */ = {isa = PBXBuildFile; productRef = CE171EED2F61AE4D008DEA05 /* OrderedCollections */; };
 		CE21E9412FF10C020007B5F6 /* PronamaAssets in Frameworks */ = {isa = PBXBuildFile; productRef = CE21E9402FF10C020007B5F6 /* PronamaAssets */; };
+		CE3FA1922FDC21880049EEA5 /* HotKey in Frameworks */ = {isa = PBXBuildFile; productRef = CE3FA1912FDC21880049EEA5 /* HotKey */; };
 		CE4442812FB87FAD0092C2BF /* VLCKit in Frameworks */ = {isa = PBXBuildFile; productRef = CE4442802FB87FAD0092C2BF /* VLCKit */; };
 		CE44428E2FB8B9050092C2BF /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = CE44428D2FB8B9050092C2BF /* Sentry */; };
 		CE47B1A72F4DC5AA00680B2E /* Logging in Frameworks */ = {isa = PBXBuildFile; productRef = CE47B1A62F4DC5AA00680B2E /* Logging */; };
@@ -108,6 +109,7 @@
 				CE4442812FB87FAD0092C2BF /* VLCKit in Frameworks */,
 				CEA5BDDA2FCB5D95007D3B10 /* X509 in Frameworks */,
 				CE47B1A72F4DC5AA00680B2E /* Logging in Frameworks */,
+				CE3FA1922FDC21880049EEA5 /* HotKey in Frameworks */,
 				CE44428E2FB8B9050092C2BF /* Sentry in Frameworks */,
 				CE21E9412FF10C020007B5F6 /* PronamaAssets in Frameworks */,
 				CEA5BCC72FC31AB8007D3B10 /* ZIPFoundation in Frameworks */,
@@ -190,6 +192,7 @@
 				CE21E9402FF10C020007B5F6 /* PronamaAssets */,
 				CEA5BCC62FC31AB8007D3B10 /* ZIPFoundation */,
 				CEA5BDD92FCB5D95007D3B10 /* X509 */,
+				CE3FA1912FDC21880049EEA5 /* HotKey */,
 			);
 			productName = kiririn;
 			productReference = 105FC57A2E9EAD3100EA8BCF /* kiririn.app */;
@@ -283,6 +286,7 @@
 				CE21E93F2FF10C020007B5F6 /* XCRemoteSwiftPackageReference "931f454f81e605d08440df93f341a841" */,
 				CEA5BCC52FC31AB8007D3B10 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 				CEA5BDD82FCB5D95007D3B10 /* XCRemoteSwiftPackageReference "swift-certificates" */,
+				CE3FA1902FDC21880049EEA5 /* XCRemoteSwiftPackageReference "HotKey" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 105FC57B2E9EAD3100EA8BCF /* Products */;
@@ -763,6 +767,14 @@
 				kind = branch;
 			};
 		};
+		CE3FA1902FDC21880049EEA5 /* XCRemoteSwiftPackageReference "HotKey" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/soffes/HotKey";
+			requirement = {
+				kind = revision;
+				revision = a3cf605d7a96f6ff50e04fcb6dea6e2613cfcbe4;
+			};
+		};
 		CE44428C2FB8B9050092C2BF /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/getsentry/sentry-cocoa.git";
@@ -818,6 +830,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CE171EEC2F61AE4D008DEA05 /* XCRemoteSwiftPackageReference "swift-collections" */;
 			productName = OrderedCollections;
+		};
+		CE3FA1912FDC21880049EEA5 /* HotKey */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CE3FA1902FDC21880049EEA5 /* XCRemoteSwiftPackageReference "HotKey" */;
+			productName = HotKey;
 		};
 		CE4442802FB87FAD0092C2BF /* VLCKit */ = {
 			isa = XCSwiftPackageProductDependency;

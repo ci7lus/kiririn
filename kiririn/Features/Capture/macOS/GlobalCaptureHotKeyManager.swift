@@ -1,6 +1,6 @@
 import AppKit
-import ApplicationServices
 import Foundation
+import HotKey
 import Logging
 
 struct GlobalCaptureHotKeyConfiguration: Equatable {
@@ -26,19 +26,7 @@ final class GlobalCaptureHotKeyManager {
 
     private let logger = Logger(label: "GlobalCaptureHotKeyManager")
     private let onTrigger: () -> Void
-
-    static var isAccessibilityPermissionGranted: Bool {
-        AXIsProcessTrusted()
-    }
-
-    @discardableResult
-    static func requestAccessibilityPermission() -> Bool {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-        return AXIsProcessTrustedWithOptions(options as CFDictionary)
-    }
-
-    private var globalMonitor: Any?
-    private var localMonitor: Any?
+    private var hotKey: HotKey?
 
     init(onTrigger: @escaping () -> Void) {
         self.onTrigger = onTrigger
@@ -46,7 +34,7 @@ final class GlobalCaptureHotKeyManager {
     }
 
     deinit {
-        unregister()
+        hotKey = nil
     }
 
     func reloadFromDefaults(_ defaults: UserDefaults = .standard) {
@@ -55,7 +43,7 @@ final class GlobalCaptureHotKeyManager {
     }
 
     func apply(configuration: GlobalCaptureHotKeyConfiguration) {
-        unregister()
+        hotKey = nil
 
         guard configuration.enabled,
             let keyCode = configuration.keyCode,
@@ -73,45 +61,16 @@ final class GlobalCaptureHotKeyManager {
             "registering global capture hotkey: \(Self.shortcutDisplayString(keyCode: UInt16(keyCode), modifiers: normalizedFlags))"
         )
 
-        if !AXIsProcessTrusted() {
-            logger.warning(
-                "accessibility permissions are NOT granted. global capture hotkey will not work in background."
-            )
+        let keyCombo = KeyCombo(
+            carbonKeyCode: keyCode,
+            carbonModifiers: normalizedFlags.carbonFlags
+        )
+        let newHotKey = HotKey(keyCombo: keyCombo)
+        newHotKey.keyDownHandler = { [weak self] in
+            self?.logger.info("global capture hotkey triggered")
+            self?.onTrigger()
         }
-
-        let targetKeyCode = UInt16(keyCode)
-
-        // Background monitoring
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) {
-            [weak self] event in
-            self?.handleEvent(event, targetKeyCode: targetKeyCode, targetFlags: normalizedFlags)
-        }
-
-        // Foreground monitoring
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
-            [weak self] event in
-            if self?.handleEvent(
-                event, targetKeyCode: targetKeyCode, targetFlags: normalizedFlags) == true
-            {
-                // Consume the event if it matches
-                return nil
-            }
-            return event
-        }
-    }
-
-    @discardableResult
-    private func handleEvent(
-        _ event: NSEvent, targetKeyCode: UInt16, targetFlags: NSEvent.ModifierFlags
-    ) -> Bool {
-        guard event.keyCode == targetKeyCode else { return false }
-
-        let currentFlags = Self.normalizedModifierFlags(event.modifierFlags)
-        guard currentFlags == targetFlags else { return false }
-
-        logger.info("global capture hotkey triggered")
-        onTrigger()
-        return true
+        hotKey = newHotKey
     }
 
     static func loadFromDefaults(_ defaults: UserDefaults = .standard)
@@ -120,7 +79,6 @@ final class GlobalCaptureHotKeyManager {
         let keyCodeValue = defaults.object(forKey: defaultsKeyCodeKey) as? Int
         let keyCode = keyCodeValue.flatMap { $0 >= 0 ? UInt32($0) : nil }
         let modifiers = UInt32(defaults.integer(forKey: defaultsModifiersKey))
-        // 有効化トグルを廃止し、キーコードが設定されていれば有効とみなす
         let enabled = keyCode != nil
         return GlobalCaptureHotKeyConfiguration(
             enabled: enabled, keyCode: keyCode, modifiers: modifiers)
@@ -149,17 +107,6 @@ final class GlobalCaptureHotKeyManager {
 
         let keyName = keyDisplayName(for: keyCode)
         return symbols.joined() + keyName
-    }
-
-    private func unregister() {
-        if let globalMonitor {
-            NSEvent.removeMonitor(globalMonitor)
-            self.globalMonitor = nil
-        }
-        if let localMonitor {
-            NSEvent.removeMonitor(localMonitor)
-            self.localMonitor = nil
-        }
     }
 
     private static func keyDisplayName(for keyCode: UInt16) -> String {
