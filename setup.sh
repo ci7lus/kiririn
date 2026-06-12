@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# https://github.com/vivid-lapin/vlckit/releases
-REVISION="202605172235"
-VLCKIT_URL="https://github.com/vivid-lapin/vlckit/releases/download/$REVISION/VLCKit-iOS-REPLACEWITHVERSION.dmg"
+# https://github.com/neneka/vlckit/releases
+REVISION="202606110423"
+VLCKIT_URL="https://github.com/neneka/vlckit/releases/download/$REVISION/VLCKit-iOS-REPLACEWITHVERSION.dmg"
 VLCKIT_DEST="./Packages/VLCKit"
 FRAMEWORK_DEST="${VLCKIT_DEST}/VLCKit.xcframework"
 
@@ -23,4 +23,4 @@ cp -R "$MOUNT_DIR/VLCKit.xcframework" "$FRAMEWORK_DEST"
 hdiutil detach "$MOUNT_DIR" -quiet
 rm -rf "$TEMP_DMG" "$MOUNT_DIR"
 
-curl -sL "https://raw.githubusercontent.com/vivid-lapin/vlckit/refs/tags/$REVISION/COPYING" -o "$VLCKIT_DEST/VLCKitLicense/COPYING"
+curl -sL "https://raw.githubusercontent.com/neneka/vlckit/refs/tags/$REVISION/COPYING" -o "$VLCKIT_DEST/VLCKitLicense/COPYING"
