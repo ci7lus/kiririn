@@ -3,6 +3,7 @@
 //  kiririnTests
 //
 
+import ARIBStandardKit
 import Foundation
 import OrderedCollections
 import Testing
@@ -30,7 +31,7 @@ struct KiririnTests {
     @Test func broadcastDisplaySegmentsSeparateEnclosedTokensFromPlainText() {
         let source = "番組🈑タイトル🆞"
 
-        let segments = source.broadcastDisplaySegments()
+        let segments = source.aribBroadcastDisplaySegments()
 
         #expect(segments.map(\.text) == ["番組", "字", "タイトル", "4K"])
         #expect(segments.map(\.isEnclosed) == [false, true, false, true])
@@ -76,8 +77,9 @@ struct KiririnTests {
         #expect(record.desc == "🈚🈛ではない")
         #expect(record.serviceName == "🈐チャンネル")
 
-        #expect(program.name.broadcastDisplaySegments().map(\.text) == ["字", "番組", "4K"])
-        #expect(program.name.broadcastDisplaySegments().map(\.isEnclosed) == [true, false, true])
+        #expect(program.name.aribBroadcastDisplaySegments().map(\.text) == ["字", "番組", "4K"])
+        #expect(
+            program.name.aribBroadcastDisplaySegments().map(\.isEnclosed) == [true, false, true])
     }
 
     @Test func playableUsesRawValuesForBroadcastTextRendering() {
@@ -118,8 +120,8 @@ struct KiririnTests {
         #expect(playable.subtitle == "🆧対応")
         #expect(playable.serviceName == "🈐サービス")
 
-        #expect(playable.title.broadcastDisplaySegments().map(\.text) == ["字", "番組", "4K"])
-        #expect(playable.subtitle?.broadcastDisplaySegments().map(\.text) == ["HDR", "対応"])
+        #expect(playable.title.aribBroadcastDisplaySegments().map(\.text) == ["字", "番組", "4K"])
+        #expect(playable.subtitle?.aribBroadcastDisplaySegments().map(\.text) == ["HDR", "対応"])
     }
 
     @Test func programGenreUsesSubGenreForShortDisplayName() {

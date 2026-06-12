@@ -1,13 +1,13 @@
 import Foundation
 
 extension String {
-    nonisolated func replacingARIBEnclosedGlyphsForDisplay() -> String {
-        broadcastDisplaySegments()
+    public func replacingARIBEnclosedGlyphsForDisplay() -> String {
+        aribBroadcastDisplaySegments()
             .map { $0.isEnclosed ? "[\($0.text)]" : $0.text }
             .joined()
     }
 
-    nonisolated func broadcastDisplaySegments() -> [(text: String, isEnclosed: Bool)] {
+    public func aribBroadcastDisplaySegments() -> [(text: String, isEnclosed: Bool)] {
         guard !isEmpty else { return [] }
         guard containsARIBEnclosedGlyphs else { return [(text: self, isEnclosed: false)] }
 
@@ -34,11 +34,11 @@ extension String {
         return segments
     }
 
-    private nonisolated var containsARIBEnclosedGlyphs: Bool {
+    private var containsARIBEnclosedGlyphs: Bool {
         contains { Self.aribEnclosedGlyphLabels[$0] != nil }
     }
 
-    private nonisolated static let aribEnclosedGlyphLabels: [Character: String] = [
+    public static let aribEnclosedGlyphLabels: [Character: String] = [
         "🅊": "HV",
         "🄿": "P",
         "🅌": "SD",

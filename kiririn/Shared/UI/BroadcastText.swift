@@ -1,3 +1,4 @@
+import ARIBStandardKit
 import SwiftUI
 
 struct BroadcastText: View {
@@ -9,7 +10,7 @@ struct BroadcastText: View {
     }
 
     var body: some View {
-        let segments = source.broadcastDisplaySegments()
+        let segments = source.aribBroadcastDisplaySegments()
 
         if segments.count == 1,
             let segment = segments.first,

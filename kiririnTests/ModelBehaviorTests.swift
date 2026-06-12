@@ -1,3 +1,4 @@
+import ARIBStandardKit
 import Foundation
 import Testing
 
@@ -66,7 +67,7 @@ struct ModelBehaviorTests {
         #expect(service.name == "🈐テストサービス")
         #expect(service.unifiedServiceKey == "20-10")
         #expect(service.type.description == "4K/8K放送 (UHDTV)")
-        #expect(service.name.broadcastDisplaySegments().map(\.text) == ["手", "テストサービス"])
+        #expect(service.name.aribBroadcastDisplaySegments().map(\.text) == ["手", "テストサービス"])
     }
 
     @Test func recordedDisplayDateFallsBackToReferenceDateAndPlayableIDUsesFirstVariant() {

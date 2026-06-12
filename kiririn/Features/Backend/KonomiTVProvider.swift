@@ -1,3 +1,4 @@
+import ARIBStandardKit
 import Foundation
 
 final class KonomiTVProvider: RecordingBackendProvider {
