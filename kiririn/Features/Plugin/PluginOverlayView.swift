@@ -1,4 +1,5 @@
 import Combine
+import KppxKit
 import Logging
 import SwiftUI
 import WebKit
@@ -9,11 +10,7 @@ import WebKit
     import UIKit
 #endif
 
-enum PluginDisplayArea: String, Codable, CaseIterable, Sendable {
-    case overlay = "overlay"
-    case options = "options"
-    case panel = "panel"
-
+extension PluginDisplayArea {
     var localizedName: String {
         switch self {
         case .overlay: return "プレイヤーオーバーレイ"

@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import KppxKit
 import SwiftUI
 import VLCKit
 

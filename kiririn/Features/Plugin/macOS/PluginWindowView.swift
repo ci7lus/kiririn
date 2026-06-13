@@ -1,3 +1,4 @@
+import KppxKit
 import SwiftUI
 
 struct PluginWindowView_macOS: View {

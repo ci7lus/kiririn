@@ -1,6 +1,7 @@
 #if !os(macOS)
     import SwiftUI
     import Combine
+    import KppxKit
     import UIKit
     import VLCKit
     import OrderedCollections

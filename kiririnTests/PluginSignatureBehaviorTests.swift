@@ -1,5 +1,6 @@
 import ApkSignatureVerifierKit
 import Foundation
+import KppxKit
 import Testing
 
 @testable import kiririn

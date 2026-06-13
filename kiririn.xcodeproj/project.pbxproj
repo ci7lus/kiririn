@@ -16,6 +16,7 @@
 		CE47B1AA2F4DC65200680B2E /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CE47B1A92F4DC65200680B2E /* GRDB */; };
 		CE54EBE92FB834D4009AFCBC /* LicenseList in Frameworks */ = {isa = PBXBuildFile; productRef = CE54EBE82FB834D4009AFCBC /* LicenseList */; };
 		CE699FA32FDC700400C6F6C4 /* ARIBStandardKit in Frameworks */ = {isa = PBXBuildFile; productRef = CE699FA22FDC700400C6F6C4 /* ARIBStandardKit */; };
+		CE6B51C72FDDAD7A00873F35 /* KppxKit in Frameworks */ = {isa = PBXBuildFile; productRef = CE6B51C62FDDAD7A00873F35 /* KppxKit */; };
 		CEA5BCC72FC31AB8007D3B10 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = CEA5BCC62FC31AB8007D3B10 /* ZIPFoundation */; };
 		CEA761572FDC65F200C55CC4 /* ApkSignatureVerifierKit in Frameworks */ = {isa = PBXBuildFile; productRef = CEA761562FDC65F200C55CC4 /* ApkSignatureVerifierKit */; };
 		CEA761592FDC66F500C55CC4 /* ApkSignatureVerifierKit in Frameworks */ = {isa = PBXBuildFile; productRef = CEA761582FDC66F500C55CC4 /* ApkSignatureVerifierKit */; };
@@ -106,6 +107,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CE6B51C72FDDAD7A00873F35 /* KppxKit in Frameworks */,
 				CE54EBE92FB834D4009AFCBC /* LicenseList in Frameworks */,
 				CE47B1AA2F4DC65200680B2E /* GRDB in Frameworks */,
 				CE171EEE2F61AE4D008DEA05 /* OrderedCollections in Frameworks */,
@@ -192,6 +194,7 @@
 				CE3FA1912FDC21880049EEA5 /* HotKey */,
 				CEA761562FDC65F200C55CC4 /* ApkSignatureVerifierKit */,
 				CEA7615D2FDC6B1C00C55CC4 /* ARIBStandardKit */,
+				CE6B51C62FDDAD7A00873F35 /* KppxKit */,
 			);
 			productName = kiririn;
 			productReference = 105FC57A2E9EAD3100EA8BCF /* kiririn.app */;
@@ -289,6 +292,7 @@
 				CE3FA1902FDC21880049EEA5 /* XCRemoteSwiftPackageReference "HotKey" */,
 				CEA761552FDC65F200C55CC4 /* XCLocalSwiftPackageReference "Packages/ApkSignatureVerifierKit" */,
 				CEA7615C2FDC6B1C00C55CC4 /* XCLocalSwiftPackageReference "Packages/ARIBStandardKit" */,
+				CE6B51C52FDDAD7A00873F35 /* XCLocalSwiftPackageReference "Packages/KppxKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 105FC57B2E9EAD3100EA8BCF /* Products */;
@@ -750,6 +754,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/VLCKit;
 		};
+		CE6B51C52FDDAD7A00873F35 /* XCLocalSwiftPackageReference "Packages/KppxKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/KppxKit;
+		};
 		CEA761552FDC65F200C55CC4 /* XCLocalSwiftPackageReference "Packages/ApkSignatureVerifierKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ApkSignatureVerifierKit;
@@ -871,6 +879,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CEA7615C2FDC6B1C00C55CC4 /* XCLocalSwiftPackageReference "Packages/ARIBStandardKit" */;
 			productName = ARIBStandardKit;
+		};
+		CE6B51C62FDDAD7A00873F35 /* KppxKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = KppxKit;
 		};
 		CEA5BCC62FC31AB8007D3B10 /* ZIPFoundation */ = {
 			isa = XCSwiftPackageProductDependency;

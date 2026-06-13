@@ -1,18 +1,18 @@
 import Foundation
 import ZIPFoundation
 
-struct PluginPackage {
-    let packageURL: URL
+public struct PluginPackage {
+    public let packageURL: URL
 
     private let archive: Archive
 
-    init(url: URL) throws {
+    public init(url: URL) throws {
         self.packageURL = url
         self.archive = try Self.archive(from: url)
         try Self.validateEntries(in: archive)
     }
 
-    func containsFile(named fileName: String) throws -> Bool {
+    public func containsFile(named fileName: String) throws -> Bool {
         let path = try Self.validatedFileName(fileName)
         guard let entry = archive[path] else {
             return false
@@ -20,7 +20,7 @@ struct PluginPackage {
         return entry.type != .directory
     }
 
-    func fileData(named fileName: String) throws -> Data? {
+    public func fileData(named fileName: String) throws -> Data? {
         let path = try Self.validatedFileName(fileName)
         guard let entry = archive[path], entry.type != .directory else {
             return nil
@@ -60,18 +60,18 @@ struct PluginPackage {
     }
 }
 
-enum PluginDecoderError: LocalizedError {
+public enum PluginDecoderError: LocalizedError, Equatable {
     case invalidArchive
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .invalidArchive: return "無効なプラグインパッケージです"
         }
     }
 }
 
-struct PluginDecoder {
-    static func decode(url: URL) throws -> PluginPackage {
+public struct PluginDecoder {
+    public static func decode(url: URL) throws -> PluginPackage {
         try PluginPackage(url: url)
     }
 }
