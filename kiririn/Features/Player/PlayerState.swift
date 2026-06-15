@@ -5,6 +5,7 @@ import OrderedCollections
 import Sentry
 import SwiftUI
 import VLCKit
+import VLCKitAssets
 
 #if canImport(UIKit)
     import UIKit
@@ -1368,7 +1369,16 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     }
 
     private func makePlayer() -> VLCMediaPlayer {
-        let player = VLCMediaPlayer(options: Self.mediaPlayerOptions)
+        var options = Self.mediaPlayerOptions
+        if let hrtfPath = VLCKitAssets.resolveSofaPath() {
+            options.append("--hrtf-file=\(hrtfPath)")
+            logger.debug("SOFA HRTF file resolved: \(hrtfPath)")
+        } else {
+            logger.warning(
+                "SOFA HRTF file not found; binaural mode will be unavailable")
+        }
+
+        let player = VLCMediaPlayer(options: options)
         player.delegate = self
         player.audio?.volume = Int32(volume.rounded())
         player.audio?.isMuted = isMuted

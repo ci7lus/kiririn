@@ -1,6 +1,6 @@
 import Foundation
 
-public enum VLCKitLicense {
+public enum VLCKitAssets {
     public static let name = "VLCKit"
     public static let homepageURL = URL(string: "https://code.videolan.org/videolan/VLCKit")!
 
@@ -11,5 +11,15 @@ public enum VLCKitLicense {
             return "ライセンスの取得に失敗しました"
         }
         return text
+    }
+
+    public static func resolveSofaPath(
+        sofaName: String = "dodeca_and_7channel_3DSL_HRTF",
+        sofaExtension: String = "sofa"
+    ) -> String? {
+        Bundle.module.path(
+            forResource: sofaName,
+            ofType: sofaExtension
+        )
     }
 }

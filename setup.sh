@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # https://github.com/neneka/vlckit/releases
-REVISION="202606110423"
+REVISION="202606162330"
 VLCKIT_URL="https://github.com/neneka/vlckit/releases/download/$REVISION/VLCKit-iOS-REPLACEWITHVERSION.dmg"
 VLCKIT_DEST="./Packages/VLCKit"
 FRAMEWORK_DEST="${VLCKIT_DEST}/VLCKit.xcframework"
@@ -23,4 +23,6 @@ cp -R "$MOUNT_DIR/VLCKit.xcframework" "$FRAMEWORK_DEST"
 hdiutil detach "$MOUNT_DIR" -quiet
 rm -rf "$TEMP_DMG" "$MOUNT_DIR"
 
-curl -sL "https://raw.githubusercontent.com/neneka/vlckit/refs/tags/$REVISION/COPYING" -o "$VLCKIT_DEST/VLCKitLicense/COPYING"
+curl -sL "https://raw.githubusercontent.com/neneka/vlckit/refs/tags/$REVISION/COPYING" -o "$VLCKIT_DEST/VLCKitAssets/COPYING"
+
+curl -sL "https://raw.githubusercontent.com/neneka/vlckit/refs/tags/$REVISION/share/hrtfs/dodeca_and_7channel_3DSL_HRTF.sofa" -o "$VLCKIT_DEST/VLCKitAssets/dodeca_and_7channel_3DSL_HRTF.sofa"

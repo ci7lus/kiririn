@@ -6,10 +6,9 @@ import PackageDescription
 let package = Package(
     name: "VLCKit",
     products: [
-        // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
             name: "VLCKit",
-            targets: ["VLCKit", "VLCKitLicense"]
+            targets: ["VLCKit", "VLCKitAssets"]
         )
     ],
     targets: [
@@ -18,10 +17,11 @@ let package = Package(
             path: "VLCKit.xcframework"
         ),
         .target(
-            name: "VLCKitLicense",
-            path: "VLCKitLicense",
+            name: "VLCKitAssets",
+            path: "VLCKitAssets",
             resources: [
-                .copy("COPYING")
+                .copy("COPYING"),
+                .copy("dodeca_and_7channel_3DSL_HRTF.sofa"),
             ]
         ),
     ]

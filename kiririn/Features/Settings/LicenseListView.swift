@@ -1,14 +1,14 @@
 import LicenseList
 import SwiftUI
-import VLCKitLicense
+import VLCKitAssets
 
 struct LicenseListView: View {
     private let libraries: [Library] =
         [
             Library(
-                name: VLCKitLicense.name,
-                url: VLCKitLicense.homepageURL.absoluteString,
-                licenseBody: VLCKitLicense.text
+                name: VLCKitAssets.name,
+                url: VLCKitAssets.homepageURL.absoluteString,
+                licenseBody: VLCKitAssets.text
             )
         ] + Library.libraries
 
