@@ -21,11 +21,84 @@ nonisolated enum PlayerMode: Sendable {
 nonisolated struct PlayerAudioTrack: Identifiable, Hashable, Sendable {
     let id: String
     let name: String
+    let channels: Int
 }
 
 nonisolated struct PlayerVideoTrack: Identifiable, Hashable, Sendable {
     let id: String
     let name: String
+}
+
+// VLCAudioStereoMode libvlc_audio_output_stereomode_t
+nonisolated enum PlayerAudioStereoMode: Int, CaseIterable, Identifiable, Hashable, Sendable {
+    case unset = 0
+    case stereo = 1
+    case reverseStereo = 2
+    case left = 3
+    case right = 4
+    case dolbySurround = 5
+    case mono = 7
+
+    var id: Int { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .unset: return "自動"
+        case .stereo: return "ステレオ"
+        case .reverseStereo: return "反転ステレオ"
+        case .left: return "左チャンネルのみ"
+        case .right: return "右チャンネルのみ"
+        case .dolbySurround: return "ドルビーサラウンド"
+        case .mono: return "モノラル"
+        }
+    }
+
+    init(vlcMode: VLCMediaPlayer.AudioStereoMode) {
+        if let mapped = Self(rawValue: Int(vlcMode.rawValue)) {
+            self = mapped
+        } else {
+            self = .unset
+        }
+    }
+
+    var vlcMode: VLCMediaPlayer.AudioStereoMode {
+        VLCMediaPlayer.AudioStereoMode(rawValue: .init(rawValue)) ?? .unset
+    }
+}
+
+// VLCAudioMixMode libvlc_audio_output_mixmode_t
+nonisolated enum PlayerAudioMixMode: Int, CaseIterable, Identifiable, Hashable, Sendable {
+    case unset = 0
+    case stereo = 1
+    case binaural = 2
+    case surround4_0 = 3
+    case surround5_1 = 4
+    case surround7_1 = 5
+
+    var id: Int { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .unset: return "自動"
+        case .stereo: return "ステレオ"
+        case .binaural: return "バイノーラル"
+        case .surround4_0: return "4.0サラウンド"
+        case .surround5_1: return "5.1サラウンド"
+        case .surround7_1: return "7.1サラウンド"
+        }
+    }
+
+    init(vlcMode: VLCMediaPlayer.AudioMixMode) {
+        if let mapped = Self(rawValue: Int(vlcMode.rawValue)) {
+            self = mapped
+        } else {
+            self = .unset
+        }
+    }
+
+    var vlcMode: VLCMediaPlayer.AudioMixMode {
+        VLCMediaPlayer.AudioMixMode(rawValue: .init(rawValue)) ?? .modeUnset
+    }
 }
 
 nonisolated struct PlayerPlaybackStatus: Sendable, Codable, Equatable {
@@ -186,6 +259,8 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     var selectedAudioTrack: PlayerAudioTrack?
     var availableVideoTracks: [PlayerVideoTrack] = []
     var selectedVideoTrack: PlayerVideoTrack?
+    var selectedAudioStereoMode: PlayerAudioStereoMode = .unset
+    var selectedAudioMixMode: PlayerAudioMixMode = .unset
     var showingSettings = false
     var showingPluginOverlay = true
     var plugins: [PluginDefinition] = []
@@ -547,6 +622,16 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         selectedVideoTrackID = option.id
     }
 
+    func selectAudioStereoMode(_ mode: PlayerAudioStereoMode) {
+        selectedAudioStereoMode = mode
+        applyAudioStereoMode()
+    }
+
+    func selectAudioMixMode(_ mode: PlayerAudioMixMode) {
+        selectedAudioMixMode = mode
+        applyAudioMixMode()
+    }
+
     func setSubtitleEnabled(_ enabled: Bool) {
         isSubtitleEnabled = enabled
         applySubtitleSelection()
@@ -566,7 +651,14 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
         let tracks = player.audioTracks
             .filter { !$0.trackId.isEmpty }
-            .map { PlayerAudioTrack(id: $0.trackId, name: $0.trackName) }
+            .map { track -> PlayerAudioTrack in
+                let channels = track.audio.map { Int($0.channelsNumber) } ?? 0
+                return PlayerAudioTrack(
+                    id: track.trackId,
+                    name: track.trackName,
+                    channels: channels
+                )
+            }
         availableAudioTracks = tracks
 
         selectedAudioTrack = tracks.first(where: { $0.id == selectedAudioTrackID })
@@ -1289,6 +1381,36 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         player?.audio?.isMuted = isMuted
     }
 
+    private func applyAudioStereoMode() {
+        guard let player else { return }
+        let target = selectedAudioStereoMode.vlcMode
+        if player.audioStereoMode != target {
+            player.audioStereoMode = target
+        }
+    }
+
+    private func applyAudioMixMode() {
+        guard let player else { return }
+        let target = selectedAudioMixMode.vlcMode
+        if player.audioMixMode != target {
+            player.audioMixMode = target
+        }
+    }
+
+    private func syncAudioModesFromVLC() {
+        guard let player else { return }
+        let vlcStereoMode = player.audioStereoMode
+        let mappedStereo = PlayerAudioStereoMode(vlcMode: vlcStereoMode)
+        if selectedAudioStereoMode != mappedStereo {
+            selectedAudioStereoMode = mappedStereo
+        }
+        let vlcMixMode = player.audioMixMode
+        let mappedMix = PlayerAudioMixMode(vlcMode: vlcMixMode)
+        if selectedAudioMixMode != mappedMix {
+            selectedAudioMixMode = mappedMix
+        }
+    }
+
     private func clearPlaybackError() {
         playbackErrorMessage = nil
     }
@@ -1339,6 +1461,7 @@ extension PlayerState {
                 isPlaying = true
                 clearPlaybackError()
                 didObservePlayingForRestore = true
+                syncAudioModesFromVLC()
                 applyAudioOutput()
                 requestPlaybackRestoreIfPossible(trigger: "state.playing")
             case .error:
@@ -1377,6 +1500,7 @@ extension PlayerState {
         Task { @MainActor in
             if trackType == .audio {
                 loadAudioTracks()
+                syncAudioModesFromVLC()
                 applyAudioOutput()
             } else if trackType == .video {
                 loadVideoTracks()
@@ -1392,6 +1516,7 @@ extension PlayerState {
         Task { @MainActor in
             if trackType == .audio {
                 loadAudioTracks()
+                syncAudioModesFromVLC()
                 applyAudioOutput()
             } else if trackType == .video {
                 loadVideoTracks()
@@ -1409,6 +1534,7 @@ extension PlayerState {
                 refreshSubtitleTrack()
                 applySubtitleSelection()
             } else if trackType == .audio {
+                syncAudioModesFromVLC()
                 applyAudioOutput()
             }
         }
@@ -1423,6 +1549,7 @@ extension PlayerState {
             if trackType == .audio {
                 selectedAudioTrackID = selectedId
                 loadAudioTracks()
+                syncAudioModesFromVLC()
                 applyAudioOutput()
             } else if trackType == .text {
                 selectedTextTrackID = selectedId.isEmpty ? nil : selectedId

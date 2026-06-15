@@ -9,7 +9,9 @@ enum PlayerPlaybackOptionCatalog {
     }
 
     static func audioTrackLabel(index: Int, track: PlayerAudioTrack) -> String {
-        "トラック\(index + 1)"
+        let base = "トラック\(index + 1)"
+        guard track.channels > 0 else { return base }
+        return "\(base)（\(track.channels)ch）"
     }
 
     static func videoTrackLabel(index: Int, track: PlayerVideoTrack) -> String {
@@ -38,44 +40,72 @@ func playerPlaybackOptionMenuEntries(playerState: PlayerState, isSeekActionAvail
         }
     }
 
-    if !playerState.availableVideoTracks.isEmpty {
-        Menu("映像トラック") {
-            Picker(
-                "映像トラック",
-                selection: Binding(
-                    get: { playerState.selectedVideoTrack },
-                    set: { if let track = $0 { playerState.selectVideoTrack(track) } }
-                )
-            ) {
-                Text("トラックなし").tag(PlayerVideoTrack?.none).disabled(true).selectionDisabled()
-                ForEach(Array(playerState.availableVideoTracks.enumerated()), id: \.element.id) {
-                    index, track in
-                    Text(PlayerPlaybackOptionCatalog.videoTrackLabel(index: index, track: track))
-                        .tag(PlayerVideoTrack?.some(track))
-                }
+    Menu("映像トラック") {
+        Picker(
+            "映像トラック",
+            selection: Binding(
+                get: { playerState.selectedVideoTrack },
+                set: { if let track = $0 { playerState.selectVideoTrack(track) } }
+            )
+        ) {
+            Text("トラックなし").tag(PlayerVideoTrack?.none).disabled(true).selectionDisabled()
+            ForEach(Array(playerState.availableVideoTracks.enumerated()), id: \.element.id) {
+                index, track in
+                Text(PlayerPlaybackOptionCatalog.videoTrackLabel(index: index, track: track))
+                    .tag(PlayerVideoTrack?.some(track))
             }
-            .labelsHidden()
         }
+        .labelsHidden()
     }
 
-    if !playerState.availableAudioTracks.isEmpty {
-        Menu("音声トラック") {
+    Menu("音声トラック") {
+        Picker(
+            "音声トラック",
+            selection: Binding(
+                get: { playerState.selectedAudioTrack },
+                set: { if let track = $0 { playerState.selectAudioTrack(track) } }
+            )
+        ) {
+            Text("トラックなし").tag(PlayerAudioTrack?.none).disabled(true).selectionDisabled()
+            ForEach(Array(playerState.availableAudioTracks.enumerated()), id: \.element.id) {
+                index, track in
+                Text(PlayerPlaybackOptionCatalog.audioTrackLabel(index: index, track: track))
+                    .tag(PlayerAudioTrack?.some(track))
+            }
+        }
+        .labelsHidden()
+    }
+
+    #if DEBUG
+        Menu("ステレオモード") {
             Picker(
-                "音声トラック",
+                "ステレオモード",
                 selection: Binding(
-                    get: { playerState.selectedAudioTrack },
-                    set: { if let track = $0 { playerState.selectAudioTrack(track) } }
+                    get: { playerState.selectedAudioStereoMode },
+                    set: { playerState.selectAudioStereoMode($0) }
                 )
             ) {
-                Text("トラックなし").tag(PlayerAudioTrack?.none).disabled(true).selectionDisabled()
-                ForEach(Array(playerState.availableAudioTracks.enumerated()), id: \.element.id) {
-                    index, track in
-                    Text(PlayerPlaybackOptionCatalog.audioTrackLabel(index: index, track: track))
-                        .tag(PlayerAudioTrack?.some(track))
+                ForEach(PlayerAudioStereoMode.allCases) { mode in
+                    Text(mode.displayName).tag(mode)
                 }
             }
             .labelsHidden()
         }
+    #endif
+
+    Menu("音声ミックスモード") {
+        Picker(
+            "音声ミックスモード",
+            selection: Binding(
+                get: { playerState.selectedAudioMixMode },
+                set: { playerState.selectAudioMixMode($0) }
+            )
+        ) {
+            ForEach(PlayerAudioMixMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+            }
+        }
+        .labelsHidden()
     }
 
     if !playerState.availableOverlayPlugins.isEmpty {
@@ -111,6 +141,7 @@ struct PlayerSettingsSheet: View {
                 playbackRateSection
                 audioTrackSection
                 videoTrackSection
+                audioModeSection
             }
             .navigationTitle("設定")
             #if !os(macOS)
@@ -210,6 +241,43 @@ struct PlayerSettingsSheet: View {
     private var videoTrackItems: [VideoTrackItem] {
         playerState.availableVideoTracks.enumerated().map { index, option in
             VideoTrackItem(id: index, option: option)
+        }
+    }
+
+    private var audioModeSection: some View {
+        Section("音声モード") {
+            ForEach(PlayerAudioStereoMode.allCases) { mode in
+                Button {
+                    playerState.selectAudioStereoMode(mode)
+                } label: {
+                    HStack {
+                        Text(mode.displayName)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        if playerState.selectedAudioStereoMode == mode {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(.tint)
+                                .fontWeight(.semibold)
+                        }
+                    }
+                }
+            }
+            ForEach(PlayerAudioMixMode.allCases) { mode in
+                Button {
+                    playerState.selectAudioMixMode(mode)
+                } label: {
+                    HStack {
+                        Text(mode.displayName)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        if playerState.selectedAudioMixMode == mode {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(.tint)
+                                .fontWeight(.semibold)
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -390,51 +390,75 @@ struct DetachedPlayerOverlayView_macOS: View {
                         }
                     }
 
-                    if !playerState.availableAudioTracks.isEmpty {
-                        Picker(
-                            "音声トラック",
-                            selection: Binding(
-                                get: { playerState.selectedAudioTrack },
-                                set: {
-                                    if let track = $0 { playerState.selectAudioTrack(track) }
-                                }
-                            )
-                        ) {
-                            Text("トラックなし").tag(PlayerAudioTrack?.none).disabled(true)
-                            ForEach(
-                                Array(playerState.availableAudioTracks.enumerated()),
-                                id: \.element.id
-                            ) { index, track in
-                                Text(
-                                    PlayerPlaybackOptionCatalog.audioTrackLabel(
-                                        index: index, track: track)
-                                )
-                                .tag(PlayerAudioTrack?.some(track))
+                    Picker(
+                        "映像トラック",
+                        selection: Binding(
+                            get: { playerState.selectedVideoTrack },
+                            set: {
+                                if let track = $0 { playerState.selectVideoTrack(track) }
                             }
+                        )
+                    ) {
+                        Text("トラックなし").tag(PlayerVideoTrack?.none).disabled(true)
+                            .selectionDisabled(true)
+                        ForEach(
+                            Array(playerState.availableVideoTracks.enumerated()),
+                            id: \.element.id
+                        ) { index, track in
+                            Text(
+                                PlayerPlaybackOptionCatalog.videoTrackLabel(
+                                    index: index, track: track)
+                            )
+                            .tag(PlayerVideoTrack?.some(track))
                         }
                     }
 
-                    if !playerState.availableVideoTracks.isEmpty {
+                    Picker(
+                        "音声トラック",
+                        selection: Binding(
+                            get: { playerState.selectedAudioTrack },
+                            set: {
+                                if let track = $0 { playerState.selectAudioTrack(track) }
+                            }
+                        )
+                    ) {
+                        Text("トラックなし").tag(PlayerAudioTrack?.none).disabled(true)
+                            .selectionDisabled(true)
+                        ForEach(
+                            Array(playerState.availableAudioTracks.enumerated()),
+                            id: \.element.id
+                        ) { index, track in
+                            Text(
+                                PlayerPlaybackOptionCatalog.audioTrackLabel(
+                                    index: index, track: track)
+                            )
+                            .tag(PlayerAudioTrack?.some(track))
+                        }
+                    }
+
+                    #if DEBUG
                         Picker(
-                            "映像トラック",
+                            "ステレオモード",
                             selection: Binding(
-                                get: { playerState.selectedVideoTrack },
-                                set: {
-                                    if let track = $0 { playerState.selectVideoTrack(track) }
-                                }
+                                get: { playerState.selectedAudioStereoMode },
+                                set: { playerState.selectAudioStereoMode($0) }
                             )
                         ) {
-                            Text("トラックなし").tag(PlayerVideoTrack?.none).disabled(true)
-                            ForEach(
-                                Array(playerState.availableVideoTracks.enumerated()),
-                                id: \.element.id
-                            ) { index, track in
-                                Text(
-                                    PlayerPlaybackOptionCatalog.videoTrackLabel(
-                                        index: index, track: track)
-                                )
-                                .tag(PlayerVideoTrack?.some(track))
+                            ForEach(PlayerAudioStereoMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode)
                             }
+                        }
+                    #endif
+
+                    Picker(
+                        "音声ミックスモード",
+                        selection: Binding(
+                            get: { playerState.selectedAudioMixMode },
+                            set: { playerState.selectAudioMixMode($0) }
+                        )
+                    ) {
+                        ForEach(PlayerAudioMixMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
                         }
                     }
 
