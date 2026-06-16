@@ -163,15 +163,17 @@ struct PluginsSettingsView: View {
                 onCancel: { cancelDownload() }
             )
         }
-        .sheet(isPresented: $showingPluginSettingsSheet) {
-            PluginSettingsSheet(
-                appModel: appModel,
-                pluginStore: pluginStore,
-                onDismiss: {
-                    showingPluginSettingsSheet = false
-                }
-            )
-        }
+        #if os(macOS) || DEBUG
+            .sheet(isPresented: $showingPluginSettingsSheet) {
+                PluginSettingsSheet(
+                    appModel: appModel,
+                    pluginStore: pluginStore,
+                    onDismiss: {
+                        showingPluginSettingsSheet = false
+                    }
+                )
+            }
+        #endif
         .toolbar {
             settingsToolbar
         }
@@ -283,12 +285,13 @@ struct PluginsSettingsView: View {
             }
             #if !os(macOS)
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button {
-                        showingPluginSettingsSheet = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-
+                    #if DEBUG
+                        Button {
+                            showingPluginSettingsSheet = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                        }
+                    #endif
                     EditButton()
                 }
             #endif
@@ -585,42 +588,44 @@ struct PluginsSettingsView: View {
     }
 }
 
-private struct PluginSettingsSheet: View {
-    let appModel: AppModel
-    let pluginStore: PluginStore
-    let onDismiss: () -> Void
+#if os(macOS) || DEBUG
+    private struct PluginSettingsSheet: View {
+        let appModel: AppModel
+        let pluginStore: PluginStore
+        let onDismiss: () -> Void
 
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("開発") {
-                    Toggle(
-                        "開発者モードを有効にする",
-                        isOn: Binding(
-                            get: { pluginStore.isDeveloperModeEnabled },
-                            set: { newValue in
-                                pluginStore.setDeveloperModeEnabled(newValue)
-                                appModel.reloadPluginsInAllPlayerStates()
-                            }
+        var body: some View {
+            NavigationStack {
+                Form {
+                    Section("開発") {
+                        Toggle(
+                            "開発者モードを有効にする",
+                            isOn: Binding(
+                                get: { pluginStore.isDeveloperModeEnabled },
+                                set: { newValue in
+                                    pluginStore.setDeveloperModeEnabled(newValue)
+                                    appModel.reloadPluginsInAllPlayerStates()
+                                }
+                            )
                         )
-                    )
+                    }
                 }
-            }
-            .formStyle(.grouped)
-            .navigationTitle("プラグイン設定")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("閉じる") {
-                        onDismiss()
+                .formStyle(.grouped)
+                .navigationTitle("プラグイン設定")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("閉じる") {
+                            onDismiss()
+                        }
                     }
                 }
             }
+            #if os(macOS)
+                .frame(minWidth: 420, minHeight: 220)
+            #endif
         }
-        #if os(macOS)
-            .frame(minWidth: 420, minHeight: 220)
-        #endif
     }
-}
+#endif
 
 private struct PluginDownloadProgressSheet: View {
     let progress: Double

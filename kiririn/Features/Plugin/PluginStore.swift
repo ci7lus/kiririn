@@ -210,7 +210,13 @@ class PluginStore {
         .rename,
         .extend,
     ]
-    private static let packageSignatureRequirement: APKSignatureRequirement = .optional
+    private static let packageSignatureRequirement: APKSignatureRequirement = {
+        #if os(iOS) && !DEBUG
+            return .required
+        #else
+            return .optional
+        #endif
+    }()
     private let packageSignatureVerifier: ApkSignatureVerifierKit
     private let manifestParser = PluginManifestParser()
     private let updateResolver: PluginUpdateResolver
@@ -330,14 +336,14 @@ class PluginStore {
     {
         guard preview.manifest.manifestID == previous.manifestID else {
             throw PluginManifestValidationError(messages: [
-                "IDが一致しません。別のプラグインパッケージのため更新を中止しました"
+                "IDが一致しません。別のプラグインのため更新を中止しました"
             ])
         }
 
         let signerMismatch = !signerMatchesForUpdate(previous: previous, preview: preview)
         if signerMismatch, !isDeveloperModeEnabled {
             throw PluginManifestValidationError(messages: [
-                "開発者モードが無効なため、署名元が一致しないkppxへの更新は利用できません"
+                "開発者モードが無効なため、署名元が一致しないプラグインへの更新は利用できません"
             ])
         }
 
@@ -1028,7 +1034,7 @@ class PluginStore {
             let fileData = try Data(contentsOf: tempURL)
             guard updateHash.matches(data: fileData) else {
                 throw PluginManifestValidationError(messages: [
-                    "アップデート検証用ハッシュがダウンロードしたkppxと一致しません"
+                    "アップデート検証用ハッシュがダウンロードしたプラグインと一致しません"
                 ])
             }
         }
@@ -1270,13 +1276,19 @@ class PluginStore {
         _ authentication: APKAuthentication,
         sourceType: PluginSourceType
     ) throws {
-        guard sourceType != .localFolder else { return }
-        guard Self.packageSignatureRequirement == .required, !authentication.isSigned else {
-            return
-        }
-        throw PluginManifestValidationError(messages: [
-            "このビルドでは署名付きkppxパッケージのみ追加できます"
-        ])
+        #if os(iOS) && !DEBUG
+            throw PluginManifestValidationError(messages: [
+                "プラグインに有効な署名がありません"
+            ])
+        #else
+            guard sourceType != .localFolder else { return }
+            guard Self.packageSignatureRequirement == .required, !authentication.isSigned else {
+                return
+            }
+            throw PluginManifestValidationError(messages: [
+                "プラグインに有効な署名がありません"
+            ])
+        #endif
     }
 
     private func validateDeveloperModeRequirement(
@@ -1334,13 +1346,13 @@ class PluginStore {
 
         switch authentication.state {
         case .unsigned:
-            return "未署名のkppxを\(actionLabel)できません。\(actionLabel)するには開発者モードを有効にしてください"
+            return "未署名のプラグインを\(actionLabel)できません。\(actionLabel)するには開発者モードを有効にしてください"
         case .selfSigned:
-            return "自己署名のkppxを\(actionLabel)できません。\(actionLabel)するには開発者モードを有効にしてください"
+            return "自己署名のプラグインを\(actionLabel)できません。\(actionLabel)するには開発者モードを有効にしてください"
         case .revoked:
-            return "失効済み署名のkppxを\(actionLabel)できません。\(actionLabel)するには開発者モードを有効にしてください"
+            return "失効済み署名のプラグインを\(actionLabel)できません。\(actionLabel)するには開発者モードを有効にしてください"
         case .verified:
-            return "不明なエラー。認証済み署名のkppxを\(actionLabel)できません"
+            return "不明なエラー。認証済み署名のプラグインを\(actionLabel)できません"
         }
     }
 
