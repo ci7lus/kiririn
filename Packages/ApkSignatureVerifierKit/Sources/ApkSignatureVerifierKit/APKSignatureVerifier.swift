@@ -107,8 +107,6 @@ public enum APKSignatureError: LocalizedError, Sendable {
 }
 
 public final class ApkSignatureVerifierKit: @unchecked Sendable {
-    public static let shared = ApkSignatureVerifierKit()
-
     private let trustedStore: TrustedCertificateStore
     private let networkLoader: CRLNetworkLoader
     private let now: () -> Date
@@ -117,7 +115,7 @@ public final class ApkSignatureVerifierKit: @unchecked Sendable {
     private var crlCache: [URL: CachedCRL] = [:]
 
     public init(
-        trustedChainPEMData: Data? = ApkSignatureVerifierKit.loadBundledTrustChain(),
+        trustedChainPEMData: Data? = nil,
         session: URLSession = .shared,
         now: @escaping () -> Date = Date.init
     ) {
@@ -570,26 +568,7 @@ public final class ApkSignatureVerifierKit: @unchecked Sendable {
         defer { crlCacheLock.unlock() }
         crlCache[url] = CachedCRL(crl: crl)
     }
-
-    public static func loadBundledTrustChain() -> Data? {
-        if let url = Bundle.main.url(forResource: "trusted_chain", withExtension: "pem"),
-            let data = try? Data(contentsOf: url)
-        {
-            return data
-        }
-
-        if let url = Bundle(for: BundleToken.self).url(
-            forResource: "trusted_chain", withExtension: "pem"),
-            let data = try? Data(contentsOf: url)
-        {
-            return data
-        }
-
-        return nil
-    }
 }
-
-private final class BundleToken {}
 
 private struct SignerVerificationResult {
     let summary: APKSignerSummary
