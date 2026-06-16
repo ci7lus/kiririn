@@ -5,6 +5,7 @@ extension Notification.Name {
     static let requestOpenFile = Notification.Name("requestOpenFile")
     static let requestOpenPlayable = Notification.Name("requestOpenPlayable")
     static let requestOpenPluginWindow = Notification.Name("requestOpenPluginWindow")
+    static let requestOpenSettings = Notification.Name("requestOpenSettings")
     static let pluginDeeplinkOpened = Notification.Name("pluginDeeplinkOpened")
 }
 
@@ -235,6 +236,16 @@ private struct AppCommands: Commands {
 
     var body: some Commands {
         #if os(macOS)
+            CommandGroup(replacing: .appSettings) {
+                Button("設定") {
+                    openWindow(id: AppWindowID.main.rawValue)
+                    NotificationCenter.default.post(
+                        name: .requestOpenSettings, object: nil
+                    )
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+
             CommandMenu("プラグイン") {
                 let enabledPlugins = appModel.pluginStore.plugins.filter {
                     $0.isEnabled

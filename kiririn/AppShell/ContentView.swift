@@ -138,6 +138,10 @@ struct ContentView: View {
                     guard let pluginID = notification.object as? UUID else { return }
                     openWindow(id: AppWindowID.plugin.rawValue, value: pluginID)
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .requestOpenSettings)) {
+                    _ in
+                    selectedMacTab = .settings
+                }
             #endif
             #if !os(macOS)
                 .onReceive(NotificationCenter.default.publisher(for: .requestOpenFile)) { _ in
