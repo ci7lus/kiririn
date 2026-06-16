@@ -80,33 +80,12 @@ final class KonomiTVProvider: RecordingBackendProvider {
             source: .recordedFile(
                 recordId: record.id, variantId: variant.id, backendId: record.backendId),
             program: buildRecordedProgram(record: record),
-            service: nil
+            service: record.synthesizedService()
         )
     }
 
     private func buildRecordedProgram(record: Recorded) -> Program? {
-        guard let startAt = record.startAt,
-            let duration = record.duration,
-            let endAt = record.endAt
-        else {
-            return nil
-        }
-
-        return Program(
-            id: "record-\(record.backendId)-\(record.id)",
-            backendId: record.backendId,
-            eventId: nil,
-            serviceId: 0,
-            networkId: 0,
-            startAt: startAt,
-            endAt: endAt,
-            duration: duration,
-            name: record.name,
-            desc: record.desc,
-            extended: record.extended,
-            genres: record.genres,
-            updatedAt: nil
-        )
+        record.toProgram()
     }
 }
 

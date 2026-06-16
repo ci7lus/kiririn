@@ -35,6 +35,45 @@ nonisolated struct Recorded: Codable, Identifiable, Sendable {
         return Playable.stableID(
             for: .recordedFile(recordId: id, variantId: variant.id, backendId: backendId))
     }
+
+    func synthesizedService() -> TVService? {
+        let trimmedName = serviceName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmedName.isEmpty else { return nil }
+        let serviceIdValue = serviceId ?? 0
+        let networkIdValue = networkId ?? 0
+        return TVService(
+            id: "record-\(backendId)-\(networkIdValue)-\(serviceIdValue)-\(id)",
+            providerIdentifier: nil,
+            serviceId: serviceIdValue,
+            networkId: networkIdValue,
+            transportStreamId: nil,
+            name: trimmedName,
+            type: .digitalTelevision,
+            remoteControlKeyId: nil,
+            hasLogoData: false,
+            channel: nil,
+            backendId: backendId
+        )
+    }
+
+    func toProgram() -> Program? {
+        guard let startAt, let duration, let endAt else { return nil }
+        return Program(
+            id: "record-\(backendId)-\(id)",
+            backendId: backendId,
+            eventId: nil,
+            serviceId: serviceId ?? 0,
+            networkId: networkId ?? 0,
+            startAt: startAt,
+            endAt: endAt,
+            duration: duration,
+            name: name,
+            desc: desc,
+            extended: extended,
+            genres: genres,
+            updatedAt: nil
+        )
+    }
 }
 
 nonisolated struct RecordedVariant: Codable, Identifiable, Sendable {

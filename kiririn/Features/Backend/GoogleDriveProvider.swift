@@ -235,7 +235,7 @@ final class GoogleDriveProvider: RecordingBackendProvider {
             source: .recordedFile(
                 recordId: record.id, variantId: variant.id, backendId: record.backendId),
             program: nil,
-            service: nil
+            service: record.synthesizedService()
         )
         playable.overriddenProgram = PlayableProgramOverride(
             duration: record.duration,

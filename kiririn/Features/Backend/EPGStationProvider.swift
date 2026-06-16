@@ -1,11 +1,13 @@
 import ARIBStandardKit
 import Foundation
+import OrderedCollections
 
 final class EPGStationProvider: LiveBackendProvider, RecordingBackendProvider {
     let configuration: BackendConfiguration
     private let client: APIClient
     private var channels: [Int64: EPGStationChannel] = [:]
     private var recordedItems: [Int64: EPGStationRecordedItem] = [:]
+    private let broadcastStore = BroadcastStore()
 
     private var isLiveEnabled: Bool {
         configuration.features.contains(.live)
@@ -21,7 +23,8 @@ final class EPGStationProvider: LiveBackendProvider, RecordingBackendProvider {
     }
 
     func checkConnection() async throws {
-        let _: EPGStationConfig = try await client.request(path: "api/config")
+        let config: EPGStationConfig = try await client.request(path: "api/config")
+        await broadcastStore.update(config.broadcast ?? [:])
     }
 
     func fetchHeaders() async throws -> [String: String] {
@@ -48,14 +51,28 @@ final class EPGStationProvider: LiveBackendProvider, RecordingBackendProvider {
 
     func fetchPrograms() async throws -> [Program] {
         guard isLiveEnabled else { return [] }
+        let currentBroadcast = await broadcastStore.current()
+
+        let startAt = Int(Date().timeIntervalSince1970)
+        let endAt = startAt + 60 * 60 * 24 * 7
+
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "startAt", value: "\(startAt)"),
+            URLQueryItem(name: "endAt", value: "\(endAt)"),
+            URLQueryItem(name: "isHalfWidth", value: "true"),
+        ]
+        for (key, enabled) in currentBroadcast where enabled {
+            queryItems.append(URLQueryItem(name: key, value: "true"))
+        }
+
         let response: [EPGStationScheduleChannel] = try await client.request(
             path: "api/schedules",
-            queryItems: [
-                URLQueryItem(name: "isHalfWidth", value: "true")
-            ]
+            queryItems: queryItems
         )
         return response.flatMap { channel in
-            channel.programs.map { $0.toProgram(backendId: configuration.id) }
+            channel.programs.map {
+                $0.toProgram(channel: channel.channel, backendId: configuration.id)
+            }
         }
     }
 
@@ -156,38 +173,29 @@ final class EPGStationProvider: LiveBackendProvider, RecordingBackendProvider {
             source: .recordedFile(
                 recordId: record.id, variantId: variant.id, backendId: record.backendId),
             program: buildRecordedProgram(record: record),
-            service: nil
+            service: record.synthesizedService()
         )
     }
 
     private func buildRecordedProgram(record: Recorded) -> Program? {
-        guard let startAt = record.startAt,
-            let duration = record.duration,
-            let endAt = record.endAt
-        else {
-            return nil
+        record.toProgram()
+    }
+
+    private actor BroadcastStore {
+        private var value: [String: Bool] = [:]
+
+        func update(_ newValue: [String: Bool]) {
+            value = newValue
         }
 
-        return Program(
-            id: "record-\(record.backendId)-\(record.id)",
-            backendId: record.backendId,
-            eventId: nil,
-            serviceId: record.serviceId ?? 0,
-            networkId: record.networkId ?? 0,
-            startAt: startAt,
-            endAt: endAt,
-            duration: duration,
-            name: record.name,
-            desc: record.desc,
-            extended: record.extended,
-            genres: record.genres,
-            updatedAt: nil
-        )
+        func current() -> [String: Bool] {
+            value
+        }
     }
 }
 
 private nonisolated struct EPGStationConfig: Codable, Sendable {
-    let socketIOPort: Int?
+    let broadcast: [String: Bool]?
 }
 
 private nonisolated struct EPGStationChannel: Codable, Sendable {
@@ -244,22 +252,42 @@ private nonisolated struct EPGStationProgram: Codable, Sendable {
     let halfWidthExtended: String?
     let genres: [EPGStationGenre]?
 
-    func toProgram(backendId: String) -> Program {
-        Program(
+    func toProgram(channel: EPGStationChannel, backendId: String) -> Program {
+        let start = Date(timeIntervalSince1970: TimeInterval(startAt) / 1000.0)
+        let end = Date(timeIntervalSince1970: TimeInterval(endAt) / 1000.0)
+        let computedDuration = end.timeIntervalSince(start)
+        return Program(
             id: "\(id)",
             backendId: backendId,
             eventId: nil,
-            serviceId: Int(channelId),
-            networkId: 0,
-            startAt: Date(timeIntervalSince1970: TimeInterval(startAt) / 1000.0),
-            endAt: Date(timeIntervalSince1970: TimeInterval(endAt) / 1000.0),
-            duration: TimeInterval(duration) / 1000.0,
+            serviceId: channel.serviceId,
+            networkId: channel.networkId,
+            startAt: start,
+            endAt: end,
+            duration: computedDuration > 0 ? computedDuration : TimeInterval(duration) / 1000.0,
             name: halfWidthName ?? name ?? "",
             desc: halfWidthDescription ?? description,
-            // extended: halfWidthExtended ?? extended,
+            extended: Self.parseExtended(halfWidthExtended ?? extended),
             genres: genres?.map { ProgramGenre(lv1: $0.lv1, lv2: $0.lv2) } ?? [],
             updatedAt: nil
         )
+    }
+
+    private static func parseExtended(_ raw: String?) -> OrderedDictionary<String, String>? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let lines = raw.components(separatedBy: "\n")
+        guard lines.count >= 2 else { return nil }
+        var result = OrderedDictionary<String, String>()
+        var index = 0
+        while index + 1 < lines.count {
+            let key = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = lines[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !key.isEmpty {
+                result[key] = value
+            }
+            index += 2
+        }
+        return result.isEmpty ? nil : result
     }
 }
 

@@ -308,10 +308,14 @@ struct LocalRecordsView: View {
 
     private func playLocalRecord(_ item: LocalRecordItem) {
         guard let url = LocalRecordManager.shared.localVideoURL(for: item) else { return }
-        let playable = Playable(
+        let recorded = item.recorded
+        var playable = Playable(
             streamURL: url,
-            source: .fileURL(url, bookmarkData: nil)
+            source: .fileURL(url, bookmarkData: nil),
+            program: recorded?.toProgram(),
+            service: recorded?.synthesizedService()
         )
+        playable.normalizeIdentity()
         #if os(macOS)
             openWindow(id: AppWindowID.player.rawValue, value: playable)
         #else
