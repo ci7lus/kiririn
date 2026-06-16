@@ -244,7 +244,7 @@ struct ContentView: View {
 
             #if !os(macOS)
                 if playerState.player != nil {
-                    PlayerOverlayView(
+                    PlayerOverlayView_iOS(
                         playerState: playerState, manager: manager, pluginStore: pluginStore,
                         appModel: appModel
                     )

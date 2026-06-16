@@ -70,6 +70,7 @@
 				AppShell/macOS/ProgramInfoWindowView.swift = (macos, );
 				Features/Capture/macOS/GlobalCaptureHotKeyManager.swift = (macos, );
 				Features/Capture/macOS/ShortcutRecorderView.swift = (macos, );
+				Features/Player/PlayerOverlayView.swift = (ios, );
 				Features/Player/macOS/DetachedPlayerOverlayView.swift = (macos, );
 				Features/Player/macOS/PlayerWindowView.swift = (macos, );
 				Features/Plugin/iOS/PluginEditableList.swift = (ios, );
