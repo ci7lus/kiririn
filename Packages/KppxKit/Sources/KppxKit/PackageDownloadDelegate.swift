@@ -1,8 +1,7 @@
 import Foundation
 
 public final class PackageDownloadDelegate: NSObject, URLSessionDownloadDelegate,
-    @unchecked
-    Sendable
+    @unchecked Sendable
 {
     public let progressHandler: (Int64, Int64) -> Void
     var continuation: CheckedContinuation<URL, Error>?

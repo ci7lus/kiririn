@@ -72,9 +72,9 @@ nonisolated enum PlayerAudioMixMode: Int, CaseIterable, Identifiable, Hashable, 
     case unset = 0
     case stereo = 1
     case binaural = 2
-    case surround4_0 = 3
-    case surround5_1 = 4
-    case surround7_1 = 5
+    case surround4Point0 = 3
+    case surround5Point1 = 4
+    case surround7Point1 = 5
 
     var id: Int { rawValue }
 
@@ -83,9 +83,9 @@ nonisolated enum PlayerAudioMixMode: Int, CaseIterable, Identifiable, Hashable, 
         case .unset: return "自動"
         case .stereo: return "ステレオ"
         case .binaural: return "バイノーラル"
-        case .surround4_0: return "4.0サラウンド"
-        case .surround5_1: return "5.1サラウンド"
-        case .surround7_1: return "7.1サラウンド"
+        case .surround4Point0: return "4.0サラウンド"
+        case .surround5Point1: return "5.1サラウンド"
+        case .surround7Point1: return "7.1サラウンド"
         }
     }
 
