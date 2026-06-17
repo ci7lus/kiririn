@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import Security
 import SwiftASN1
+import X509
 
 public enum APKSignatureRequirement: Sendable {
     case optional
@@ -111,30 +112,35 @@ public final class ApkSignatureVerifierKit: @unchecked Sendable {
     private let networkLoader: CRLNetworkLoader
     private let now: () -> Date
     private let requirement: APKSignatureRequirement
+    private let ignoreExpiry: Bool
     private let crlCacheLock = NSLock()
     private var crlCache: [URL: CachedCRL] = [:]
 
     public init(
         trustedChainPEMData: Data? = nil,
         session: URLSession = .shared,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        ignoreExpiry: Bool = false
     ) {
         self.trustedStore = TrustedCertificateStore(pemData: trustedChainPEMData)
         self.networkLoader = CRLNetworkLoader(session: session)
         self.now = now
         self.requirement = .optional
+        self.ignoreExpiry = ignoreExpiry
     }
 
     init(
         trustedChainPEMData: Data?,
         session: URLSession,
         now: @escaping () -> Date,
-        requirement: APKSignatureRequirement
+        requirement: APKSignatureRequirement,
+        ignoreExpiry: Bool = false
     ) {
         self.trustedStore = TrustedCertificateStore(pemData: trustedChainPEMData)
         self.networkLoader = CRLNetworkLoader(session: session)
         self.now = now
         self.requirement = requirement
+        self.ignoreExpiry = ignoreExpiry
     }
 
     public func verify(packageURL: URL) throws -> APKAuthentication {
@@ -307,6 +313,12 @@ public final class ApkSignatureVerifierKit: @unchecked Sendable {
         SecTrustSetAnchorCertificates(
             trust, trustedStore.certificates.map(\.secCertificate) as CFArray)
         SecTrustSetAnchorCertificatesOnly(trust, true)
+
+        if ignoreExpiry, let leaf = certificates.first,
+            let cert = try? Certificate(leaf.secCertificate)
+        {
+            SecTrustSetVerifyDate(trust, cert.notValidBefore as CFDate)
+        }
 
         return SecTrustEvaluateWithError(trust, nil)
     }

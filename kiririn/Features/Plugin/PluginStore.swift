@@ -243,7 +243,10 @@ class PluginStore {
         defaults: UserDefaults = .standard,
         fileManager: FileManager = .default,
         packageSignatureVerifier: ApkSignatureVerifierKit =
-            ApkSignatureVerifierKit(trustedChainPEMData: TrustedCertificateChain.data)
+            ApkSignatureVerifierKit(
+                trustedChainPEMData: TrustedCertificateChain.data,
+                ignoreExpiry: true
+            )
     ) {
         self.defaults = defaults
         self.fileManager = fileManager
