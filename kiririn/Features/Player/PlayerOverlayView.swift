@@ -1975,6 +1975,7 @@ private struct LowerContextPluginsView: View {
     @Binding var selectedPluginID: UUID?
     private let pluginSwitcherHeight: CGFloat = 52
     private let pluginSwitcherBottomPadding: CGFloat = 52
+    private let infoSheetCollapsedBarCapsuleHeight: CGFloat = 32
 
     private var enabledPlugins: [PluginDefinition] {
         pluginStore.plugins.filter { $0.isEnabled && $0.supports(area: .panel) }
@@ -2021,7 +2022,7 @@ private struct LowerContextPluginsView: View {
     private func panelSafeAreaInsets(containerSafeAreaInsets: EdgeInsets)
         -> PluginSafeAreaInsets
     {
-        var bottomInset = containerSafeAreaInsets.bottom
+        var bottomInset = containerSafeAreaInsets.bottom + infoSheetCollapsedBarCapsuleHeight
         if enabledPlugins.count > 1 {
             bottomInset += pluginSwitcherHeight + pluginSwitcherBottomPadding
         }
