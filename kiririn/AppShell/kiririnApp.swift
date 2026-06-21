@@ -102,7 +102,7 @@ extension Notification.Name {
         }
 
         private static var defaultSupportedOrientations: UIInterfaceOrientationMask {
-            UIDevice.current.userInterfaceIdiom == .pad ? .all : .portrait
+            UIDevice.current.userInterfaceIdiom == .pad ? .all : .allButUpsideDown
         }
     }
 
