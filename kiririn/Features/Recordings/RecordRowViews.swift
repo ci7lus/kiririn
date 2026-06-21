@@ -30,7 +30,7 @@ struct RecordRowView: View {
         if let position = playbackPosition, position > 0.02, position < 0.98 {
             GeometryReader { geo in
                 Rectangle()
-                    .fill(.blue)
+                    .fill(.tint.opacity(0.8))
                     .frame(width: geo.size.width * CGFloat(position), height: 3)
             }
             .frame(height: 3)
@@ -113,7 +113,7 @@ struct RecordRowView: View {
                     if let progress = localSaveProgress {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.down.circle.fill")
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(.tint)
                             Text("ローカル保存中")
                             Text("(\(Int(progress * 100))%)")
                                 .monospacedDigit()

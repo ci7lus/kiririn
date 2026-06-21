@@ -48,7 +48,6 @@ struct PluginList_iOS: View {
                             } label: {
                                 Label("再読み込み", systemImage: "arrow.clockwise")
                             }
-                            .tint(.blue)
                         }
                     }
                     .onDelete { indexSet in

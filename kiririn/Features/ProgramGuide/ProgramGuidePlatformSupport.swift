@@ -13,7 +13,6 @@ func programGuideCurrentTimeControl(
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-        .tint(.accentColor)
         .padding(.trailing, 8)
         .help("現在の時刻にスクロール")
     #else

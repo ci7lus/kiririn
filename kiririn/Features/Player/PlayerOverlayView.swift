@@ -374,7 +374,7 @@ struct PlayerOverlayView_iOS: View {
                         GeometryReader { pGeo in
                             ZStack(alignment: .leading) {
                                 Color.gray.opacity(0.3)
-                                Color.blue
+                                Color.accentColor
                                     .frame(width: pGeo.size.width * CGFloat(displayProgress))
                             }
                         }
@@ -1640,7 +1640,7 @@ struct PlayerOverlayView_iOS: View {
                             )
 
                         Capsule()
-                            .fill(Color.blue)
+                            .fill(Color.accentColor)
                             .frame(
                                 width: max(0, availableWidth * progress), height: trackHeight
                             )
@@ -1649,7 +1649,7 @@ struct PlayerOverlayView_iOS: View {
                             .allowsHitTesting(false)
 
                         Circle()
-                            .fill(Color.blue)
+                            .fill(Color.white)
                             .frame(width: thumbSize, height: thumbSize)
                             .shadow(radius: 2)
                             .position(

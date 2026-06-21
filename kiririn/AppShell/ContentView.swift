@@ -76,6 +76,7 @@ struct ContentView: View {
 
     var body: some View {
         mainStack
+            .tint(.accentColor)
             .onAppear {
                 isLoadingIndicatorVisible = manager.isDataLoading
                 droppedPluginAlertMessage = pluginStore.droppedPluginAlertMessage

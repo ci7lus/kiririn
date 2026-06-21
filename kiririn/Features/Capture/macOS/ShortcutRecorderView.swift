@@ -13,7 +13,7 @@ struct ShortcutRecorderView: View {
             HStack(spacing: 8) {
                 if isRecording {
                     Text("キーを押してください...")
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(.tint)
                 } else {
                     if keyCode >= 0 {
                         Text(
@@ -37,7 +37,8 @@ struct ShortcutRecorderView: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
                     .strokeBorder(
-                        isRecording ? Color.blue : Color.secondary.opacity(0.35), lineWidth: 1)
+                        isRecording ? Color.accentColor : Color.secondary.opacity(0.35),
+                        lineWidth: 1)
             )
         }
         .buttonStyle(.plain)

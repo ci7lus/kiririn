@@ -10,8 +10,7 @@ struct BackendBadge: View {
                 .fontWeight(.semibold)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(Color.blue.opacity(0.15))
-                .foregroundStyle(.blue)
+                .background(Color.accentColor.opacity(0.3))
                 .clipShape(.capsule)
                 .lineLimit(1)
         }
