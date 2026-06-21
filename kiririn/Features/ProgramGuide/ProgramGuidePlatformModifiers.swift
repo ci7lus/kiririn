@@ -1,6 +1,14 @@
 import SwiftUI
 
 #if os(macOS)
+    private struct ProgramGuideTitleModifier: ViewModifier {
+        @Environment(\.isTabActive) private var isTabActive
+
+        func body(content: Content) -> some View {
+            content.navigationTitle(isTabActive ? "番組表" : "")
+        }
+    }
+
     private struct ProgramGuideSearchToolbarModifier: ViewModifier {
         let isSearchSheetPresented: Binding<Bool>
         @Environment(\.isTabActive) private var isTabActive
@@ -24,18 +32,11 @@ import SwiftUI
 
 extension View {
     @ViewBuilder
-    func programGuideTitle(showsNavigationTitle: Bool, size: CGSize) -> some View {
+    func programGuideTitle() -> some View {
         #if os(iOS)
-            self
-                .modifier(
-                    ProgramGuideTitleModifier(
-                        isEnabled: showsNavigationTitle && size.height >= size.width
-                    )
-                )
-                .navigationBarTitleDisplayMode(.inline)
+            self.navigationBarTitleDisplayMode(.inline)
         #else
-            self
-                .modifier(ProgramGuideTitleModifier(isEnabled: true))
+            self.modifier(ProgramGuideTitleModifier())
         #endif
     }
 

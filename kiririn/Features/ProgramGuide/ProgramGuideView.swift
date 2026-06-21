@@ -3,7 +3,6 @@ import SwiftUI
 
 struct ProgramGuideView: View {
     let manager: BackendManager
-    let showsNavigationTitle: Bool
     @State var playerState: PlayerState
     @Environment(\.scenePhase) private var scenePhase
     #if os(macOS)
@@ -99,10 +98,9 @@ struct ProgramGuideView: View {
             stride(from: minimumPastDays * 24, through: maximumFutureDays * 24, by: timelineHours))
     }
 
-    init(manager: BackendManager, playerState: PlayerState, showsNavigationTitle: Bool = true) {
+    init(manager: BackendManager, playerState: PlayerState) {
         self.manager = manager
         self._playerState = State(initialValue: playerState)
-        self.showsNavigationTitle = showsNavigationTitle
     }
 
     var body: some View {
@@ -134,7 +132,7 @@ struct ProgramGuideView: View {
                         scrollToNow(animated: true)
                     }
                 }
-                .programGuideTitle(showsNavigationTitle: showsNavigationTitle, size: geo.size)
+                .programGuideTitle()
                 .task {
                     await reloadPrograms()
                     updateDisplayChannels()
