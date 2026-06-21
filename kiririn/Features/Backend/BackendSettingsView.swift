@@ -151,7 +151,7 @@ struct BackendSettingsView: View {
                 .onMove(perform: moveConfigs)
             } footer: {
                 if configStore.configurations.isEmpty {
-                    Text("右上の＋ボタンからMirakurunやEPGStationを追加してください")
+                    Text("追加ボタンからバックエンドを追加してください")
                 }
             }
         }

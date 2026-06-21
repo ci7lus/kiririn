@@ -262,7 +262,6 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     var selectedVideoTrack: PlayerVideoTrack?
     var selectedAudioStereoMode: PlayerAudioStereoMode = .unset
     var selectedAudioMixMode: PlayerAudioMixMode = .unset
-    var showingSettings = false
     var showingPluginOverlay = true
     var plugins: [PluginDefinition] = []
     var isRecording = false

@@ -56,11 +56,27 @@ struct ProgramGuideSearchSheetView: View {
             .toolbar {
                 #if os(macOS)
                     ToolbarItem(placement: .automatic) {
-                        Button("閉じる") { onClose() }
+                        if #available(iOS 26, macOS 26, *) {
+                            Button(role: .close) {
+                                onClose()
+                            }
+                        } else {
+                            Button("閉じる") {
+                                onClose()
+                            }
+                        }
                     }
                 #else
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("閉じる") { onClose() }
+                        if #available(iOS 26, macOS 26, *) {
+                            Button(role: .close) {
+                                onClose()
+                            }
+                        } else {
+                            Button("閉じる") {
+                                onClose()
+                            }
+                        }
                     }
                 #endif
             }

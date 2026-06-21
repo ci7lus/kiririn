@@ -167,10 +167,6 @@ struct DetachedPlayerOverlayView_macOS: View {
                 playbackErrorAlertMessage = message
                 isPlaybackErrorAlertPresented = true
             }
-            .sheet(isPresented: $playerState.showingSettings) {
-                PlayerSettingsSheet(playerState: playerState)
-                    .frame(minWidth: 360, minHeight: 380)
-            }
             .alert("再生エラー", isPresented: $isPlaybackErrorAlertPresented) {
                 Button("OK", role: .cancel) {}
             } message: {

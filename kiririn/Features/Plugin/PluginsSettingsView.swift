@@ -614,8 +614,14 @@ struct PluginsSettingsView: View {
                 .navigationTitle("プラグイン設定")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("閉じる") {
-                            onDismiss()
+                        if #available(iOS 26, macOS 26, *) {
+                            Button(role: .close) {
+                                onDismiss()
+                            }
+                        } else {
+                            Button("閉じる") {
+                                onDismiss()
+                            }
                         }
                     }
                 }
@@ -670,8 +676,14 @@ private struct PluginDownloadProgressSheet: View {
             .navigationTitle("プラグインを追加")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("キャンセル") {
-                        onCancel()
+                    if #available(iOS 26, macOS 26, *) {
+                        Button(role: .cancel) {
+                            onCancel()
+                        }
+                    } else {
+                        Button("キャンセル") {
+                            onCancel()
+                        }
                     }
                 }
             }
@@ -741,13 +753,25 @@ struct PluginInstallConfirmationSheet: View {
             .navigationTitle(request.title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("キャンセル") {
-                        onCancel()
+                    if #available(iOS 26, macOS 26, *) {
+                        Button(role: .cancel) {
+                            onCancel()
+                        }
+                    } else {
+                        Button("キャンセル") {
+                            onCancel()
+                        }
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(request.confirmButtonTitle) {
-                        onConfirm()
+                    if #available(iOS 26, macOS 26, *) {
+                        Button(role: .confirm) {
+                            onConfirm()
+                        }
+                    } else {
+                        Button(request.confirmButtonTitle) {
+                            onConfirm()
+                        }
                     }
                 }
             }

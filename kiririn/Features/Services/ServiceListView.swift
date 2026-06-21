@@ -585,8 +585,14 @@ private struct FavoriteServiceOrderingSheet: View {
                 .navigationTitle("お気に入り")
                 .toolbar {
                     ToolbarItem(placement: closeButtonPlacement) {
-                        Button("閉じる") {
-                            dismiss()
+                        if #available(iOS 26, macOS 26, *) {
+                            Button(role: .close) {
+                                dismiss()
+                            }
+                        } else {
+                            Button("閉じる") {
+                                dismiss()
+                            }
                         }
                     }
 

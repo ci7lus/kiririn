@@ -134,13 +134,30 @@ struct CaptureListView: View {
             if isTabActive {
                 if !items.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
-                        Button(isSelectionMode ? "完了" : "選択") {
-                            withAnimation {
-                                if isSelectionMode {
-                                    isSelectionMode = false
-                                    selectedIDs.removeAll()
-                                } else {
-                                    isSelectionMode = true
+                        if #available(iOS 26, macOS 26, *) {
+                            if isSelectionMode {
+                                Button(role: .cancel) {
+                                    withAnimation {
+                                        isSelectionMode = false
+                                        selectedIDs.removeAll()
+                                    }
+                                }
+                            } else {
+                                Button("選択") {
+                                    withAnimation {
+                                        isSelectionMode = true
+                                    }
+                                }
+                            }
+                        } else {
+                            Button(isSelectionMode ? "完了" : "選択") {
+                                withAnimation {
+                                    if isSelectionMode {
+                                        isSelectionMode = false
+                                        selectedIDs.removeAll()
+                                    } else {
+                                        isSelectionMode = true
+                                    }
                                 }
                             }
                         }

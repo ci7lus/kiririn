@@ -24,7 +24,15 @@ struct PluginEditSheet: View {
             )
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完了") { onDismiss() }
+                    if #available(iOS 26, macOS 26, *) {
+                        Button(role: .close) {
+                            onDismiss()
+                        }
+                    } else {
+                        Button("閉じる") {
+                            onDismiss()
+                        }
+                    }
                 }
             }
         }
@@ -912,8 +920,14 @@ private struct PluginUpdateCompletionSheet: View {
             .navigationTitle("アップデート完了")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("閉じる") {
-                        onDismiss()
+                    if #available(iOS 26, macOS 26, *) {
+                        Button(role: .close) {
+                            onDismiss()
+                        }
+                    } else {
+                        Button("閉じる") {
+                            onDismiss()
+                        }
                     }
                 }
             }

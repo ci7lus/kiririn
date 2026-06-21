@@ -137,11 +137,29 @@ struct BackendEditView: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("キャンセル") { dismiss() }
+                    if #available(iOS 26, macOS 26, *) {
+                        Button(role: .cancel) {
+                            dismiss()
+                        }
+                    } else {
+                        Button("キャンセル", role: .cancel) {
+                            dismiss()
+                        }
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
+                    if #available(iOS 26, macOS 26, *) {
+                        Button(role: .confirm) {
+                            save()
+                        }
                         .disabled(name.isEmpty || (type.requiresBaseURL && baseURL.isEmpty))
+                    } else {
+                        Button("保存") {
+                            save()
+                        }
+                        .disabled(name.isEmpty || (type.requiresBaseURL && baseURL.isEmpty))
+                    }
+
                 }
             }
             .onAppear {

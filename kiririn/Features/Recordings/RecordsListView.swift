@@ -95,8 +95,7 @@ struct RecordsListView: View {
                                 Label("URLから再生", systemImage: "link")
                             }
                         } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .symbolRenderingMode(.hierarchical)
+                            Image(systemName: "plus")
                         }
                     }
                 }
