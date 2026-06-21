@@ -20,6 +20,7 @@ struct ProgramGuideView: View {
     @State private var hasRestoredSearchScrollInCurrentPresentation = false
     @State private var searchQueryResults: [ProgramSearchResult] = []
     @State private var isLoading = false
+    @State private var hasAttemptedLoad = false
     @State private var channels: [GuideChannel] = []
     @State private var timelineOffsetHours = 0
     @State private var nowLineDate = Date()
@@ -524,10 +525,6 @@ struct ProgramGuideView: View {
     }
 
     private func updateDisplayChannels() {
-        if selectedBroadcastType == favoriteBroadcastType && !manager.hasFavoriteServices {
-            selectedBroadcastType = "all"
-        }
-
         displayChannels =
             channels
             .filter { channel in
@@ -544,6 +541,18 @@ struct ProgramGuideView: View {
                 return GuideChannel(
                     id: channel.id, service: channel.service, programs: channel.programs)
             }
+
+        // バックエンド切断等でお気に入りチャンネルの番組が取得できない場合は「すべて」にフォールバック
+        if displayChannels.isEmpty && selectedBroadcastType == favoriteBroadcastType
+            && hasAttemptedLoad
+        {
+            selectedBroadcastType = "all"
+            displayChannels = channels.compactMap { channel in
+                guard !channel.programs.isEmpty else { return nil }
+                return GuideChannel(
+                    id: channel.id, service: channel.service, programs: channel.programs)
+            }
+        }
     }
 
     @ViewBuilder
@@ -649,7 +658,7 @@ struct ProgramGuideView: View {
 
     private var broadcastFilterOptions: [(id: String, name: String)] {
         let types = Set(channels.map { $0.service.channel?.type ?? "その他" })
-        let ordered = ["GR", "BS", "CS", "SKY", "CATV", "その他"]
+        let ordered = ["GR", "BS", "CS", "SKY", "CATV"]
         let sortedTypes = types.sorted { lhs, rhs in
             let li = ordered.firstIndex(of: lhs) ?? ordered.count
             let ri = ordered.firstIndex(of: rhs) ?? ordered.count
@@ -658,7 +667,8 @@ struct ProgramGuideView: View {
         }
 
         var options: [(id: String, name: String)] = []
-        if manager.hasFavoriteServices {
+        let hasFavoriteChannels = channels.contains { manager.isFavorite($0.service) }
+        if hasFavoriteChannels {
             options.append((favoriteBroadcastType, "お気に入り"))
         }
         options.append(("all", "すべて"))
@@ -667,6 +677,7 @@ struct ProgramGuideView: View {
     }
 
     private func reloadPrograms() async {
+        defer { hasAttemptedLoad = true }
         guard manager.isCacheReady else {
             channels = []
             return
