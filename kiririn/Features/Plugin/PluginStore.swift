@@ -1279,19 +1279,13 @@ class PluginStore {
         _ authentication: APKAuthentication,
         sourceType: PluginSourceType
     ) throws {
-        #if os(iOS) && !DEBUG
-            throw PluginManifestValidationError(messages: [
-                "プラグインに有効な署名がありません"
-            ])
-        #else
-            guard sourceType != .localFolder else { return }
-            guard Self.packageSignatureRequirement == .required, !authentication.isSigned else {
-                return
-            }
-            throw PluginManifestValidationError(messages: [
-                "プラグインに有効な署名がありません"
-            ])
-        #endif
+        guard sourceType != .localFolder else { return }
+        guard Self.packageSignatureRequirement == .required, !authentication.isSigned else {
+            return
+        }
+        throw PluginManifestValidationError(messages: [
+            "プラグインに有効な署名がありません"
+        ])
     }
 
     private func validateDeveloperModeRequirement(
