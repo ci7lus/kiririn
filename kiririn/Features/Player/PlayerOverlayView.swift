@@ -122,6 +122,14 @@ struct PlayerOverlayView_iOS: View {
         }
     }
 
+    private func expandedModeUsesFullscreenLayout(in size: CGSize) -> Bool {
+        if verticalSizeClass == .compact { return true }
+        if UIDevice.current.userInterfaceIdiom == .pad && size.width > size.height {
+            return true
+        }
+        return false
+    }
+
     private var showsFullscreenToggleButton: Bool {
         guard showsLowerContext else { return false }
         return !(UIDevice.current.userInterfaceIdiom == .phone && verticalSizeClass == .compact)
@@ -157,7 +165,7 @@ struct PlayerOverlayView_iOS: View {
                 persistentPlayerView(geo: geo)
                 switch playerState.mode {
                 case .expanded:
-                    if verticalSizeClass == .compact {
+                    if expandedModeUsesFullscreenLayout(in: geo.size) {
                         fullscreenView(geo: geo)
                     } else {
                         expandedView(geo: geo)
@@ -273,7 +281,7 @@ struct PlayerOverlayView_iOS: View {
     private func playerSurfaceFrame(in geo: GeometryProxy) -> CGRect {
         switch playerState.mode {
         case .expanded:
-            if verticalSizeClass == .compact {
+            if expandedModeUsesFullscreenLayout(in: geo.size) {
                 return CGRect(origin: .zero, size: geo.size)
             }
             let height = geo.size.width * 9 / 16
@@ -304,7 +312,7 @@ struct PlayerOverlayView_iOS: View {
     private func sourcePlayerCenterForMiniTransition(in geo: GeometryProxy) -> CGPoint {
         switch miniEntrySourceMode {
         case .expanded:
-            if verticalSizeClass == .compact {
+            if expandedModeUsesFullscreenLayout(in: geo.size) {
                 return CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
             }
             let height = geo.size.width * 9 / 16
