@@ -93,6 +93,11 @@ struct ProgramGuideView: View {
         timeRulerWidth + CGFloat(displayChannels.count) * channelColumnWidth
     }
 
+    private var nowLineYOffset: CGFloat {
+        let deltaMinutes = nowLineDate.timeIntervalSince(anchorTime) / 60.0
+        return CGFloat(deltaMinutes) * minuteHeight
+    }
+
     private var dateOffsets: [Int] {
         Array(
             stride(from: minimumPastDays * 24, through: maximumFutureDays * 24, by: timelineHours))
@@ -125,11 +130,6 @@ struct ProgramGuideView: View {
                     updateDisplayChannels()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         scrollToNow(animated: false)
-                    }
-                }
-                .onChange(of: timelineOffsetHours) { _, _ in
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        scrollToNow(animated: true)
                     }
                 }
                 .programGuideTitle()
@@ -339,12 +339,12 @@ struct ProgramGuideView: View {
                         .id(channel.id)
                     }
                 }
-                if nowLineDate >= timelineStart && nowLineDate < timelineEnd {
-                    let y = yOffset(for: nowLineDate)
+                if nowLineYOffset >= 0 && nowLineYOffset < timelineHeight {
                     Rectangle()
-                        .fill(Color.red)
+                        .fill(Color.accentColor)
+                        .opacity(timelineOffsetHours == 0 ? 1.0 : 0.5)
                         .frame(width: max(viewportWidth, contentWidth) - timeRulerWidth, height: 3)
-                        .offset(y: y - 1.5)
+                        .offset(y: nowLineYOffset - 1.5)
                         .allowsHitTesting(false)
                         .zIndex(1800)
                 }
@@ -391,9 +391,8 @@ struct ProgramGuideView: View {
             programGuideCurrentTimeControl(timelineOffsetHours: timelineOffsetHours) {
                 if timelineOffsetHours != 0 {
                     timelineOffsetHours = 0
-                } else {
-                    scrollToNow(animated: true)
                 }
+                scrollToNow(animated: true)
             }
         }
         .frame(height: 52)

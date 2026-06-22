@@ -63,9 +63,8 @@ extension View {
                     Button {
                         if timelineOffsetHours.wrappedValue != 0 {
                             timelineOffsetHours.wrappedValue = 0
-                        } else {
-                            onScrollToNow()
                         }
+                        onScrollToNow()
                     } label: {
                         Image(systemName: "clock.arrow.circlepath")
                             .font(.title3.weight(.semibold))
