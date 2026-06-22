@@ -12,7 +12,6 @@ func programGuideCurrentTimeControl(
             Label("現在", systemImage: "clock.arrow.circlepath")
         }
         .buttonStyle(.bordered)
-        .controlSize(.small)
         .padding(.trailing, 8)
         .help("現在の時刻にスクロール")
     #else

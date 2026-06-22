@@ -378,30 +378,12 @@ struct ProgramGuideView: View {
             Divider()
                 .padding(.vertical, 10)
 
-            Menu {
+            Picker("絞り込み", selection: $selectedBroadcastType) {
                 ForEach(broadcastFilterOptions, id: \.id) { option in
-                    Button {
-                        selectedBroadcastType = option.id
-                    } label: {
-                        if selectedBroadcastType == option.id {
-                            Label(option.name, systemImage: "checkmark")
-                        } else {
-                            Text(option.name)
-                        }
-                    }
+                    Text(option.name).tag(option.id)
                 }
-            } label: {
-                let isFiltered = selectedBroadcastType != "all"
-                Label(
-                    broadcastTypeDisplayName(selectedBroadcastType),
-                    systemImage: isFiltered
-                        ? "line.3.horizontal.decrease.circle.fill"
-                        : "line.3.horizontal.decrease.circle"
-                )
-                .foregroundStyle(isFiltered ? Color.accentColor : Color.secondary)
             }
-            .menuIndicator(.hidden)
-            .controlSize(.small)
+            .labelsHidden()
             .fixedSize()
             .padding(.horizontal, 8)
             .help("放送種別を絞り込む")
