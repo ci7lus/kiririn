@@ -6,12 +6,13 @@ nonisolated enum LocalRecordPath {
             let documentsURL = FileManager.default.urls(
                 for: .documentDirectory, in: .userDomainMask
             ).first!
-            return documentsURL.appendingPathComponent("LocalRecords", isDirectory: true)
+            return documentsURL.appendingPathComponent("Downloads", isDirectory: true)
         #else
             let appSupportURL = FileManager.default.urls(
                 for: .applicationSupportDirectory, in: .userDomainMask
             ).first!
-            return appSupportURL.appendingPathComponent("kiririn/LocalRecords", isDirectory: true)
+            return appSupportURL.appendingPathComponent(
+                "kiririn/Downloads", isDirectory: true)
         #endif
     }
 

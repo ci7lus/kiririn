@@ -93,7 +93,8 @@ struct ModelBehaviorTests {
     }
 
     @Test func localRecordPathRecordIDPercentEncodesReservedCharacters() {
-        let encoded = LocalRecordPath.recordID(backendId: "backend/main", recordID: "record id?#1")
+        let encoded = LocalRecordPath.recordID(
+            backendId: "backend/main", recordID: "record id?#1")
 
         #expect(encoded == "backendmainrecordid1")
     }
@@ -166,7 +167,8 @@ struct ModelBehaviorTests {
         #expect(downloading.recorded?.id == "record")
         #expect(
             downloading.playableID
-                == Playable.stableID(for: .fileURL(downloading.localVideoURL, bookmarkData: nil)))
+                == Playable.stableID(for: .fileURL(downloading.localVideoURL, bookmarkData: nil))
+        )
     }
 
     @Test func backendConnectionStateStartsDisconnected() {

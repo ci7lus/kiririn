@@ -13,7 +13,7 @@ struct BackendRecordsView: View {
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var hasCompletedInitialLoad = false
     @State private var visibleIds: Set<String> = []
-    private let localRecordManager = LocalRecordManager.shared
+    private let recordDownloadManager = RecordDownloadManager.shared
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
     #endif
@@ -32,11 +32,19 @@ struct BackendRecordsView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if visibleRecords.isEmpty {
                     if let error = viewModel.errorMessage {
-                        ContentUnavailableView(
-                            "エラー",
-                            systemImage: "exclamationmark.triangle",
-                            description: Text(error)
-                        )
+                        ContentUnavailableView {
+                            Label("エラー", systemImage: "exclamationmark.triangle")
+                        } description: {
+                            Text(error)
+                        } actions: {
+                            Button {
+                                Task {
+                                    await refreshRecords()
+                                }
+                            } label: {
+                                Text("再試行")
+                            }
+                        }
                     } else {
                         ContentUnavailableView(
                             "録画番組なし",
@@ -48,7 +56,7 @@ struct BackendRecordsView: View {
                     ScrollViewReader { proxy in
                         List {
                             ForEach(visibleRecords) { record in
-                                let localRecordID = LocalRecordManager.localRecordID(
+                                let recordDownloadID = RecordDownloadManager.localRecordID(
                                     backendId: record.backendId,
                                     recordID: record.id
                                 )
@@ -57,10 +65,11 @@ struct BackendRecordsView: View {
                                     thumbnailData: viewModel.thumbnailData(for: record),
                                     isThumbnailFailed: viewModel.isThumbnailFailed(for: record),
                                     playbackPosition: viewModel.playbackPosition(for: record),
-                                    localSaveProgress: localRecordManager.downloadProgressByItemId[
-                                        localRecordID],
-                                    onCancelLocalSave: {
-                                        localRecordManager.cancelDownload(id: localRecordID)
+                                    downloadProgress:
+                                        recordDownloadManager.downloadProgressByItemId[
+                                            recordDownloadID],
+                                    onCancelDownload: {
+                                        recordDownloadManager.cancelDownload(id: recordDownloadID)
                                     },
                                     manager: manager
                                 ) {
@@ -219,7 +228,7 @@ private struct RecordsSearchableModifier: ViewModifier {
     }
 }
 
-struct LocalRecordsView: View {
+struct RecordDownloadView: View {
     let manager: BackendManager
     @State var playerState: PlayerState
     let refreshTrigger: Int
@@ -227,7 +236,7 @@ struct LocalRecordsView: View {
     let showsNavigationTitle: Bool
     let showsSearch: Bool
 
-    private let localRecordManager = LocalRecordManager.shared
+    private let recordDownloadManager = RecordDownloadManager.shared
     @State private var playbackPositionById: [String: Float] = [:]
     @State private var deletingRecordIDs: Set<String> = []
     #if os(macOS)
@@ -236,9 +245,9 @@ struct LocalRecordsView: View {
 
     var visibleRecords: [LocalRecordItem] {
         if searchText.isEmpty {
-            return localRecordManager.localRecords
+            return recordDownloadManager.localRecords
         }
-        return localRecordManager.localRecords.filter {
+        return recordDownloadManager.localRecords.filter {
             $0.name.localizedCaseInsensitiveContains(searchText)
         }
     }
@@ -246,38 +255,39 @@ struct LocalRecordsView: View {
     var body: some View {
         VStack(spacing: 0) {
             Group {
-                if localRecordManager.isLoadingLocalRecords
-                    && localRecordManager.localRecords.isEmpty
+                if recordDownloadManager.isLoadingLocalRecords
+                    && recordDownloadManager.localRecords.isEmpty
                 {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if visibleRecords.isEmpty {
                     ContentUnavailableView(
-                        "ローカル保存データなし",
+                        "ダウンロード番組なし",
                         systemImage: "folder",
-                        description: Text("ダウンロードした録画番組がありません")
+                        description: Text("ダウンロードした番組はありません")
                     )
                 } else {
                     List {
                         ForEach(visibleRecords) { item in
                             if let record = item.recorded {
-                                LocalRecordRowView(
+                                RecordDownloadRowView(
                                     item: item,
                                     record: record,
                                     playbackPosition: playbackPositionById[item.id],
-                                    downloadProgress: localRecordManager.downloadProgressByItemId[
-                                        item.id],
+                                    downloadProgress:
+                                        recordDownloadManager.downloadProgressByItemId[
+                                            item.id],
                                     isDeleting: deletingRecordIDs.contains(item.id),
                                     manager: manager,
-                                    onTap: { playLocalRecord(item) },
-                                    onCancel: { localRecordManager.cancelDownload(id: item.id) },
-                                    onDelete: { deleteLocalRecord(item) }
+                                    onTap: { playDownloadRecord(item) },
+                                    onCancel: { recordDownloadManager.cancelDownload(id: item.id) },
+                                    onDelete: { deleteDownloadRecord(item) }
                                 )
                             }
                         }
                     }
                     .refreshable {
-                        await localRecordManager.reloadLocalRecords()
+                        await recordDownloadManager.reloadLocalRecords()
                         await loadPlaybackPositions()
                     }
                 }
@@ -294,20 +304,20 @@ struct LocalRecordsView: View {
         }
         .onChange(of: refreshTrigger) { _, _ in
             Task {
-                await localRecordManager.reloadLocalRecords()
+                await recordDownloadManager.reloadLocalRecords()
                 await loadPlaybackPositions()
             }
         }
         .task {
-            if localRecordManager.localRecords.isEmpty {
-                await localRecordManager.reloadLocalRecords()
+            if recordDownloadManager.localRecords.isEmpty {
+                await recordDownloadManager.reloadLocalRecords()
             }
             await loadPlaybackPositions()
         }
     }
 
-    private func playLocalRecord(_ item: LocalRecordItem) {
-        guard let url = LocalRecordManager.shared.localVideoURL(for: item) else { return }
+    private func playDownloadRecord(_ item: LocalRecordItem) {
+        guard let url = RecordDownloadManager.shared.localVideoURL(for: item) else { return }
         let recorded = item.recorded
         var playable = Playable(
             streamURL: url,
@@ -323,18 +333,18 @@ struct LocalRecordsView: View {
         #endif
     }
 
-    private func deleteLocalRecord(_ item: LocalRecordItem) {
+    private func deleteDownloadRecord(_ item: LocalRecordItem) {
         guard !deletingRecordIDs.contains(item.id) else { return }
         deletingRecordIDs.insert(item.id)
         Task { @MainActor in
             defer { deletingRecordIDs.remove(item.id) }
-            await localRecordManager.deleteLocalRecord(item)
+            await recordDownloadManager.deleteLocalRecord(item)
         }
     }
 
     private func loadPlaybackPositions() async {
         guard let cacheStore = AppModel.shared.cacheStore else { return }
-        let downloadedItems = localRecordManager.localRecords.filter {
+        let downloadedItems = recordDownloadManager.localRecords.filter {
             $0.downloadState == .downloaded
         }
         await withTaskGroup(of: (String, Float?).self) { group in
@@ -357,7 +367,7 @@ struct LocalRecordsView: View {
     private func applyPlaybackPositionUpdateFromCacheStore() {
         guard let entry = AppModel.shared.cacheStore?.lastSavedPlaybackPosition else { return }
         guard
-            let item = localRecordManager.localRecords.first(where: {
+            let item = recordDownloadManager.localRecords.first(where: {
                 $0.playableID == entry.playableID
             })
         else {

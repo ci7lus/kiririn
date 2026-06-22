@@ -5,8 +5,8 @@ struct RecordRowView: View {
     let thumbnailData: Data?
     let isThumbnailFailed: Bool
     let playbackPosition: Float?
-    let localSaveProgress: Double?
-    let onCancelLocalSave: (() -> Void)?
+    let downloadProgress: Double?
+    let onCancelDownload: (() -> Void)?
     let manager: BackendManager
     let onTap: () -> Void
 
@@ -22,7 +22,7 @@ struct RecordRowView: View {
     }
 
     private var isLocalSaveInProgress: Bool {
-        localSaveProgress != nil
+        downloadProgress != nil
     }
 
     @ViewBuilder
@@ -110,20 +110,20 @@ struct RecordRowView: View {
                         }
                     }
 
-                    if let progress = localSaveProgress {
+                    if let progress = downloadProgress {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.down.circle.fill")
                                 .foregroundStyle(.tint)
-                            Text("ローカル保存中")
+                            Text("ダウンロード中")
                             Text("(\(Int(progress * 100))%)")
                                 .monospacedDigit()
-                            if let onCancelLocalSave {
-                                Button(role: .destructive, action: onCancelLocalSave) {
+                            if let onCancelDownload {
+                                Button(role: .destructive, action: onCancelDownload) {
                                     Image(systemName: "xmark.circle.fill")
                                         .font(.caption)
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityLabel("ローカル保存をキャンセル")
+                                .accessibilityLabel("ダウンロードをキャンセル")
                             }
                         }
                         .font(.caption2)
@@ -144,22 +144,22 @@ struct RecordRowView: View {
             decodedThumbnail = await decodeRecordingsImage(from: data)
         }
         .contextMenu {
-            if isLocalSaveInProgress, let onCancelLocalSave {
-                Button(role: .destructive, action: onCancelLocalSave) {
-                    Label("ローカル保存をキャンセル", systemImage: "xmark.circle")
+            if isLocalSaveInProgress, let onCancelDownload {
+                Button(role: .destructive, action: onCancelDownload) {
+                    Label("ダウンロードをキャンセル", systemImage: "xmark.circle")
                 }
             } else {
                 Button {
-                    LocalRecordManager.shared.downloadRecord(record, manager: manager)
+                    RecordDownloadManager.shared.downloadRecord(record, manager: manager)
                 } label: {
-                    Label("ローカルに保存", systemImage: "arrow.down.circle")
+                    Label("ダウンロード", systemImage: "arrow.down.circle")
                 }
             }
         }
     }
 }
 
-struct LocalRecordRowView: View {
+struct RecordDownloadRowView: View {
     let item: LocalRecordItem
     let record: Recorded
     let playbackPosition: Float?
@@ -187,8 +187,8 @@ struct LocalRecordRowView: View {
                     thumbnailData: item.thumbnailData,
                     isThumbnailFailed: false,
                     playbackPosition: playbackPosition,
-                    localSaveProgress: nil,
-                    onCancelLocalSave: nil,
+                    downloadProgress: nil,
+                    onCancelDownload: nil,
                     manager: manager,
                     onTap: onTap
                 )
@@ -202,8 +202,8 @@ struct LocalRecordRowView: View {
                     thumbnailData: item.thumbnailData,
                     isThumbnailFailed: false,
                     playbackPosition: nil,
-                    localSaveProgress: nil,
-                    onCancelLocalSave: nil,
+                    downloadProgress: nil,
+                    onCancelDownload: nil,
                     manager: manager,
                     onTap: onTap
                 )

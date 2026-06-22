@@ -4,9 +4,9 @@ import Logging
 
 @MainActor
 @Observable
-final class LocalRecordManager {
-    static let shared = LocalRecordManager()
-    private let logger = Logger(label: "LocalRecordManager")
+final class RecordDownloadManager {
+    static let shared = RecordDownloadManager()
+    private let logger = Logger(label: "RecordDownloadManager")
 
     private(set) var localRecords: [LocalRecordItem] = []
     private(set) var isLoadingLocalRecords = false
@@ -68,7 +68,8 @@ final class LocalRecordManager {
         }
     }
 
-    private func isAvailableLocalVideoFileName(_ fileName: String, excluding itemID: String) -> Bool
+    private func isAvailableLocalVideoFileName(_ fileName: String, excluding itemID: String)
+        -> Bool
     {
         let isUsedByAnotherItem = localRecords.contains {
             $0.id != itemID && $0.videoFileName.caseInsensitiveCompare(fileName) == .orderedSame

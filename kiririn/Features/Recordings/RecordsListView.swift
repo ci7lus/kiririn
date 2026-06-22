@@ -18,7 +18,7 @@ struct RecordsListView: View {
 
     private var recordingBackendIds: [String] {
         let _ = manager.backendSyncCount
-        var ids = ["local"]
+        var ids = ["download"]
         ids.append(
             contentsOf: manager.recordingBackendIds.filter {
                 manager.isBackendEnabled($0) && manager.recordingProvider(for: $0) != nil
@@ -49,8 +49,8 @@ struct RecordsListView: View {
                             HStack(spacing: 2) {
                                 Picker("バックエンド", selection: selectedBackendBinding) {
                                     ForEach(recordingBackendIds, id: \.self) { backendId in
-                                        if backendId == "local" {
-                                            Text("ローカル保存")
+                                        if backendId == "download" {
+                                            Text("ダウンロード")
                                                 .tag(backendId)
                                         } else {
                                             Text(manager.backendName(backendId))
@@ -59,13 +59,9 @@ struct RecordsListView: View {
                                     }
                                 }
                                 .pickerStyle(.menu)
-                                if let backendId = currentBackendId {
-                                    if backendId == "local" {
-                                        BackendBadge(typeName: "Local")
-                                    } else {
-                                        BackendBadge(
-                                            typeName: manager.backendTypeName(backendId))
-                                    }
+                                if let backendId = currentBackendId, backendId != "download" {
+                                    BackendBadge(
+                                        typeName: manager.backendTypeName(backendId))
                                 }
                             }
                             .padding(.horizontal, 2)
@@ -137,8 +133,8 @@ struct RecordsListView: View {
                 description: Text("録画対応バックエンドを追加すると録画を再生できます\nツールバーからファイルやURLを直接再生できます")
             )
         } else if let backendId = currentBackendId {
-            if backendId == "local" {
-                LocalRecordsView(
+            if backendId == "download" {
+                RecordDownloadView(
                     manager: manager,
                     playerState: playerState,
                     refreshTrigger: refreshTrigger,
@@ -146,7 +142,7 @@ struct RecordsListView: View {
                     showsNavigationTitle: showsNavigationTitle,
                     showsSearch: showsSearch
                 )
-                .id("local")
+                .id("download")
             } else {
                 BackendRecordsView(
                     manager: manager,
