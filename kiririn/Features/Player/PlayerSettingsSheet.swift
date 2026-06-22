@@ -4,8 +4,7 @@ enum PlayerPlaybackOptionCatalog {
     static let rateOptions: [Float] = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
     static func rateLabel(_ rate: Float) -> String {
-        if rate == floor(rate) { return "\(Int(rate))x" }
-        return "\(String(format: "%.2g", rate))x"
+        return "\(String(format: "%g", rate))x"
     }
 
     static func audioTrackLabel(index: Int, track: PlayerAudioTrack) -> String {
