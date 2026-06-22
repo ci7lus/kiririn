@@ -82,7 +82,7 @@ nonisolated enum PlayerAudioMixMode: Int, CaseIterable, Identifiable, Hashable, 
         switch self {
         case .unset: return "自動"
         case .stereo: return "ステレオ"
-        case .binaural: return "バイノーラル"
+        case .binaural: return "仮想サラウンド"
         case .surround4Point0: return "4.0サラウンド"
         case .surround5Point1: return "5.1サラウンド"
         case .surround7Point1: return "7.1サラウンド"

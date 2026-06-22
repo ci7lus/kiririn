@@ -86,13 +86,21 @@ struct RecordsListView: View {
                             Button {
                                 showingFilePicker = true
                             } label: {
-                                Label("ファイルから再生", systemImage: "doc")
+                                Label {
+                                    Text("ファイルから再生")
+                                } icon: {
+                                    accentMenuIcon(systemName: "doc")
+                                }
                             }
                             Button {
                                 urlInputText = ""
                                 showingURLInput = true
                             } label: {
-                                Label("URLから再生", systemImage: "link")
+                                Label {
+                                    Text("URLから再生")
+                                } icon: {
+                                    accentMenuIcon(systemName: "link")
+                                }
                             }
                         } label: {
                             Image(systemName: "plus")

@@ -24,7 +24,7 @@ func playerPlaybackOptionMenuEntries(playerState: PlayerState, isSeekActionAvail
     -> some View
 {
     if isSeekActionAvailable {
-        Menu("再生速度") {
+        Menu {
             Picker(
                 "再生速度",
                 selection: Binding(
@@ -37,10 +37,16 @@ func playerPlaybackOptionMenuEntries(playerState: PlayerState, isSeekActionAvail
                 }
             }
             .labelsHidden()
+        } label: {
+            Label {
+                Text("再生速度")
+            } icon: {
+                accentMenuIcon(systemName: "gauge")
+            }
         }
     }
 
-    Menu("映像トラック") {
+    Menu {
         Picker(
             "映像トラック",
             selection: Binding(
@@ -56,9 +62,15 @@ func playerPlaybackOptionMenuEntries(playerState: PlayerState, isSeekActionAvail
             }
         }
         .labelsHidden()
+    } label: {
+        Label {
+            Text("映像トラック")
+        } icon: {
+            accentMenuIcon(systemName: "video")
+        }
     }
 
-    Menu("音声トラック") {
+    Menu {
         Picker(
             "音声トラック",
             selection: Binding(
@@ -74,10 +86,16 @@ func playerPlaybackOptionMenuEntries(playerState: PlayerState, isSeekActionAvail
             }
         }
         .labelsHidden()
+    } label: {
+        Label {
+            Text("音声トラック")
+        } icon: {
+            accentMenuIcon(systemName: "speaker.wave.2")
+        }
     }
 
     #if DEBUG
-        Menu("ステレオモード") {
+        Menu {
             Picker(
                 "ステレオモード",
                 selection: Binding(
@@ -90,10 +108,16 @@ func playerPlaybackOptionMenuEntries(playerState: PlayerState, isSeekActionAvail
                 }
             }
             .labelsHidden()
+        } label: {
+            Label {
+                Text("ステレオモード")
+            } icon: {
+                accentMenuIcon(systemName: "headphones")
+            }
         }
     #endif
 
-    Menu("音声ミックスモード") {
+    Menu {
         Picker(
             "音声ミックスモード",
             selection: Binding(
@@ -106,17 +130,25 @@ func playerPlaybackOptionMenuEntries(playerState: PlayerState, isSeekActionAvail
             }
         }
         .labelsHidden()
+    } label: {
+        Label {
+            Text("音声モード")
+        } icon: {
+            accentMenuIcon(systemName: "headphones")
+        }
     }
 
     if !playerState.availableOverlayPlugins.isEmpty {
         Button {
             playerState.showingPluginOverlay.toggle()
         } label: {
-            Label(
-                playerState.showingPluginOverlay ? "プラグイン非表示" : "プラグイン表示",
-                systemImage: playerState.showingPluginOverlay
-                    ? "puzzlepiece.extension.fill" : "puzzlepiece.extension"
-            )
+            Label {
+                Text(playerState.showingPluginOverlay ? "プラグイン非表示" : "プラグイン表示")
+            } icon: {
+                accentMenuIcon(
+                    systemName: playerState.showingPluginOverlay
+                        ? "puzzlepiece.extension.fill" : "puzzlepiece.extension")
+            }
         }
     }
 }
