@@ -66,14 +66,6 @@ struct ContentView: View {
     private var playerState: PlayerState { appModel.playerState }
     private var pluginStore: PluginStore { appModel.pluginStore }
 
-    #if os(iOS)
-        private var loadingIndicatorTopPadding: CGFloat {
-            UIDevice.current.userInterfaceIdiom == .pad ? 46 : 8
-        }
-    #else
-        private var loadingIndicatorTopPadding: CGFloat { 8 }
-    #endif
-
     var body: some View {
         mainStack
             .tint(.accentColor)
@@ -285,7 +277,11 @@ struct ContentView: View {
                         Capsule()
                             .strokeBorder(Color.kiririnSeparator.opacity(0.35), lineWidth: 0.8)
                     }
-                    .padding(.top, loadingIndicatorTopPadding)
+                    #if os(iOS)
+                        .padding(.top, 46)
+                    #else
+                        .padding(.top, 8)
+                    #endif
                     Spacer()
                 }
                 .padding(.horizontal, 12)
