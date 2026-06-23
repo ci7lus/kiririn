@@ -38,6 +38,7 @@ struct AboutAppView: View {
         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "-"
     }
     private let githubURL = URL(string: "https://github.com/ci7lus/kiririn")!
+    private let githubIssuesURL = URL(string: "https://github.com/ci7lus/kiririn/issues")!
 
     @ViewBuilder
     private var appHeaderSection: some View {
@@ -70,6 +71,10 @@ struct AboutAppView: View {
             Section {
                 Link(destination: githubURL) {
                     Label("GitHubリポジトリ", systemImage: "link")
+                }
+
+                Link(destination: githubIssuesURL) {
+                    Label("GitHubで問題を報告", systemImage: "exclamationmark.circle")
                 }
 
                 NavigationLink {
