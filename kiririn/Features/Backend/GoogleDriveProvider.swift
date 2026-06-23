@@ -73,9 +73,10 @@ final class GoogleDriveProvider: RecordingBackendProvider {
         self._configuration = configuration
     }
 
-    func checkConnection() async throws {
+    func checkConnection() async throws -> String? {
         let _: GoogleDriveAbout = try await request(
             path: "drive/v3/about", queryItems: [URLQueryItem(name: "fields", value: "user")])
+        return nil
     }
 
     func fetchHeaders() async throws -> [String: String] {

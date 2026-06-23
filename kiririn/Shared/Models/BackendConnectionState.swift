@@ -14,6 +14,7 @@ class BackendConnectionState {
     var status: ConnectionStatus
     var lastError: String?
     var lastConnectedAt: Date?
+    var version: String?
 
     init(backendId: String, isEnabled: Bool = true) {
         self.backendId = backendId

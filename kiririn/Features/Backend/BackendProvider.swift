@@ -1,7 +1,7 @@
 import Foundation
 
 protocol BackendProvider {
-    func checkConnection() async throws
+    func checkConnection() async throws -> String?
     func fetchHeaders() async throws -> [String: String]
 }
 

@@ -232,6 +232,9 @@ struct BackendRowView: View {
                                 Text(statusText(state.status))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .multilineTextAlignment(.trailing)
+                                    .truncationMode(.middle)
 
                                 if let error = state.lastError {
                                     Text(error)
@@ -297,7 +300,11 @@ struct BackendRowView: View {
 
     private func statusText(_ status: ConnectionStatus) -> String {
         switch status {
-        case .connected: return "接続済み"
+        case .connected:
+            if let version = state?.version, !version.isEmpty {
+                return version
+            }
+            return "接続済み"
         case .connecting: return "接続中..."
         case .disconnected: return "未接続"
         case .error: return "エラー"

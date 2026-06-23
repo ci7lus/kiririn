@@ -22,9 +22,23 @@ final class EPGStationProvider: LiveBackendProvider, RecordingBackendProvider {
         self.client = APIClient(configuration: configuration)
     }
 
-    func checkConnection() async throws {
-        let config: EPGStationConfig = try await client.request(path: "api/config")
+    func checkConnection() async throws -> String? {
+        async let configTask: EPGStationConfig = client.request(path: "api/config")
+        async let versionTask: String? = fetchVersion()
+
+        let config = try await configTask
+        let version = await versionTask
         await broadcastStore.update(config.broadcast ?? [:])
+        return version
+    }
+
+    private func fetchVersion() async -> String? {
+        do {
+            let info: EPGStationVersionInfo = try await client.request(path: "api/version")
+            return info.version
+        } catch {
+            return nil
+        }
     }
 
     func fetchHeaders() async throws -> [String: String] {
@@ -196,6 +210,10 @@ final class EPGStationProvider: LiveBackendProvider, RecordingBackendProvider {
 
 private nonisolated struct EPGStationConfig: Codable, Sendable {
     let broadcast: [String: Bool]?
+}
+
+private nonisolated struct EPGStationVersionInfo: Codable, Sendable {
+    let version: String?
 }
 
 private nonisolated struct EPGStationChannel: Codable, Sendable {

@@ -11,8 +11,9 @@ final class MirakurunProvider: LiveBackendProvider {
         self.client = APIClient(configuration: configuration)
     }
 
-    func checkConnection() async throws {
-        let _: MirakurunStatus = try await client.request(path: "api/status")
+    func checkConnection() async throws -> String? {
+        let status: MirakurunStatus = try await client.request(path: "api/status")
+        return status.version
     }
 
     func fetchHeaders() async throws -> [String: String] {

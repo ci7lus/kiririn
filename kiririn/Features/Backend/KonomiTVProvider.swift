@@ -14,9 +14,10 @@ final class KonomiTVProvider: RecordingBackendProvider {
         self.client = APIClient(configuration: configuration)
     }
 
-    func checkConnection() async throws {
+    func checkConnection() async throws -> String? {
         // バージョン情報取得APIを使用して接続確認を行う
-        let _: KonomiTVVersionInfo = try await client.request(path: "api/version")
+        let info: KonomiTVVersionInfo = try await client.request(path: "api/version")
+        return info.version
     }
 
     func fetchHeaders() async throws -> [String: String] {

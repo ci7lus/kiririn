@@ -165,6 +165,7 @@ class BackendManager {
                     providerConfigurations[config.id] = config
                     connectionStates[config.id]?.status = .disconnected
                     connectionStates[config.id]?.lastError = nil
+                    connectionStates[config.id]?.version = nil
                 }
             } else {
                 let provider = createProvider(for: config)
@@ -244,24 +245,28 @@ class BackendManager {
         guard state.isEnabled else {
             state.status = .disconnected
             state.lastError = nil
+            state.version = nil
             rebuildAggregatedData()
             return .skipped
         }
 
         state.status = .connecting
         state.lastError = nil
+        state.version = nil
         loadingTaskCount += 1
         defer { loadingTaskCount = max(0, loadingTaskCount - 1) }
 
         do {
-            try await provider.checkConnection()
+            let version = try await provider.checkConnection()
             state.status = .connected
             state.lastConnectedAt = Date()
+            state.version = version
             return await refreshData(
                 backendId: backendId, programRefreshPolicy: programRefreshPolicy)
         } catch {
             state.status = .error
             state.lastError = error.localizedDescription
+            state.version = nil
             rebuildAggregatedData()
             return .failed(error.localizedDescription)
         }
@@ -319,6 +324,7 @@ class BackendManager {
         } catch {
             state.status = .error
             state.lastError = error.localizedDescription
+            state.version = nil
             rebuildAggregatedData()
             return .failed(error.localizedDescription)
         }

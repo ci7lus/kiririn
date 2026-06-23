@@ -227,9 +227,13 @@ struct BackendEditView: View {
         }()
 
         do {
-            try await provider.checkConnection()
+            let version = try await provider.checkConnection()
             testSuccess = true
-            testResult = "接続成功"
+            if let version, !version.isEmpty {
+                testResult = version
+            } else {
+                testResult = "接続成功"
+            }
         } catch {
             testSuccess = false
             testResult = error.localizedDescription
