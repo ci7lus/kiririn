@@ -176,21 +176,21 @@ struct PluginManifestInfoSections: View {
 
     var body: some View {
         metadataSection
-        signatureSection
         descriptionSection
-        permissionsSection
         hostPermissionsSection
     }
 
     @ViewBuilder
     private var metadataSection: some View {
         Section {
-            if let sourceLabel = info.sourceLabel {
-                LabeledContent("ソース") {
-                    Text(sourceLabel)
-                        .foregroundStyle(.secondary)
+            #if os(macOS)
+                if let sourceLabel = info.sourceLabel {
+                    LabeledContent("ソース") {
+                        Text(sourceLabel)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-            }
+            #endif
             LabeledContent("ID") {
                 Text(info.manifestID)
                     .foregroundStyle(.secondary)
@@ -214,27 +214,70 @@ struct PluginManifestInfoSections: View {
                         .truncationMode(.middle)
                 }
             }
-            if let updateURL = info.manifestUpdateURL,
-                let url = URL(string: updateURL)
-            {
-                LabeledContent("更新URL") {
-                    Link(updateURL, destination: url)
-                        .foregroundStyle(.tint)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+            LabeledContent("自動更新") {
+                Text(isAutoUpdateSupported ? "対応" : "非対応")
+                    .foregroundStyle(.secondary)
+            }
+            LabeledContent("対応機能") {
+                if let areas = info.displayAreas, !areas.isEmpty {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        ForEach(areas.indices, id: \.self) { index in
+                            if index > 0 {
+                                Text("/")
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(areas[index].localizedName)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    Text("すべて")
+                        .foregroundStyle(.secondary)
                 }
             }
-            LabeledContent("対応エリア") {
-                if let areas = info.displayAreas {
-                    Text(areas.map(\.localizedName).joined(separator: ", "))
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("すべて").foregroundStyle(.secondary)
+            if !info.requestedPermissions.isEmpty {
+                LabeledContent("権限") {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        ForEach(info.requestedPermissions.indices, id: \.self) { index in
+                            if index > 0 {
+                                Text("/")
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(
+                                PluginPermission.localizedName(
+                                    for: info.requestedPermissions[index]
+                                ) ?? info.requestedPermissions[index]
+                            )
+                            .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             LabeledContent("バックグラウンド") {
                 Text(info.isBackgroundExists ? "あり" : "なし")
                     .foregroundStyle(.secondary)
+            }
+            NavigationLink {
+                PluginSignatureDetailView(info: info)
+            } label: {
+                LabeledContent("署名") {
+                    HStack(spacing: 8) {
+                        let color = Self.signatureColor(for: info.packageAuthentication.state)
+                        Text(info.packageAuthentication.state.localizedTitle)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(color)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(color.opacity(0.12), in: Capsule())
+
+                        if let commonName = firstSignerCommonName {
+                            Text(commonName)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                }
             }
         }
     }
@@ -251,61 +294,8 @@ struct PluginManifestInfoSections: View {
     }
 
     @ViewBuilder
-    private var signatureSection: some View {
-        Section("署名") {
-            HStack(alignment: .firstTextBaseline) {
-                Text(info.packageAuthentication.state.localizedTitle)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(signatureColor)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(signatureColor.opacity(0.12), in: Capsule())
-
-                Spacer(minLength: 12)
-
-                if let signatureSummaryText {
-                    Text(signatureSummaryText)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .multilineTextAlignment(.trailing)
-                        .textSelection(.enabled)
-                }
-            }
-
-            if !info.packageAuthentication.warnings.isEmpty {
-                ForEach(info.packageAuthentication.warnings, id: \.self) { warning in
-                    Label {
-                        Text(warning)
-                            .font(.footnote)
-                    } icon: {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                    }
-                    .foregroundStyle(signatureWarningColor)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var permissionsSection: some View {
-        Section("権限") {
-            if !info.requestedPermissions.isEmpty {
-                ForEach(info.requestedPermissions, id: \.self) { permission in
-                    Text(permission)
-                        .font(.system(.footnote, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                Label("追加権限なし", systemImage: "checkmark.shield")
-                    .foregroundStyle(.secondary)
-                    .font(.subheadline)
-            }
-        }
-    }
-
-    @ViewBuilder
     private var hostPermissionsSection: some View {
-        Section("アクセス許可URL") {
+        Section("ホスト権限") {
             if !info.requestedHostPermissions.isEmpty {
                 ForEach(info.requestedHostPermissions, id: \.self) { pattern in
                     Text(pattern)
@@ -313,15 +303,28 @@ struct PluginManifestInfoSections: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Label("外部URLへのアクセスなし", systemImage: "network.slash")
+                Label("ホスト権限なし", systemImage: "network.slash")
                     .foregroundStyle(.secondary)
                     .font(.subheadline)
             }
         }
     }
 
-    private var signatureColor: Color {
-        switch info.packageAuthentication.state {
+    private var isAutoUpdateSupported: Bool {
+        guard let updateURL = info.manifestUpdateURL else { return false }
+        return !updateURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var firstSignerCommonName: String? {
+        guard let signer = info.packageAuthentication.signers.first else {
+            return nil
+        }
+        return Self.signerCommonName(from: signer.distinguishedName)
+            ?? signer.distinguishedName
+    }
+
+    fileprivate static func signatureColor(for state: APKAuthenticationState) -> Color {
+        switch state {
         case .unsigned:
             return .secondary
         case .verified:
@@ -333,8 +336,8 @@ struct PluginManifestInfoSections: View {
         }
     }
 
-    private var signatureWarningColor: Color {
-        switch info.packageAuthentication.state {
+    fileprivate static func signatureWarningColor(for state: APKAuthenticationState) -> Color {
+        switch state {
         case .revoked:
             return .red
         default:
@@ -342,36 +345,81 @@ struct PluginManifestInfoSections: View {
         }
     }
 
-    private var signatureSummaryText: String? {
-        guard let signer = info.packageAuthentication.signers.first else {
-            return nil
-        }
-
-        let commonName =
-            signerCommonName(from: signer.distinguishedName) ?? signer.distinguishedName
-        let fingerprint = abbreviatedFingerprint(signer.publicKeySHA256)
-        let extraSignerSuffix: String
-        if info.packageAuthentication.signers.count > 1 {
-            extraSignerSuffix = " +\(info.packageAuthentication.signers.count - 1)"
-        } else {
-            extraSignerSuffix = ""
-        }
-        return "\(commonName) (\(fingerprint))\(extraSignerSuffix)"
-    }
-
-    private func signerCommonName(from distinguishedName: String) -> String? {
+    fileprivate static func signerCommonName(from distinguishedName: String) -> String? {
         distinguishedName
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .first { $0.hasPrefix("CN=") }
             .map { String($0.dropFirst(3)) }
     }
+}
 
-    private func abbreviatedFingerprint(_ fingerprint: String) -> String {
-        guard fingerprint.count > 24 else {
-            return fingerprint
+struct PluginSignatureDetailView: View {
+    let info: PluginManifestPresentation
+
+    var body: some View {
+        Form {
+            if !info.packageAuthentication.signers.isEmpty {
+                Section("署名者") {
+                    ForEach(
+                        info.packageAuthentication.signers,
+                        id: \.publicKeySHA256
+                    ) { signer in
+                        signerRow(signer)
+                    }
+                }
+            }
+
+            if !info.packageAuthentication.warnings.isEmpty {
+                Section("警告") {
+                    ForEach(info.packageAuthentication.warnings, id: \.self) { warning in
+                        Label {
+                            Text(warning)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                        }
+                        .foregroundStyle(
+                            PluginManifestInfoSections.signatureWarningColor(
+                                for: info.packageAuthentication.state
+                            )
+                        )
+                    }
+                }
+            }
         }
-        return "\(fingerprint.prefix(12))...\(fingerprint.suffix(12))"
+        .formStyle(.grouped)
+        .navigationTitle("署名情報")
+    }
+
+    @ViewBuilder
+    private func signerRow(_ signer: APKSignerSummary) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(
+                PluginManifestInfoSections.signerCommonName(
+                    from: signer.distinguishedName
+                ) ?? signer.distinguishedName
+            )
+            .font(.body.weight(.medium))
+
+            Text("識別名")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(signer.distinguishedName)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+
+            Text("公開鍵SHA-256")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(signer.publicKeySHA256)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+        }
+        .padding(.vertical, 2)
     }
 }
 
@@ -749,7 +797,7 @@ private struct PluginDetailView: View {
     #endif
 
     private func clearWebDataConfirmationMessage(for plugin: PluginDefinition) -> String {
-        "プラグインのパネル/オーバーレイ/設定に紐づくストレージを消去します。消去後は再読み込みされます"
+        "プラグインに紐づくストレージを消去します。消去後は再読み込みされます"
     }
 
     @MainActor

@@ -7,6 +7,24 @@ public enum PluginDisplayArea: String, Codable, CaseIterable, Sendable {
     case panel = "panel"
 }
 
+public enum PluginPermission: String, Codable, CaseIterable, Sendable {
+    case storage
+    case unlimitedStorage
+}
+
+extension PluginPermission {
+    public var localizedName: String {
+        switch self {
+        case .storage: return "ストレージ"
+        case .unlimitedStorage: return "無制限のストレージ"
+        }
+    }
+
+    public static func localizedName(for rawValue: String) -> String? {
+        PluginPermission(rawValue: rawValue)?.localizedName
+    }
+}
+
 public struct ExtensionPluginManifest: Equatable, Sendable {
     public let manifestID: String
     public let displayName: String

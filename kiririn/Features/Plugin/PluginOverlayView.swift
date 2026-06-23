@@ -13,7 +13,7 @@ import WebKit
 extension PluginDisplayArea {
     var localizedName: String {
         switch self {
-        case .overlay: return "プレイヤーオーバーレイ"
+        case .overlay: return "オーバーレイ"
         case .options: return "プラグイン設定"
         case .panel: return "パネル"
         }
