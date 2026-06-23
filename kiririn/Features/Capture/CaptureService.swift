@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import Foundation
 import ImageIO
@@ -68,19 +69,16 @@ final class CaptureService: ObservableObject {
     let didClearHistory = PassthroughSubject<Void, Never>()
     let didCaptureForPlugin = PassthroughSubject<PluginCaptureEvent, Never>()
 
-    private let folderBookmarkKey = "kiririn.capture.folder.bookmark"
+    private static let folderBookmarkKey = "kiririn.capture.folder.bookmark"
     private let iCloudBackupKey = "kiririn.capture.icloud_backup"
     private let copyCaptureToClipboardKey = "kiririn.capture.copy_to_clipboard"
     private let compositePluginOverlayKey = "kiririn.capture.composite_plugin_overlay"
     private let clipboardTargetKey = "kiririn.capture.clipboard_target"
     private var cacheStore: CacheStore?
+    private var activeScopedFolderURL: URL?
 
     var isExternalFolderSelected: Bool {
-        #if os(macOS)
-            return UserDefaults.standard.data(forKey: folderBookmarkKey) != nil
-        #else
-            return false
-        #endif
+        return UserDefaults.standard.data(forKey: Self.folderBookmarkKey) != nil
     }
 
     init() {
@@ -224,14 +222,7 @@ final class CaptureService: ObservableObject {
             return nil
         }
 
-        guard
-            let data = await Task.detached(
-                priority: .utility,
-                operation: {
-                    try? Data(contentsOf: targetURL)
-                }
-            ).value
-        else {
+        guard let data = await loadCaptureData(at: targetURL) else {
             return nil
         }
 
@@ -294,11 +285,8 @@ final class CaptureService: ObservableObject {
         let allItems =
             await cacheStore?.fetchCaptureHistory(searchText: "", limit: 10000, offset: 0) ?? []
         for item in allItems {
-            for (index, url) in item.allFileURLs.enumerated() {
-                let path = index == 0 ? item.filePath : item.variantPaths[index - 1]
-                if !path.hasPrefix("/") {
-                    try? FileManager.default.removeItem(at: url)
-                }
+            for url in item.allFileURLs {
+                deleteCaptureFile(at: url)
             }
         }
         await cacheStore?.clearCaptureHistory()
@@ -306,11 +294,8 @@ final class CaptureService: ObservableObject {
     }
 
     func deleteHistoryItem(_ item: CaptureHistoryItem) async {
-        for (index, url) in item.allFileURLs.enumerated() {
-            let path = index == 0 ? item.filePath : item.variantPaths[index - 1]
-            if !path.hasPrefix("/") {
-                try? FileManager.default.removeItem(at: url)
-            }
+        for url in item.allFileURLs {
+            deleteCaptureFile(at: url)
         }
         await cacheStore?.deleteCaptureHistoryItem(id: item.id)
     }
@@ -362,59 +347,141 @@ final class CaptureService: ObservableObject {
     func saveToFolder(
         tempURL: URL, programName: String?, serviceName: String?, extension ext: String
     ) throws -> String {
-        guard let folderURL = try getCaptureFolderURL() else {
-            throw CaptureError.folderNotFound
+        guard let folderURL = activeScopedFolderURL else {
+            throw CaptureError.folderAccessDenied
         }
 
         let fileName = generateFileName(
             programName: programName, serviceName: serviceName, extension: ext)
         let destinationURL = folderURL.appendingPathComponent(fileName)
 
-        if folderURL.startAccessingSecurityScopedResource() {
-            defer { folderURL.stopAccessingSecurityScopedResource() }
-
-            if FileManager.default.fileExists(atPath: destinationURL.path) {
-                try? FileManager.default.removeItem(at: destinationURL)
-            }
-            try FileManager.default.moveItem(at: tempURL, to: destinationURL)
-            return destinationURL.path
-        } else {
-            try FileManager.default.moveItem(at: tempURL, to: destinationURL)
-            return destinationURL.path
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try? FileManager.default.removeItem(at: destinationURL)
         }
+        try FileManager.default.moveItem(at: tempURL, to: destinationURL)
+        return destinationURL.path
     }
 
     private func loadCaptureFolder() {
-        captureFolder = try? getCaptureFolderURL()
+        captureFolder = ensureScopedFolderAccess()
     }
 
-    private func getCaptureFolderURL() throws -> URL? {
-        if let bookmarkData = UserDefaults.standard.data(forKey: folderBookmarkKey) {
-            var isStale = false
-            if let url = try? URL(
+    private func ensureScopedFolderAccess() -> URL? {
+        if let active = activeScopedFolderURL { return active }
+        guard let bookmarkData = UserDefaults.standard.data(forKey: Self.folderBookmarkKey) else {
+            return nil
+        }
+        var isStale = false
+        guard
+            let url = try? URL(
                 resolvingBookmarkData: bookmarkData, options: .securityScoped,
                 bookmarkDataIsStale: &isStale)
-            {
-                return url
-            }
-        }
-        return nil
+        else { return nil }
+        guard url.startAccessingSecurityScopedResource() else { return nil }
+        activeScopedFolderURL = url
+        if isStale { refreshBookmark(for: url) }
+        return url
+    }
+
+    private func releaseScopedFolderAccess() {
+        activeScopedFolderURL?.stopAccessingSecurityScopedResource()
+        activeScopedFolderURL = nil
+    }
+
+    private func refreshBookmark(for url: URL) {
+        guard
+            let data = try? url.bookmarkData(
+                options: .securityScoped, includingResourceValuesForKeys: nil, relativeTo: nil)
+        else { return }
+        UserDefaults.standard.set(data, forKey: Self.folderBookmarkKey)
     }
 
     func setCaptureFolder(_ url: URL) throws {
-        let accessing = url.startAccessingSecurityScopedResource()
-        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-
+        releaseScopedFolderAccess()
+        guard url.startAccessingSecurityScopedResource() else {
+            throw CaptureError.folderAccessDenied
+        }
         let bookmarkData = try url.bookmarkData(
             options: .securityScoped, includingResourceValuesForKeys: nil, relativeTo: nil)
-        UserDefaults.standard.set(bookmarkData, forKey: folderBookmarkKey)
-
-        loadCaptureFolder()
+        UserDefaults.standard.set(bookmarkData, forKey: Self.folderBookmarkKey)
+        activeScopedFolderURL = url
+        captureFolder = url
     }
 
     func resetToSandbox() {
-        UserDefaults.standard.removeObject(forKey: folderBookmarkKey)
-        loadCaptureFolder()
+        releaseScopedFolderAccess()
+        UserDefaults.standard.removeObject(forKey: Self.folderBookmarkKey)
+        captureFolder = nil
+    }
+
+    // MARK: - External File Access
+
+    private func requiresScopedAccess(for url: URL) -> Bool {
+        guard let scopedURL = activeScopedFolderURL else { return false }
+        let scopedPath = scopedURL.path
+        let targetPath = url.path
+        if targetPath == scopedPath { return false }
+        return !targetPath.hasPrefix(scopedPath + "/")
+    }
+
+    private func deleteCaptureFile(at url: URL) {
+        let shouldAccess = requiresScopedAccess(for: url)
+        let didAccess = shouldAccess ? url.startAccessingSecurityScopedResource() : false
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            logger.error("Failed to delete capture file at \(url.path): \(error)")
+        }
+    }
+
+    func loadCaptureData(at url: URL) async -> Data? {
+        let shouldAccess = requiresScopedAccess(for: url)
+        let didAccess = shouldAccess ? url.startAccessingSecurityScopedResource() : false
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+        return await Task.detached(priority: .utility) {
+            try? Data(contentsOf: url)
+        }.value
+    }
+
+    func loadCaptureImage(from url: URL) async -> PlatformImage? {
+        let shouldAccess = requiresScopedAccess(for: url)
+        let didAccess = shouldAccess ? url.startAccessingSecurityScopedResource() : false
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+        return await Task.detached(priority: .utility) {
+            #if canImport(UIKit)
+                return UIImage(contentsOfFile: url.path)
+            #elseif canImport(AppKit)
+                return NSImage(contentsOfFile: url.path)
+            #else
+                return nil
+            #endif
+        }.value
+    }
+
+    func generateVideoThumbnail(from url: URL) async -> PlatformImage? {
+        let shouldAccess = requiresScopedAccess(for: url)
+        let didAccess = shouldAccess ? url.startAccessingSecurityScopedResource() : false
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+        return await Task.detached(priority: .utility) {
+            let asset = AVURLAsset(url: url)
+            let imageGenerator = AVAssetImageGenerator(asset: asset)
+            imageGenerator.appliesPreferredTrackTransform = true
+            let time = CMTime(seconds: 1, preferredTimescale: 60)
+            do {
+                let (cgImage, _) = try await imageGenerator.image(at: time)
+                #if canImport(UIKit)
+                    return UIImage(cgImage: cgImage)
+                #elseif canImport(AppKit)
+                    let size = NSSize(width: cgImage.width, height: cgImage.height)
+                    return NSImage(cgImage: cgImage, size: size)
+                #else
+                    return nil
+                #endif
+            } catch {
+                return nil
+            }
+        }.value
     }
 
     private func generateFileName(programName: String?, serviceName: String?, extension ext: String)

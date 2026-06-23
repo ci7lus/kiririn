@@ -17,18 +17,11 @@ import SwiftUI
     }
 
     func loadCapturePlatformImage(from url: URL) async -> PlatformImage? {
-        await Task.detached(priority: .utility) {
-            NSImage(contentsOfFile: url.path)
-        }.value
+        await CaptureService.shared.loadCaptureImage(from: url)
     }
 
     func captureImage(_ image: PlatformImage) -> Image {
         Image(nsImage: image)
-    }
-
-    func makeCaptureVideoImage(from cgImage: CGImage) -> PlatformImage? {
-        let size = NSSize(width: cgImage.width, height: cgImage.height)
-        return NSImage(cgImage: cgImage, size: size)
     }
 #elseif os(iOS)
     import UIKit
@@ -51,16 +44,10 @@ import SwiftUI
     }
 
     func loadCapturePlatformImage(from url: URL) async -> PlatformImage? {
-        await Task.detached(priority: .utility) {
-            UIImage(contentsOfFile: url.path)
-        }.value
+        await CaptureService.shared.loadCaptureImage(from: url)
     }
 
     func captureImage(_ image: PlatformImage) -> Image {
         Image(uiImage: image)
-    }
-
-    func makeCaptureVideoImage(from cgImage: CGImage) -> PlatformImage? {
-        UIImage(cgImage: cgImage)
     }
 #endif

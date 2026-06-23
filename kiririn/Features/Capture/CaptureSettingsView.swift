@@ -20,22 +20,21 @@ struct CaptureSettingsView: View {
             Section("保存設定") {
                 #if os(macOS)
                     LabeledContent("保存先") {
-                        Text(captureService.captureFolder?.path ?? "App Sandbox (デフォルト)")
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.trailing)
-                            .truncationMode(.middle)
-                    }
+                        HStack(spacing: 4) {
+                            Text(captureService.captureFolder?.path ?? "App Sandbox (デフォルト)")
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.trailing)
+                                .truncationMode(.middle)
 
-                    HStack {
-                        Spacer()
-                        Button("変更") {
-                            isFolderPickerPresented = true
-                        }
+                            Button("変更") {
+                                isFolderPickerPresented = true
+                            }
 
-                        if captureService.isExternalFolderSelected {
-                            Button("デフォルトに戻す") {
-                                captureService.resetToSandbox()
+                            if captureService.isExternalFolderSelected {
+                                Button("デフォルトに戻す") {
+                                    captureService.resetToSandbox()
+                                }
                             }
                         }
                     }

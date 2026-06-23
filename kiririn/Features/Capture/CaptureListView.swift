@@ -1,4 +1,3 @@
-import AVKit
 import QuickLook
 import SwiftUI
 
@@ -565,16 +564,7 @@ private struct VideoThumbnailView: View {
     }
 
     private func generateThumbnail(at url: URL) async -> PlatformImage? {
-        let asset = AVURLAsset(url: url)
-        let imageGenerator = AVAssetImageGenerator(asset: asset)
-        imageGenerator.appliesPreferredTrackTransform = true
-        let time = CMTime(seconds: 1, preferredTimescale: 60)
-        do {
-            let (cgImage, _) = try await imageGenerator.image(at: time)
-            return makeCaptureVideoImage(from: cgImage)
-        } catch {
-            return nil
-        }
+        await CaptureService.shared.generateVideoThumbnail(from: url)
     }
 }
 
