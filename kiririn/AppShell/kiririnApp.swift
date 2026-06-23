@@ -218,6 +218,9 @@ private enum SentryBootstrap {
     static func initializeIfAvailable() {
         SentrySDK.start { options in
             options.dsn = dsn
+            options.enableNetworkBreadcrumbs = false
+            options.enableCaptureFailedRequests = false
+            options.enableNetworkTracking = false
             #if DEBUG
                 options.tracesSampleRate = 1.0
                 options.configureProfiling = {
