@@ -2007,7 +2007,7 @@ private struct LowerContextPluginsView: View {
                     .id(plugin.id)
                 } else {
                     ContentUnavailableView(
-                        "有効なプラグインなし",
+                        "有効なプラグインがありません",
                         systemImage: "puzzlepiece.extension",
                         description: Text("設定からプラグインを追加または有効にしてください")
                     )

@@ -245,9 +245,9 @@ struct ProgramGuideView: View {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if displayChannels.isEmpty {
             ContentUnavailableView(
-                "番組情報なし",
+                "番組情報がありません",
                 systemImage: "calendar",
-                description: Text("条件に一致する番組がありません")
+                description: Text("番組情報があると、ここに表示されます")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {

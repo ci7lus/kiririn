@@ -10,9 +10,9 @@ struct CaptionWindowView_macOS: View {
                     .id(playerState.id)
             } else {
                 ContentUnavailableView(
-                    "プレイヤーなし",
+                    "プレイヤーがありません",
                     systemImage: "captions.bubble",
-                    description: Text("プレイヤーウィンドウをフォーカスすると字幕履歴が表示されます")
+                    description: Text("プレイヤーウィンドウをフォーカスすると、字幕履歴が表示されます")
                 )
             }
         }

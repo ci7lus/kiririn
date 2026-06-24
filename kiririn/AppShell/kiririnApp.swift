@@ -255,7 +255,7 @@ private struct AppCommands: Commands {
                 }
 
                 if enabledPlugins.isEmpty {
-                    Text("有効なプラグインなし")
+                    Text("なし")
                         .disabled(true)
                 } else {
                     ForEach(enabledPlugins) { plugin in

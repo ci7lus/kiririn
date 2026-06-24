@@ -126,13 +126,7 @@ struct RecordsListView: View {
 
     @ViewBuilder
     private var recordsContent: some View {
-        if recordingBackendIds.isEmpty {
-            ContentUnavailableView(
-                "録画バックエンドなし",
-                systemImage: "internaldrive",
-                description: Text("録画対応バックエンドを追加すると録画を再生できます\nツールバーからファイルやURLを直接再生できます")
-            )
-        } else if let backendId = currentBackendId {
+        if let backendId = currentBackendId {
             if backendId == "download" {
                 RecordDownloadView(
                     manager: manager,
@@ -160,7 +154,7 @@ struct RecordsListView: View {
                 }
             }
         } else {
-            ContentUnavailableView("録画バックエンドなし", systemImage: "internaldrive")
+            ContentUnavailableView("録画バックエンドがありません", systemImage: "internaldrive")
         }
     }
 

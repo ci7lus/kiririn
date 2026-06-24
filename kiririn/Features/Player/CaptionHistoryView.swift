@@ -8,9 +8,9 @@ struct CaptionHistoryView: View {
         Group {
             if history.isEmpty {
                 ContentUnavailableView(
-                    "字幕履歴なし",
+                    "字幕履歴がありません",
                     systemImage: "captions.bubble",
-                    description: Text("再生中に字幕が表示されると、ここに履歴が記録されます")
+                    description: Text("再生中に字幕が表示されると、ここに履歴が表示されます")
                 )
             } else {
                 List(history) { item in

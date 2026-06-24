@@ -176,9 +176,9 @@ struct ServiceListView: View {
     private var emptyStateView: some View {
         if viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             ContentUnavailableView(
-                "チャンネルなし",
+                "チャンネルがありません",
                 systemImage: "tv",
-                description: Text("バックエンドに接続してチャンネルを取得してください")
+                description: Text("バックエンドに接続すると、チャンネルが表示されます")
             )
         } else {
             ContentUnavailableView(
@@ -844,7 +844,7 @@ struct ServiceRowView: View {
                                 .lineLimit(1)
                         }
                     } else {
-                        Text("番組情報なし")
+                        Text("番組情報がありません")
                             .font(.headline)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)

@@ -14,9 +14,11 @@ struct PluginList_macOS: View {
     var body: some View {
         if pluginStore.plugins.isEmpty {
             ContentUnavailableView(
-                "プラグインなし",
+                "プラグインがありません",
                 systemImage: "puzzlepiece.extension",
-                description: Text("プラグインがインストールされていません")
+                description: Text("追加は")
+                    + Text(Image(systemName: "plus")).foregroundStyle(Color.accentColor)
+                    + Text("ボタンから行えます")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {

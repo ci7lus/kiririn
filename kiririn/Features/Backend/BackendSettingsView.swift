@@ -12,6 +12,7 @@ struct BackendSettingsView: View {
 
     var body: some View {
         listView
+            .navigationTitle("バックエンド")
             .toolbar {
                 toolbarContent
             }
@@ -53,62 +54,19 @@ struct BackendSettingsView: View {
         #endif
     }
 
+    @ViewBuilder
     private var macosList: some View {
-        List(selection: $selectedBackendID) {
-            ForEach(configStore.configurations) { config in
-                BackendRowView(
-                    config: config,
-                    state: manager.connectionStates[config.id],
-                    isEnabled: configStore.isEnabled(config.id),
-                    onToggle: { enabled in
-                        configStore.setEnabled(enabled, for: config.id)
-                        manager.connectionStates[config.id]?.isEnabled = enabled
-                        if enabled {
-                            Task { await manager.connect(backendId: config.id) }
-                        } else {
-                            manager.connectionStates[config.id]?.status = .disconnected
-                            manager.backendAvailabilityDidChange()
-                        }
-                    },
-                    onReconnect: {
-                        Task { await manager.connect(backendId: config.id) }
-                    },
-                    onEdit: {
-                        editingConfig = config
-                    }
-                )
-                .tag(config.id)
-            }
-            .onMove(perform: moveConfigs)
-        }
-        .contextMenu(forSelectionType: String.self) { selectedIDs in
-            if let firstID = selectedIDs.first,
-                let config = configStore.configurations.first(where: { $0.id == firstID })
-            {
-                Button("編集") {
-                    editingConfig = config
-                }
-
-                Divider()
-
-                Button("削除", role: .destructive) {
-                    backendIDsToDelete = [firstID]
-                    showingDeleteConfirmation = true
-                }
-            }
-        } primaryAction: { selectedIDs in
-            if let firstID = selectedIDs.first,
-                let config = configStore.configurations.first(where: { $0.id == firstID })
-            {
-                editingConfig = config
-            }
-        }
-        .navigationTitle("バックエンド")
-    }
-
-    private var iosList: some View {
-        List(selection: $selectedBackendID) {
-            Section {
+        if configStore.configurations.isEmpty {
+            ContentUnavailableView(
+                "バックエンドがありません",
+                systemImage: "server.rack",
+                description: Text("追加は")
+                    + Text(Image(systemName: "plus")).foregroundStyle(Color.accentColor)
+                    + Text("ボタンから行えます")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List(selection: $selectedBackendID) {
                 ForEach(configStore.configurations) { config in
                     BackendRowView(
                         config: config,
@@ -131,31 +89,92 @@ struct BackendSettingsView: View {
                             editingConfig = config
                         }
                     )
-                    .contextMenu {
-                        Button("編集") {
-                            editingConfig = config
-                        }
-
-                        Divider()
-
-                        Button("削除", role: .destructive) {
-                            backendIDsToDelete = [config.id]
-                            showingDeleteConfirmation = true
-                        }
-                    }
-                }
-                .onDelete { indexSet in
-                    backendIDsToDelete = indexSet.map { configStore.configurations[$0].id }
-                    showingDeleteConfirmation = true
+                    .tag(config.id)
                 }
                 .onMove(perform: moveConfigs)
-            } footer: {
-                if configStore.configurations.isEmpty {
-                    Text("追加ボタンからバックエンドを追加してください")
+            }
+            .contextMenu(forSelectionType: String.self) { selectedIDs in
+                if let firstID = selectedIDs.first,
+                    let config = configStore.configurations.first(where: { $0.id == firstID })
+                {
+                    Button("編集") {
+                        editingConfig = config
+                    }
+
+                    Divider()
+
+                    Button("削除", role: .destructive) {
+                        backendIDsToDelete = [firstID]
+                        showingDeleteConfirmation = true
+                    }
+                }
+            } primaryAction: { selectedIDs in
+                if let firstID = selectedIDs.first,
+                    let config = configStore.configurations.first(where: { $0.id == firstID })
+                {
+                    editingConfig = config
                 }
             }
         }
-        .navigationTitle("バックエンド")
+    }
+
+    @ViewBuilder
+    private var iosList: some View {
+        if configStore.configurations.isEmpty {
+            ContentUnavailableView(
+                "バックエンドがありません",
+                systemImage: "server.rack",
+                description: Text("追加は")
+                    + Text(Image(systemName: "plus")).foregroundStyle(Color.accentColor)
+                    + Text("ボタンから行えます")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List(selection: $selectedBackendID) {
+                Section {
+                    ForEach(configStore.configurations) { config in
+                        BackendRowView(
+                            config: config,
+                            state: manager.connectionStates[config.id],
+                            isEnabled: configStore.isEnabled(config.id),
+                            onToggle: { enabled in
+                                configStore.setEnabled(enabled, for: config.id)
+                                manager.connectionStates[config.id]?.isEnabled = enabled
+                                if enabled {
+                                    Task { await manager.connect(backendId: config.id) }
+                                } else {
+                                    manager.connectionStates[config.id]?.status = .disconnected
+                                    manager.backendAvailabilityDidChange()
+                                }
+                            },
+                            onReconnect: {
+                                Task { await manager.connect(backendId: config.id) }
+                            },
+                            onEdit: {
+                                editingConfig = config
+                            }
+                        )
+                        .contextMenu {
+                            Button("編集") {
+                                editingConfig = config
+                            }
+
+                            Divider()
+
+                            Button("削除", role: .destructive) {
+                                backendIDsToDelete = [config.id]
+                                showingDeleteConfirmation = true
+                            }
+                        }
+                    }
+                    .onDelete { indexSet in
+                        backendIDsToDelete = indexSet.map { configStore.configurations[$0].id }
+                        showingDeleteConfirmation = true
+                    }
+                    .onMove(perform: moveConfigs)
+                }
+            }
+        }
     }
 
     @ToolbarContentBuilder

@@ -19,17 +19,17 @@ struct ProgramInfoWindowView_macOS: View {
                     .id(playerState.id)
                 } else {
                     ContentUnavailableView(
-                        "番組情報なし",
+                        "番組情報がありません",
                         systemImage: "info.circle",
-                        description: Text("フォーカス中のプレイヤーで番組情報を取得できると、ここに表示されます")
+                        description: Text("フォーカス中のプレイヤーに番組情報があれば、ここに表示されます")
                     )
                     .id(playerState.id)
                 }
             } else {
                 ContentUnavailableView(
-                    "プレイヤーなし",
+                    "プレイヤーがありません",
                     systemImage: "play.rectangle",
-                    description: Text("プレイヤーウィンドウをフォーカスすると番組情報が表示されます")
+                    description: Text("プレイヤーウィンドウをフォーカスすると、番組情報が表示されます")
                 )
             }
         }

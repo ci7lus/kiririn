@@ -36,9 +36,10 @@ struct CaptureListView: View {
 
     private var emptyStateView: some View {
         ContentUnavailableView(
-            searchText.isEmpty ? "キャプチャ履歴なし" : "検索結果なし",
+            searchText.isEmpty ? "キャプチャ履歴がありません" : "検索結果なし",
             systemImage: "photo.on.rectangle.angled",
-            description: Text(searchText.isEmpty ? "撮影された項目はありません" : "キーワードに一致する項目が見つかりませんでした")
+            description: Text(
+                searchText.isEmpty ? "キャプチャを撮影すると、ここに表示されます" : "キーワードに一致する項目が見つかりませんでした")
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

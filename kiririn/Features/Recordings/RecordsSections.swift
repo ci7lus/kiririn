@@ -47,9 +47,9 @@ struct BackendRecordsView: View {
                         }
                     } else {
                         ContentUnavailableView(
-                            "録画番組なし",
+                            "録画番組がありません",
                             systemImage: "film.stack",
-                            description: Text("録画された番組がありません")
+                            description: Text("録画番組がある場合はここに表示されます")
                         )
                     }
                 } else {
@@ -262,9 +262,9 @@ struct RecordDownloadView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if visibleRecords.isEmpty {
                     ContentUnavailableView(
-                        "ダウンロード番組なし",
+                        "録画番組がありません",
                         systemImage: "folder",
-                        description: Text("ダウンロードした番組はありません")
+                        description: Text("録画番組をダウンロードすると、ここに表示されます")
                     )
                 } else {
                     List {
