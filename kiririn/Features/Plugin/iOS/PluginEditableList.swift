@@ -34,9 +34,6 @@ struct PluginList_iOS: View {
                                 editingPlugin = plugin
                             }
                         )
-                        .contextMenu {
-                            contextMenuItems(for: plugin)
-                        }
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
                                 pluginIDsToDelete = [plugin.id]
@@ -62,20 +59,6 @@ struct PluginList_iOS: View {
                     }
                 }
             }
-        }
-    }
-
-    @ViewBuilder
-    private func contextMenuItems(for plugin: PluginDefinition) -> some View {
-        Button("編集") {
-            editingPlugin = plugin
-        }
-
-        Divider()
-
-        Button("削除", role: .destructive) {
-            pluginIDsToDelete = [plugin.id]
-            showingDeleteConfirmation = true
         }
     }
 }

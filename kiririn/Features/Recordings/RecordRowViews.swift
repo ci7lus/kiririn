@@ -146,13 +146,21 @@ struct RecordRowView: View {
         .contextMenu {
             if isLocalSaveInProgress, let onCancelDownload {
                 Button(role: .destructive, action: onCancelDownload) {
-                    Label("ダウンロードをキャンセル", systemImage: "xmark.circle")
+                    Label {
+                        Text("ダウンロードをキャンセル")
+                    } icon: {
+                        accentMenuIcon(systemName: "xmark.circle")
+                    }
                 }
             } else {
                 Button {
                     RecordDownloadManager.shared.downloadRecord(record, manager: manager)
                 } label: {
-                    Label("ダウンロード", systemImage: "arrow.down.circle")
+                    Label {
+                        Text("ダウンロード")
+                    } icon: {
+                        accentMenuIcon(systemName: "arrow.down.circle")
+                    }
                 }
             }
         }
@@ -178,7 +186,11 @@ struct RecordDownloadRowView: View {
                 downloadingRow
                     .contextMenu {
                         Button(role: .destructive, action: onCancel) {
-                            Label("キャンセル", systemImage: "xmark.circle")
+                            Label {
+                                Text("キャンセル")
+                            } icon: {
+                                accentMenuIcon(systemName: "xmark.circle")
+                            }
                         }
                     }
             } else if item.downloadState == .downloaded {
@@ -334,7 +346,11 @@ struct RecordDownloadRowView: View {
         localRecordRevealContextMenuItem(for: item)
 
         Button(role: .destructive, action: onDelete) {
-            Label("削除", systemImage: "trash")
+            Label {
+                Text("削除")
+            } icon: {
+                accentMenuIcon(systemName: "trash")
+            }
         }
     }
 }

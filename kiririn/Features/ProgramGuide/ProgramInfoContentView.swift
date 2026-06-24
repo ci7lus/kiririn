@@ -113,7 +113,11 @@ struct ProgramInfoContentView: View {
         Button {
             copyTextToClipboard(text)
         } label: {
-            Label(title, systemImage: "doc.on.doc")
+            Label {
+                Text(title)
+            } icon: {
+                accentMenuIcon(systemName: "doc.on.doc")
+            }
         }
     }
 

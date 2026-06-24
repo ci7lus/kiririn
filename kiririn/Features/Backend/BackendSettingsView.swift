@@ -154,18 +154,6 @@ struct BackendSettingsView: View {
                                 editingConfig = config
                             }
                         )
-                        .contextMenu {
-                            Button("編集") {
-                                editingConfig = config
-                            }
-
-                            Divider()
-
-                            Button("削除", role: .destructive) {
-                                backendIDsToDelete = [config.id]
-                                showingDeleteConfirmation = true
-                            }
-                        }
                     }
                     .onDelete { indexSet in
                         backendIDsToDelete = indexSet.map { configStore.configurations[$0].id }

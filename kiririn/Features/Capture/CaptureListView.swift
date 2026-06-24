@@ -390,19 +390,31 @@ private struct CaptureHistoryItemView: View {
             Button {
                 copyCurrentVariantToClipboard()
             } label: {
-                Label("コピー", systemImage: "doc.on.doc")
+                Label {
+                    Text("コピー")
+                } icon: {
+                    accentMenuIcon(systemName: "doc.on.doc")
+                }
             }
 
             Button {
                 revealCaptureItemInSystemFiles(selectedURL)
             } label: {
-                Label(captureRevealButtonTitle, systemImage: "folder")
+                Label {
+                    Text(captureRevealButtonTitle)
+                } icon: {
+                    accentMenuIcon(systemName: "folder")
+                }
             }
 
             Button(role: .destructive) {
                 Task { await onDelete() }
             } label: {
-                Label("削除", systemImage: "trash")
+                Label {
+                    Text("削除")
+                } icon: {
+                    accentMenuIcon(systemName: "trash")
+                }
             }
         }
         .onChange(of: item.variantPaths) {
