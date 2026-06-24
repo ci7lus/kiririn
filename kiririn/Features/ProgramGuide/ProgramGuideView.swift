@@ -32,6 +32,7 @@ struct ProgramGuideView: View {
     @State private var serviceSelectionForPlayback: TVService? = nil
     @State private var lastAnchorTime: Date? = nil
     @FocusState private var isSearchFieldFocused: Bool
+    @Namespace private var glassNamespace
 
     private let channelColumnWidth: CGFloat = 220
     private let timeRulerWidth: CGFloat = 45
@@ -176,7 +177,8 @@ struct ProgramGuideView: View {
             timelineOffsetHours: $timelineOffsetHours,
             onScrollToNow: {
                 scrollToNow(animated: true)
-            }
+            },
+            glassNamespace: glassNamespace
         )
         .sheet(
             isPresented: $isSearchSheetPresented,
