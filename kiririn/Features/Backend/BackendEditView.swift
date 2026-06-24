@@ -174,7 +174,7 @@ struct BackendEditView: View {
                 syncFeatureTogglesForType()
             }
             .onChange(of: type) { _, _ in
-                syncFeatureTogglesForType()
+                enableSupportedFeaturesForCurrentType()
             }
         }
         #if os(macOS)
@@ -211,6 +211,11 @@ struct BackendEditView: View {
         if !type.supportsRecording {
             recordingEnabled = false
         }
+    }
+
+    private func enableSupportedFeaturesForCurrentType() {
+        liveEnabled = type.supportsLive
+        recordingEnabled = type.supportsRecording
     }
 
     private func testConnection() async {
