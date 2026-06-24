@@ -831,31 +831,6 @@ extension CacheStore {
                 columns: ["serviceId", "networkId", "startAt"])
         }
 
-        migrator.registerMigration("favorite-service-display-order-20260519") { db in
-            try db.alter(table: "favorite_service") { t in
-                t.add(column: "displayOrder", .integer)
-            }
-        }
-
-        migrator.registerMigration("favorite-service-drop-favorited-at-20260519") { db in
-            try db.create(table: "favorite_service_new") { t in
-                t.column("networkId", .integer).notNull()
-                t.column("serviceId", .integer).notNull()
-                t.column("displayOrder", .integer)
-                t.primaryKey(["networkId", "serviceId"])
-            }
-
-            try db.execute(
-                sql: """
-                    INSERT INTO favorite_service_new (networkId, serviceId, displayOrder)
-                    SELECT networkId, serviceId, displayOrder
-                    FROM favorite_service
-                    """
-            )
-            try db.drop(table: "favorite_service")
-            try db.rename(table: "favorite_service_new", to: "favorite_service")
-        }
-
         return migrator
 
     }
