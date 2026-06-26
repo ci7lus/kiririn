@@ -314,6 +314,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         "--ts-standard=arib",
         "--no-snapshot-preview",
         "--snapshot-format=jpg",
+        "--aribcaption-font=Hiragino Maru Gothic ProN,Rounded M+ 1m WadaLab comp ARIB,Apple Symbols",
         "--verbose=1",
     ]
 

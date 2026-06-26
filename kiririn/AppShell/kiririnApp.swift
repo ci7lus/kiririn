@@ -1,3 +1,4 @@
+import CoreText
 import Sentry
 import SwiftUI
 
@@ -148,12 +149,30 @@ extension Notification.Name {
     }
 #endif
 
+private func registerFonts() {
+    guard
+        let fontURL = Bundle.main.url(
+            forResource: "rounded-mplus-1m-wadalab-comp-arib", withExtension: "ttf")
+    else {
+        return
+    }
+    var error: Unmanaged<CFError>?
+    if !CTFontManagerRegisterFontsForURL(fontURL as CFURL, .process, &error) {
+        if let error = error?.takeRetainedValue() {
+            #if DEBUG
+                debugPrint("font registration failed: \(error)")
+            #endif
+        }
+    }
+}
+
 @main
 struct KiririnApp: App {
     @State private var appModel = AppModel.shared
 
     init() {
         SentryBootstrap.initializeIfAvailable()
+        registerFonts()
     }
 
     #if os(macOS)
