@@ -648,8 +648,7 @@ struct ProgramGuideView: View {
         }
 
         var options: [(id: String, name: String)] = []
-        let hasFavoriteChannels = channels.contains { manager.isFavorite($0.service) }
-        if hasFavoriteChannels {
+        if manager.hasFavoriteServices || selectedBroadcastType == favoriteBroadcastType {
             options.append((favoriteBroadcastType, "お気に入り"))
         }
         options.append(("all", "すべて"))
