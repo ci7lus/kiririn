@@ -114,10 +114,10 @@
 				CE171EEE2F61AE4D008DEA05 /* OrderedCollections in Frameworks */,
 				CE4442812FB87FAD0092C2BF /* VLCKit in Frameworks */,
 				CEA7615E2FDC6B1C00C55CC4 /* ARIBStandardKit in Frameworks */,
+				CE21E9412FF10C020007B5F6 /* PronamaAssets in Frameworks */,
 				CE47B1A72F4DC5AA00680B2E /* Logging in Frameworks */,
 				CE3FA1922FDC21880049EEA5 /* HotKey in Frameworks */,
 				CE44428E2FB8B9050092C2BF /* Sentry in Frameworks */,
-				CE21E9412FF10C020007B5F6 /* PronamaAssets in Frameworks */,
 				CEA761572FDC65F200C55CC4 /* ApkSignatureVerifierKit in Frameworks */,
 				CEA5BCC72FC31AB8007D3B10 /* ZIPFoundation in Frameworks */,
 			);
@@ -190,12 +190,12 @@
 				CE54EBE82FB834D4009AFCBC /* LicenseList */,
 				CE4442802FB87FAD0092C2BF /* VLCKit */,
 				CE44428D2FB8B9050092C2BF /* Sentry */,
-				CE21E9402FF10C020007B5F6 /* PronamaAssets */,
 				CEA5BCC62FC31AB8007D3B10 /* ZIPFoundation */,
 				CE3FA1912FDC21880049EEA5 /* HotKey */,
 				CEA761562FDC65F200C55CC4 /* ApkSignatureVerifierKit */,
 				CEA7615D2FDC6B1C00C55CC4 /* ARIBStandardKit */,
 				CE6B51C62FDDAD7A00873F35 /* KppxKit */,
+				CE21E9402FF10C020007B5F6 /* PronamaAssets */,
 			);
 			productName = kiririn;
 			productReference = 105FC57A2E9EAD3100EA8BCF /* kiririn.app */;

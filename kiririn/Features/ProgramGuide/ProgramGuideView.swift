@@ -187,10 +187,11 @@ struct ProgramGuideView: View {
                     pendingProgramSelection = nil
                     selectedProgram = pending
                 }
+            },
+            content: {
+                searchSheetView
             }
-        ) {
-            searchSheetView
-        }
+        )
         .onChange(of: isSearchSheetPresented) { _, newValue in
             if newValue {
                 hasRestoredSearchScrollInCurrentPresentation = false
@@ -212,13 +213,14 @@ struct ProgramGuideView: View {
                         isSearchSheetPresented = true
                     }
                 }
+            },
+            content: { selection in
+                ProgramGuideProgramDetailSheetView(
+                    selection: selection,
+                    onClose: { selectedProgram = nil }
+                )
             }
-        ) { selection in
-            ProgramGuideProgramDetailSheetView(
-                selection: selection,
-                onClose: { selectedProgram = nil }
-            )
-        }
+        )
     }
 
     @ViewBuilder
@@ -577,10 +579,11 @@ struct ProgramGuideView: View {
             .playbackBackendSelectionDialog(
                 service: service,
                 selectedService: $serviceSelectionForPlayback,
-                manager: manager
-            ) { candidate in
-                Task { await playCandidate(candidate) }
-            }
+                manager: manager,
+                onSelect: { candidate in
+                    Task { await playCandidate(candidate) }
+                }
+            )
 
             favoriteButton(for: service)
         }
