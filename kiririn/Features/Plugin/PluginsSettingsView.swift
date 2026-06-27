@@ -177,10 +177,9 @@ struct PluginsSettingsView: View {
         .toolbar {
             settingsToolbar
         }
-        .confirmationDialog(
+        .alert(
             "プラグインを削除しますか？",
-            isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
+            isPresented: $showingDeleteConfirmation
         ) {
             deleteConfirmationButtons
         } message: {

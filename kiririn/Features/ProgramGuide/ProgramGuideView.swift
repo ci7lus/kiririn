@@ -219,24 +219,6 @@ struct ProgramGuideView: View {
                 onClose: { selectedProgram = nil }
             )
         }
-        .confirmationDialog(
-            "再生するバックエンドを選択",
-            isPresented: Binding(
-                get: { serviceSelectionForPlayback != nil },
-                set: { if !$0 { serviceSelectionForPlayback = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            if let service = serviceSelectionForPlayback {
-                let candidates = manager.playbackCandidates(for: service)
-                ForEach(candidates, id: \.backendId) { candidate in
-                    Button(manager.backendFullDisplayName(candidate.backendId)) {
-                        Task { await playCandidate(candidate) }
-                    }
-                }
-            }
-            Button("キャンセル", role: .cancel) {}
-        }
     }
 
     @ViewBuilder
@@ -592,6 +574,13 @@ struct ProgramGuideView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .playbackBackendSelectionDialog(
+                service: service,
+                selectedService: $serviceSelectionForPlayback,
+                manager: manager
+            ) { candidate in
+                Task { await playCandidate(candidate) }
+            }
 
             favoriteButton(for: service)
         }

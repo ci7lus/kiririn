@@ -170,6 +170,18 @@ struct CaptureListView: View {
                         } label: {
                             Label("削除", systemImage: "trash")
                         }
+                        .confirmationDialog(
+                            "選択した項目を削除しますか？",
+                            isPresented: $showDeleteConfirmation,
+                            titleVisibility: .visible
+                        ) {
+                            Button("削除", role: .destructive) {
+                                Task { await deleteSelectedItems() }
+                            }
+                            Button("キャンセル", role: .cancel) {}
+                        } message: {
+                            Text("\(selectedIDs.count)件の項目を削除します")
+                        }
                     }
                 }
             }
@@ -213,18 +225,6 @@ struct CaptureListView: View {
             selectedIDs = selectedIDs.intersection(ids)
         }
         .quickLookPreview($previewURL)
-        .confirmationDialog(
-            "選択した項目を削除しますか？",
-            isPresented: $showDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("削除", role: .destructive) {
-                Task { await deleteSelectedItems() }
-            }
-            Button("キャンセル", role: .cancel) {}
-        } message: {
-            Text("\(selectedIDs.count)件の項目を削除します")
-        }
         .task {
             await loadInitial()
         }

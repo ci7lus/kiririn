@@ -118,24 +118,6 @@ struct ServiceListView: View {
         .onChange(of: manager.services) {
             triggerRebuild()
         }
-        .confirmationDialog(
-            "再生するバックエンドを選択",
-            isPresented: Binding(
-                get: { serviceSelectionForPlayback != nil },
-                set: { if !$0 { serviceSelectionForPlayback = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            if let service = serviceSelectionForPlayback {
-                let candidates = manager.playbackCandidates(for: service)
-                ForEach(candidates, id: \.backendId) { candidate in
-                    Button(manager.backendFullDisplayName(candidate.backendId)) {
-                        Task { await playCandidate(candidate) }
-                    }
-                }
-            }
-            Button("キャンセル", role: .cancel) {}
-        }
         .sheet(isPresented: $showingFavoriteOrderingSheet) {
             FavoriteServiceOrderingSheet(
                 groups: favoriteOrderingGroups,
@@ -206,6 +188,13 @@ struct ServiceListView: View {
                             Task { await playService(item.service) }
                         } onToggleFavorite: {
                             Task { await manager.toggleFavorite(item.service) }
+                        }
+                        .playbackBackendSelectionDialog(
+                            service: item.service,
+                            selectedService: $serviceSelectionForPlayback,
+                            manager: manager
+                        ) { candidate in
+                            Task { await playCandidate(candidate) }
                         }
                     }
                 } header: {

@@ -509,20 +509,6 @@ private struct PluginDetailView: View {
         } message: {
             Text(manifestErrorMessage ?? "")
         }
-        .confirmationDialog(
-            "プラグインのストレージを消去しますか？",
-            isPresented: $showingClearWebDataConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("消去", role: .destructive) {
-                Task {
-                    await clearWebData(for: plugin)
-                }
-            }
-            Button("キャンセル", role: .cancel) {}
-        } message: {
-            Text(clearWebDataConfirmationMessage(for: plugin))
-        }
         .alert(
             "ストレージ",
             isPresented: Binding(
@@ -613,6 +599,20 @@ private struct PluginDetailView: View {
             }
             .buttonStyle(.plain)
             .disabled(isClearingWebData)
+            .confirmationDialog(
+                "プラグインのストレージを消去しますか？",
+                isPresented: $showingClearWebDataConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("消去", role: .destructive) {
+                    Task {
+                        await clearWebData(for: plugin)
+                    }
+                }
+                Button("キャンセル", role: .cancel) {}
+            } message: {
+                Text(clearWebDataConfirmationMessage(for: plugin))
+            }
 
             if plugin.manifestSupportedAreas?.contains(.options) == true {
                 NavigationLink {

@@ -16,20 +16,11 @@ struct BackendSettingsView: View {
             .toolbar {
                 toolbarContent
             }
-            .confirmationDialog(
+            .alert(
                 "バックエンドを削除しますか？",
-                isPresented: $showingDeleteConfirmation,
-                titleVisibility: .visible
+                isPresented: $showingDeleteConfirmation
             ) {
-                Button("削除", role: .destructive) {
-                    for id in backendIDsToDelete {
-                        removeConfig(id: id)
-                    }
-                    backendIDsToDelete = []
-                }
-                Button("キャンセル", role: .cancel) {
-                    backendIDsToDelete = []
-                }
+                deleteConfirmationButtons
             } message: {
                 Text("この操作は取り消せません。")
             }
@@ -189,6 +180,30 @@ struct BackendSettingsView: View {
         #else
             return .topBarTrailing
         #endif
+    }
+
+    private var deleteConfirmationButtons: some View {
+        Group {
+            Button("削除", role: .destructive) {
+                confirmPendingDeletion()
+            }
+            Button("キャンセル", role: .cancel) {
+                clearPendingDeletion()
+            }
+        }
+    }
+
+    private func confirmPendingDeletion() {
+        let ids = backendIDsToDelete
+        clearPendingDeletion()
+        for id in ids {
+            removeConfig(id: id)
+        }
+    }
+
+    private func clearPendingDeletion() {
+        showingDeleteConfirmation = false
+        backendIDsToDelete = []
     }
 
     private func moveConfigs(from offsets: IndexSet, to destination: Int) {
