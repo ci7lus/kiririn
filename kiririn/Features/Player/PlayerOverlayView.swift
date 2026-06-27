@@ -1,3 +1,4 @@
+import ARIBStandardKit
 import Combine
 import KppxKit
 import OrderedCollections
@@ -24,7 +25,6 @@ struct PlayerOverlayView_iOS: View {
     let appModel: AppModel
     let showsLowerContext: Bool
     @State private var dragOffset: CGFloat = 0
-    @State private var infoDragOffset: CGFloat = 0
     @State private var miniPlayerCenter: CGPoint = .zero
     @State private var miniPlayerDragOffset: CGSize = .zero
     @State private var miniPlayerBaseWidth: CGFloat = 280
@@ -188,7 +188,6 @@ struct PlayerOverlayView_iOS: View {
             .buttonStyle(.plain)
         #endif
         .onChange(of: playerState.currentPlayable?.id) {
-            infoDragOffset = 0
             withAnimation(.easeOut(duration: 0.22)) {
                 isInfoSheetVisible = true
             }
@@ -198,7 +197,6 @@ struct PlayerOverlayView_iOS: View {
             ensureLowerTabSelection()
         }
         .onChange(of: playerState.mode) { oldMode, newMode in
-            infoDragOffset = 0
             isInfoSheetVisible = true
             if newMode == .mini {
                 miniEntrySourceMode = oldMode
@@ -352,9 +350,13 @@ struct PlayerOverlayView_iOS: View {
                         lowerContextView
 
                         if isInfoSheetVisible {
-                            infoSheet
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
-                                .ignoresSafeArea()
+                            PlayerInfoSheet(
+                                playable: playerState.currentPlayable,
+                                isVisible: $isInfoSheetVisible
+                            )
+                            .id(playerState.currentPlayable?.id)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .ignoresSafeArea()
                         } else {
                             infoSheetCollapsedBar
                         }
@@ -667,69 +669,6 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @ViewBuilder
-    private var infoSheet: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                Capsule()
-                    .fill(Color.kiririnTertiaryLabel)
-                    .frame(width: 36, height: 5)
-
-                HStack {
-                    Spacer()
-                    Button {
-                        dismissInfoSheet()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 32, height: 32)
-                            .background(Color.kiririnTertiarySystemFill, in: Circle())
-                    }
-                    .padding(.trailing, 16)
-                }
-            }
-            .frame(height: 44)
-            .contentShape(Rectangle())
-            .gesture(infoSheetDismissDragGesture)
-
-            ScrollView {
-                programInfoContent
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 32)
-            }
-        }
-        .background(Color.kiririnSystemBackground)
-        .clipShape(.rect(topLeadingRadius: 16, topTrailingRadius: 16))
-        .offset(y: max(0, infoDragOffset))
-    }
-
-    private func dismissInfoSheet() {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-            isInfoSheetVisible = false
-            infoDragOffset = 0
-        }
-    }
-
-    private var infoSheetDismissDragGesture: some Gesture {
-        DragGesture(coordinateSpace: .global)
-            .onChanged { value in
-                if value.translation.height > 0 {
-                    infoDragOffset = value.translation.height
-                }
-            }
-            .onEnded { value in
-                let velocity = value.predictedEndLocation.y - value.location.y
-                if value.translation.height > 80 || velocity > 200 {
-                    dismissInfoSheet()
-                } else {
-                    withAnimation(.interpolatingSpring(stiffness: 300, damping: 28)) {
-                        infoDragOffset = 0
-                    }
-                }
-            }
-    }
-
-    @ViewBuilder
     private var lowerContextView: some View {
         TabView(selection: $lowerTabSelection) {
             NavigationStack {
@@ -796,24 +735,11 @@ struct PlayerOverlayView_iOS: View {
     }
 
     private var infoSheetCollapsedBar: some View {
-        VStack(spacing: 8) {
-            Spacer()
-
-            Button {
-                withAnimation(.easeOut(duration: 0.22)) {
-                    isInfoSheetVisible = true
-                }
-            } label: {
-                Label("情報を開く", systemImage: "chevron.up")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: Capsule())
+        PlayerInfoSheetCollapsedBar {
+            withAnimation(.easeOut(duration: 0.22)) {
+                isInfoSheetVisible = true
             }
-            .padding(.bottom, 64)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
@@ -827,33 +753,6 @@ struct PlayerOverlayView_iOS: View {
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.kiririnSystemBackground)
-    }
-
-    private var programInfoContent: some View {
-        Group {
-            if let program = playerState.displayProgram {
-                ProgramInfoContentView(
-                    program: program,
-                    serviceName: playerState.currentPlayable?.serviceName,
-                    showsCopyContextMenu: true
-                )
-            } else {
-                VStack(alignment: .leading, spacing: 12) {
-                    BroadcastText(playerState.currentPlayable?.title ?? "")
-                        .font(.title3)
-                        .fontWeight(.bold)
-
-                    if let sub = playerState.currentPlayable?.subtitle,
-                        !sub.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    {
-                        BroadcastText(sub)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
     }
 
     @ViewBuilder
@@ -1976,6 +1875,280 @@ struct PlayerOverlayView_iOS: View {
     }
 }
 
+struct PlayerInfoSheet: View {
+    let playable: Playable?
+    @Binding var isVisible: Bool
+    @State private var dragOffset: CGFloat = 0
+    @State private var didTriggerScrollDismiss = false
+    private let headerHeight: CGFloat = 78
+    private let contentTopPadding: CGFloat = 78
+    private let scrollDismissThreshold: CGFloat = 120
+    private let sheetCornerRadius: CGFloat = 50
+
+    var body: some View {
+        if #available(iOS 26, *) {
+            infoSheetContent
+                .clipShape(RoundedRectangle(cornerRadius: sheetCornerRadius, style: .continuous))
+                .glassEffect(
+                    .regular.interactive(),
+                    in: RoundedRectangle(cornerRadius: sheetCornerRadius, style: .continuous)
+                )
+                .offset(y: max(0, dragOffset))
+        } else {
+            infoSheetContent
+                .background(Color.kiririnSystemBackground)
+                .clipShape(.rect(topLeadingRadius: 16, topTrailingRadius: 16))
+                .offset(y: max(0, dragOffset))
+        }
+    }
+
+    private var infoSheetContent: some View {
+        ZStack(alignment: .top) {
+            ScrollView {
+                PlayerInfoSheetPullDismissObserver { pullDistance in
+                    handleScrollPullDistance(pullDistance)
+                }
+                .frame(width: 0, height: 0)
+                .allowsHitTesting(false)
+
+                content
+                    .padding(.horizontal, 16)
+                    .padding(.top, contentTopPadding)
+                    .padding(.bottom, 32)
+            }
+
+            infoSheetHeader
+        }
+    }
+
+    private var infoSheetHeader: some View {
+        ZStack(alignment: .top) {
+            infoSheetHeaderBackdrop
+
+            Capsule()
+                .fill(Color.kiririnTertiaryLabel)
+                .frame(width: 36, height: 5)
+                .padding(.top, 6)
+
+            HStack {
+                dismissButton
+                Spacer()
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 24)
+
+            Text("番組詳細")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.primary)
+                .padding(.top, 36)
+        }
+        .frame(height: headerHeight)
+        .contentShape(Rectangle())
+        .gesture(dismissDragGesture)
+    }
+
+    private var infoSheetHeaderBackdrop: some View {
+        Rectangle()
+            .fill(.ultraThinMaterial)
+            .overlay {
+                Color.kiririnSystemBackground.opacity(0.22)
+            }
+            .frame(height: headerHeight)
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: 0.74),
+                        .init(color: .clear, location: 1),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private var dismissButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            if #available(iOS 26, *) {
+                Image(systemName: "xmark")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.accent)
+                    .frame(width: 48, height: 48)
+                    .glassEffect(.regular.interactive(), in: .circle)
+                    .contentShape(.circle)
+            } else {
+                Image(systemName: "xmark")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 40, height: 40)
+                    .background(Color.kiririnTertiarySystemFill, in: Circle())
+                    .contentShape(.circle)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let program = playable?.displayProgram {
+            ProgramInfoContentView(
+                program: program,
+                serviceName: playable?.serviceName,
+                showsCopyContextMenu: true
+            )
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                BroadcastText(playable?.title ?? "")
+                    .font(.title3)
+                    .fontWeight(.bold)
+
+                if let sub = playable?.subtitle,
+                    !sub.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                {
+                    BroadcastText(sub)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var dismissDragGesture: some Gesture {
+        DragGesture(coordinateSpace: .global)
+            .onChanged { value in
+                if value.translation.height > 0 {
+                    dragOffset = value.translation.height
+                }
+            }
+            .onEnded { value in
+                let velocity = value.predictedEndLocation.y - value.location.y
+                if value.translation.height > 80 || velocity > 200 {
+                    dismiss()
+                } else {
+                    withAnimation(.interpolatingSpring(stiffness: 300, damping: 28)) {
+                        dragOffset = 0
+                    }
+                }
+            }
+    }
+
+    private func handleScrollPullDistance(_ distance: CGFloat) {
+        guard !didTriggerScrollDismiss, distance > scrollDismissThreshold else { return }
+        didTriggerScrollDismiss = true
+        dismiss()
+    }
+
+    private func dismiss() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            isVisible = false
+            dragOffset = 0
+        }
+    }
+}
+
+private struct PlayerInfoSheetPullDismissObserver: UIViewRepresentable {
+    var onPullDistanceChange: (CGFloat) -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.isUserInteractionEnabled = false
+        DispatchQueue.main.async {
+            context.coordinator.attach(to: view)
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.onPullDistanceChange = onPullDistanceChange
+        DispatchQueue.main.async {
+            context.coordinator.attach(to: uiView)
+        }
+    }
+
+    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPullDistanceChange: onPullDistanceChange)
+    }
+
+    final class Coordinator {
+        var onPullDistanceChange: (CGFloat) -> Void
+        private weak var scrollView: UIScrollView?
+        private var contentOffsetObservation: NSKeyValueObservation?
+
+        init(onPullDistanceChange: @escaping (CGFloat) -> Void) {
+            self.onPullDistanceChange = onPullDistanceChange
+        }
+
+        func attach(to view: UIView) {
+            guard let scrollView = view.enclosingScrollView() else { return }
+            guard self.scrollView !== scrollView else { return }
+            detach()
+            self.scrollView = scrollView
+            contentOffsetObservation = scrollView.observe(
+                \.contentOffset,
+                options: [.new]
+            ) { [weak self, weak scrollView] _, _ in
+                guard let self, let scrollView else { return }
+                self.reportPullDistance(in: scrollView)
+            }
+            reportPullDistance(in: scrollView)
+        }
+
+        func detach() {
+            contentOffsetObservation?.invalidate()
+            contentOffsetObservation = nil
+            scrollView = nil
+        }
+
+        private func reportPullDistance(in scrollView: UIScrollView) {
+            let topOffset = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
+            onPullDistanceChange(max(0, -topOffset))
+        }
+    }
+}
+
+extension UIView {
+    fileprivate func enclosingScrollView() -> UIScrollView? {
+        var current: UIView? = self
+        while let view = current {
+            if let scrollView = view as? UIScrollView {
+                return scrollView
+            }
+            current = view.superview
+        }
+        return nil
+    }
+}
+
+struct PlayerInfoSheetCollapsedBar: View {
+    let onTap: () -> Void
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Spacer()
+
+            Button(action: onTap) {
+                Label("番組情報を開く", systemImage: "chevron.up")
+                    .font(.caption.weight(.bold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: Capsule())
+            }
+            .padding(.bottom, 64)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 private struct LowerContextPluginsView: View {
     let pluginStore: PluginStore
     @State var playerState: PlayerState
@@ -2088,4 +2261,71 @@ private struct LowerContextPluginPanel: View {
         .background(Color.kiririnSecondarySystemBackground)
         .ignoresSafeArea(edges: .bottom)
     }
+}
+
+private struct PlayerOverlayPreview: View {
+    @State private var playerState: PlayerState = {
+        let state = PlayerState()
+        state.mode = .fullscreen
+        state.isPlaying = true
+        state.isSubtitleEnabled = true
+        state.isPipAvailable = true
+        var playable = Playable(
+            streamURL: URL(string: "https://example.com/preview")!,
+            source: .liveService(serviceUniqueId: "preview"),
+            program: PlayerOverlayPreview.mockProgram()
+        )
+        playable.isSeekable = true
+        playable.length = 5400
+        state.currentPlayable = playable
+        state.playbackStatus = PlayerPlaybackStatus(
+            playableID: playable.id,
+            isPlaying: true,
+            time: 5400 * 0.35,
+            position: 0.35
+        )
+        state.player = PreviewVLCMediaPlayer()
+        return state
+    }()
+
+    private let appModel = AppModel.shared
+
+    var body: some View {
+        PlayerOverlayView_iOS(
+            playerState: playerState,
+            manager: appModel.manager,
+            pluginStore: appModel.pluginStore,
+            appModel: appModel
+        )
+    }
+
+    private static func mockProgram() -> Program {
+        let startAt = Date()
+        return Program(
+            id: "preview-program",
+            backendId: "preview",
+            eventId: 1,
+            serviceId: 1,
+            networkId: 1,
+            startAt: startAt,
+            endAt: startAt.addingTimeInterval(3600),
+            duration: 3600,
+            name: "ニュース番組ニュース番組",
+            desc: "きょう1日の主なニュース項目をまとめてお伝えします。国内外の動きや経済情報を詳しく解説します。",
+            extended: [
+                "番組内容": "全国各地のニュースを迅速・正確にお伝えします。",
+                "出演者": "あああ いいい",
+            ],
+            genres: [ProgramGenre(lv1: 0x0, lv2: 0x0)],
+            updatedAt: nil
+        )
+    }
+}
+
+private final class PreviewVLCMediaPlayer: VLCMediaPlayer {
+    override var isSeekable: Bool { true }
+}
+
+#Preview {
+    PlayerOverlayPreview()
 }

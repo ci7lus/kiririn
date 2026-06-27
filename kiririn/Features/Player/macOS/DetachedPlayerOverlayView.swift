@@ -955,3 +955,211 @@ private struct WindowDragSurface: NSViewRepresentable {
         }
     }
 }
+
+#Preview("Detached Player Controls") {
+    DetachedPlayerOverlayChromePreview()
+        .frame(width: 1280, height: 720)
+        .preferredColorScheme(.dark)
+}
+
+private struct DetachedPlayerOverlayChromePreview: View {
+    @State private var isPlaying = true
+    @State private var isMuted = false
+    @State private var volume: Double = 80
+    @State private var isRecording = false
+    @State private var isPipAvailable = true
+    @State private var isPipEnabled = false
+    @State private var isSubtitleEnabled = true
+    @State private var progress: Double = 0.32
+    @State private var isSeekable = true
+    @State private var isAlwaysOnTop = false
+
+    private let totalTime: Double = 5400
+    private var currentTime: Double { totalTime * progress }
+    private let scale: CGFloat = 1.0
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.05, green: 0.0, blue: 0.1),
+                    Color(red: 0.18, green: 0.06, blue: 0.28),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            VStack(spacing: 0) {
+                titleBar
+                Spacer()
+                controlsBar
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var titleBar: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("NHK総合 ニュースウォッチ9")
+                    .font(.system(size: 14 * scale, weight: .semibold))
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text("NHK")
+                        .font(.system(size: 12 * scale, weight: .regular))
+                        .foregroundStyle(.secondary)
+                    Text("2024年1月15日 21:00 - 22:00")
+                        .font(.system(size: 12 * scale, weight: .regular))
+                        .foregroundStyle(.secondary)
+                }
+                Text("字幕付き")
+                    .font(.system(size: 12 * scale, weight: .regular))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.right")
+                    Text("22:00 ドラマ10「何かしてる」")
+                }
+                .font(.system(size: 12 * scale, weight: .regular))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12 * scale)
+        .padding(.vertical, 8 * scale)
+        .padding(.leading, 76 * scale)
+        .background(.ultraThinMaterial)
+        .allowsHitTesting(false)
+    }
+
+    private var controlsBar: some View {
+        HStack(spacing: 12 * scale) {
+            if isSeekable {
+                Button {
+                    progress = max(0, progress - 10.0 / totalTime)
+                } label: {
+                    Image(systemName: "gobackward.10")
+                        .frame(width: 20 * scale, height: 20 * scale)
+                }
+            }
+
+            Button {
+                isPlaying.toggle()
+            } label: {
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 18 * scale, weight: .bold))
+                    .frame(width: 24 * scale, height: 24 * scale)
+            }
+
+            if isSeekable {
+                Button {
+                    progress = min(1, progress + 10.0 / totalTime)
+                } label: {
+                    Image(systemName: "goforward.10")
+                        .frame(width: 20 * scale, height: 20 * scale)
+                }
+            }
+
+            if isSeekable {
+                Text(currentTime.playerTimeString)
+                    .font(.system(size: 12 * scale, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 56 * scale, alignment: .leading)
+                    .lineLimit(1)
+
+                PlayerSlider(
+                    value: $progress,
+                    range: 0...1,
+                    scale: scale
+                )
+                .frame(height: 24 * scale)
+                .disabled(!isSeekable)
+
+                Text(totalTime.playerTimeString)
+                    .font(.system(size: 12 * scale, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 56 * scale, alignment: .trailing)
+                    .lineLimit(1)
+            } else {
+                Spacer(minLength: 0)
+            }
+
+            Button {
+                isMuted.toggle()
+            } label: {
+                Image(
+                    systemName: isMuted
+                        ? "speaker.slash.fill" : "speaker.wave.2.fill"
+                )
+                .frame(width: 20 * scale, height: 20 * scale)
+            }
+
+            PlayerSlider(
+                value: $volume,
+                range: 0...200,
+                scale: scale
+            )
+            .frame(width: 120 * scale, height: 24 * scale)
+            .opacity(isMuted ? 0.45 : 1)
+
+            if isPipAvailable {
+                Button {
+                    isPipEnabled.toggle()
+                } label: {
+                    Image(systemName: isPipEnabled ? "pip.exit" : "pip.enter")
+                        .frame(width: 20 * scale, height: 20 * scale)
+                }
+            }
+
+            Button {
+                isSubtitleEnabled.toggle()
+            } label: {
+                Image(
+                    systemName: isSubtitleEnabled
+                        ? "captions.bubble.fill" : "captions.bubble"
+                )
+                .frame(width: 20 * scale, height: 20 * scale)
+            }
+
+            Button {
+            } label: {
+                Image(systemName: "camera.fill")
+                    .frame(width: 20 * scale, height: 20 * scale)
+            }
+
+            Button {
+                isRecording.toggle()
+            } label: {
+                Image(
+                    systemName: isRecording
+                        ? "record.circle.fill" : "record.circle"
+                )
+                .foregroundStyle(isRecording ? .red : .primary)
+                .frame(width: 20 * scale, height: 20 * scale)
+            }
+
+            Menu {
+                Button("再生速度") {}
+                Button("映像トラック") {}
+                Button("音声トラック") {}
+                Divider()
+                Button("プラグインを表示") {}
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: 20 * scale, height: 20 * scale)
+                    .contentShape(.rect)
+            }
+        }
+        .font(.system(size: 15 * scale, weight: .semibold))
+        .padding(.horizontal, 12 * scale)
+        .padding(.vertical, 8 * scale)
+        .background(playerControlBackground)
+        .padding(8 * scale)
+    }
+
+    private var playerControlBackground: some View {
+        RoundedRectangle(cornerRadius: 8 * scale, style: .continuous)
+            .fill(.ultraThinMaterial)
+    }
+}
