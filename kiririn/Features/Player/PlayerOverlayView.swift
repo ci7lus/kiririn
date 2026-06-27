@@ -15,6 +15,14 @@ struct PlayerOverlayView_iOS: View {
         case bottomTrailing
     }
 
+    private struct TransportControlMetrics {
+        let sideButtonSize: CGFloat
+        let centerButtonSize: CGFloat
+        let sideIconSize: CGFloat
+        let centerIconSize: CGFloat
+        let spacing: CGFloat
+    }
+
     @State var playerState: PlayerState
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     #if os(macOS)
@@ -480,21 +488,25 @@ struct PlayerOverlayView_iOS: View {
     @ViewBuilder
     private func floatingOrientationLockButton(geo: GeometryProxy) -> some View {
         if showsOrientationLockButton {
-            let frame = playerSurfaceFrame(in: geo)
-            let bottomInset =
-                usesFullscreenPlayerLayout
-                ? max(geo.safeAreaInsets.bottom + 2, 2)
-                : 2
-            orientationLockButton
-                .position(
-                    x: frame.maxX - 30,
-                    y: frame.maxY - bottomInset - 22
-                )
-                .transition(.opacity)
-                .zIndex(10)
-                .animation(.easeInOut(duration: 0.28), value: geo.size)
-                .animation(.easeInOut(duration: 0.28), value: verticalSizeClass)
-                .animation(.easeInOut(duration: 0.2), value: playerState.showControls)
+            if #available(iOS 26, *), usesFullscreenPlayerLayout {
+                EmptyView()
+            } else {
+                let frame = playerSurfaceFrame(in: geo)
+                let centerBottomInset =
+                    usesFullscreenPlayerLayout
+                    ? max(geo.safeAreaInsets.bottom + 104, 104)
+                    : 36
+                orientationLockButton
+                    .position(
+                        x: frame.maxX - 30,
+                        y: frame.maxY - centerBottomInset
+                    )
+                    .transition(.opacity)
+                    .zIndex(10)
+                    .animation(.easeInOut(duration: 0.28), value: geo.size)
+                    .animation(.easeInOut(duration: 0.28), value: verticalSizeClass)
+                    .animation(.easeInOut(duration: 0.2), value: playerState.showControls)
+            }
         }
     }
 
@@ -508,75 +520,21 @@ struct PlayerOverlayView_iOS: View {
             Color.black.opacity(0.2)
                 .allowsHitTesting(false)
 
-            if isSeekActionAvailable && displayDuration > 0 {
-                HStack(spacing: 32) {
-                    Button {
-                        seekToBeginning()
-                    } label: {
-                        Image(systemName: "backward.end.fill")
-                            .font(.system(size: 32, weight: .medium))
-                            .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
-                    }
-
-                    Button {
-                        seekBackward()
-                    } label: {
-                        Image(systemName: "gobackward.10")
-                            .font(.system(size: 32, weight: .medium))
-                            .foregroundStyle(.white)
-                    }.keyboardShortcut(.leftArrow, modifiers: [])
-
-                    Button {
-                        playerState.togglePlayPause()
-                    } label: {
-                        Image(systemName: playerState.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 48, weight: .bold))
-                            .foregroundStyle(.white)
-                    }.keyboardShortcut(.space, modifiers: [])
-
-                    Button {
-                        seekForward()
-                    } label: {
-                        Image(systemName: "goforward.10")
-                            .font(.system(size: 32, weight: .medium))
-                            .foregroundStyle(.white)
-                    }.keyboardShortcut(.rightArrow, modifiers: [])
-
-                    Color.clear.frame(width: 32)
-                }
-                .frame(maxWidth: .infinity)
-            } else {
-                Button {
-                    playerState.togglePlayPause()
-                } label: {
-                    Image(systemName: playerState.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 48, weight: .bold))
-                        .foregroundStyle(.white)
-                }.keyboardShortcut(.space, modifiers: [])
-            }
+            transportControls(width: width, height: height, isFullscreen: false)
 
             VStack {
                 HStack(spacing: 8) {
                     if showsLowerContext {
-                        Button {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                playerState.collapse()
-                            }
-                        } label: {
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 44, height: 44)
-                        }
-                        .padding(.leading, 8)
+                        collapsePlayerButton
+                            .padding(.leading, 8)
                     }
 
                     Spacer()
 
                     topRightControlButtons(
                         isFullscreen: false,
-                        showsFullscreenToggle: showsFullscreenToggleButton
+                        showsFullscreenToggle: showsFullscreenToggleButton,
+                        separatesOptionsMenu: true
                     )
                 }
                 .padding(.top, 4)
@@ -589,6 +547,298 @@ struct PlayerOverlayView_iOS: View {
 
         }
         .frame(width: width, height: height)
+    }
+
+    @ViewBuilder
+    private func transportControls(width: CGFloat, height: CGFloat, isFullscreen: Bool)
+        -> some View
+    {
+        if #available(iOS 26, *) {
+            glassTransportControls(width: width, height: height, isFullscreen: isFullscreen)
+        } else if isFullscreen {
+            legacyFullscreenTransportControls()
+        } else {
+            legacyVideoTransportControls()
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private func glassTransportControls(width: CGFloat, height: CGFloat, isFullscreen: Bool)
+        -> some View
+    {
+        let metrics = glassTransportMetrics(
+            width: width, height: height, isFullscreen: isFullscreen)
+        return GlassEffectContainer(spacing: metrics.spacing) {
+            if isSeekActionAvailable && displayDuration > 0 {
+                HStack(spacing: metrics.spacing) {
+                    Button {
+                        seekToBeginning()
+                    } label: {
+                        glassTransportIcon(
+                            systemName: "backward.end.fill",
+                            fontSize: metrics.sideIconSize,
+                            weight: .semibold,
+                            buttonSize: metrics.sideButtonSize
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("先頭に戻る")
+
+                    Button {
+                        seekBackward()
+                    } label: {
+                        glassTransportIcon(
+                            systemName: "gobackward.10",
+                            fontSize: metrics.sideIconSize,
+                            weight: .semibold,
+                            buttonSize: metrics.sideButtonSize
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.leftArrow, modifiers: [])
+                    .accessibilityLabel("10秒戻る")
+
+                    Button {
+                        playerState.togglePlayPause()
+                    } label: {
+                        glassTransportIcon(
+                            systemName: playerState.isPlaying ? "pause.fill" : "play.fill",
+                            fontSize: metrics.centerIconSize,
+                            weight: .bold,
+                            buttonSize: metrics.centerButtonSize
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.space, modifiers: [])
+                    .accessibilityLabel(playerState.isPlaying ? "一時停止" : "再生")
+
+                    Button {
+                        seekForward()
+                    } label: {
+                        glassTransportIcon(
+                            systemName: "goforward.10",
+                            fontSize: metrics.sideIconSize,
+                            weight: .semibold,
+                            buttonSize: metrics.sideButtonSize
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.rightArrow, modifiers: [])
+                    .accessibilityLabel("10秒進む")
+
+                    Color.clear
+                        .frame(width: metrics.sideButtonSize, height: metrics.sideButtonSize)
+                        .accessibilityHidden(true)
+                }
+            } else {
+                Button {
+                    playerState.togglePlayPause()
+                } label: {
+                    glassTransportIcon(
+                        systemName: playerState.isPlaying ? "pause.fill" : "play.fill",
+                        fontSize: metrics.centerIconSize,
+                        weight: .bold,
+                        buttonSize: metrics.centerButtonSize
+                    )
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.space, modifiers: [])
+                .accessibilityLabel(playerState.isPlaying ? "一時停止" : "再生")
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @available(iOS 26.0, *)
+    private func glassTransportIcon(
+        systemName: String,
+        fontSize: CGFloat,
+        weight: Font.Weight,
+        buttonSize: CGFloat
+    ) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: fontSize, weight: weight))
+            .foregroundStyle(.white)
+            .frame(width: buttonSize, height: buttonSize)
+            .glassEffect(.regular.interactive(), in: .circle)
+            .contentShape(.circle)
+    }
+
+    private func glassTransportMetrics(width: CGFloat, height: CGFloat, isFullscreen: Bool)
+        -> TransportControlMetrics
+    {
+        let baseSideButtonSize: CGFloat = 64
+        let baseCenterButtonSize: CGFloat = 94
+        let baseSideIconSize: CGFloat = 34
+        let baseCenterIconSize: CGFloat = 46
+        let baseSpacing: CGFloat = isFullscreen ? 26 : 22
+        let requiredWidth =
+            baseSideButtonSize * 4 + baseCenterButtonSize + baseSpacing * 4
+        let fittingScale = max(width - 24, 1) / requiredWidth
+        if isFullscreen {
+            let heightScale = min(max(min(width, height) / 390, 0.92), 1.08)
+            let scale = min(heightScale, fittingScale)
+            return TransportControlMetrics(
+                sideButtonSize: baseSideButtonSize * scale,
+                centerButtonSize: baseCenterButtonSize * scale,
+                sideIconSize: baseSideIconSize * scale,
+                centerIconSize: baseCenterIconSize * scale,
+                spacing: baseSpacing * scale
+            )
+        }
+
+        let heightScale = min(max(height / 260, 0.72), 0.92)
+        let scale = min(heightScale, fittingScale)
+        return TransportControlMetrics(
+            sideButtonSize: baseSideButtonSize * scale,
+            centerButtonSize: baseCenterButtonSize * scale,
+            sideIconSize: baseSideIconSize * scale,
+            centerIconSize: baseCenterIconSize * scale,
+            spacing: baseSpacing * scale
+        )
+    }
+
+    @ViewBuilder
+    private func legacyVideoTransportControls() -> some View {
+        if isSeekActionAvailable && displayDuration > 0 {
+            HStack(spacing: 32) {
+                Button {
+                    seekToBeginning()
+                } label: {
+                    Image(systemName: "backward.end.fill")
+                        .font(.system(size: 32, weight: .medium))
+                        .foregroundStyle(.white)
+                        .frame(width: 32, height: 32)
+                }
+                .accessibilityLabel("先頭に戻る")
+
+                Button {
+                    seekBackward()
+                } label: {
+                    Image(systemName: "gobackward.10")
+                        .font(.system(size: 32, weight: .medium))
+                        .foregroundStyle(.white)
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+                .accessibilityLabel("10秒戻る")
+
+                Button {
+                    playerState.togglePlayPause()
+                } label: {
+                    Image(systemName: playerState.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 48, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .keyboardShortcut(.space, modifiers: [])
+                .accessibilityLabel(playerState.isPlaying ? "一時停止" : "再生")
+
+                Button {
+                    seekForward()
+                } label: {
+                    Image(systemName: "goforward.10")
+                        .font(.system(size: 32, weight: .medium))
+                        .foregroundStyle(.white)
+                }
+                .keyboardShortcut(.rightArrow, modifiers: [])
+                .accessibilityLabel("10秒進む")
+
+                Color.clear.frame(width: 32)
+            }
+            .frame(maxWidth: .infinity)
+        } else {
+            Button {
+                playerState.togglePlayPause()
+            } label: {
+                Image(systemName: playerState.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 48, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            .keyboardShortcut(.space, modifiers: [])
+            .accessibilityLabel(playerState.isPlaying ? "一時停止" : "再生")
+        }
+    }
+
+    @ViewBuilder
+    private func legacyFullscreenTransportControls() -> some View {
+        if isSeekActionAvailable && displayDuration > 0 {
+            HStack(spacing: 24) {
+                Button {
+                    seekToBeginning()
+                } label: {
+                    Image(systemName: "backward.end")
+                        .font(.system(size: 32, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 62, height: 62)
+                }
+                .accessibilityLabel("先頭に戻る")
+
+                Button {
+                    seekBackward()
+                } label: {
+                    Image(systemName: "gobackward.10")
+                        .font(.system(size: 40, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 62, height: 62)
+                }
+                .accessibilityLabel("10秒戻る")
+
+                Button {
+                    playerState.togglePlayPause()
+                } label: {
+                    Image(systemName: playerState.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 56, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 84, height: 84)
+                }
+                .accessibilityLabel(playerState.isPlaying ? "一時停止" : "再生")
+
+                Button {
+                    seekForward()
+                } label: {
+                    Image(systemName: "goforward.10")
+                        .font(.system(size: 40, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 62, height: 62)
+                }
+                .accessibilityLabel("10秒進む")
+
+                Color.clear.frame(width: 62)
+            }
+        } else {
+            Button {
+                playerState.togglePlayPause()
+            } label: {
+                Image(systemName: playerState.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 56, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 84, height: 84)
+            }
+            .accessibilityLabel(playerState.isPlaying ? "一時停止" : "再生")
+        }
+    }
+
+    private var collapsePlayerButton: some View {
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                playerState.collapse()
+            }
+        } label: {
+            if #available(iOS 26, *) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .glassEffect(.regular.interactive(), in: .circle)
+                    .contentShape(.circle)
+            } else {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("プレイヤーをたたむ")
     }
 
     @ViewBuilder
@@ -792,14 +1042,28 @@ struct PlayerOverlayView_iOS: View {
                                 Button {
                                     playerState.close()
                                 } label: {
-                                    Image(systemName: "xmark")
-                                        .font(.title2)
-                                        .fontWeight(.bold)
-                                        .foregroundStyle(.white)
-                                        .frame(width: 44, height: 44)
-                                        .background(.black.opacity(0.35), in: Circle())
+                                    if #available(iOS 26, *) {
+                                        Image(systemName: "xmark")
+                                            .font(.title2)
+                                            .fontWeight(.bold)
+                                            .foregroundStyle(.white)
+                                            .frame(width: 44, height: 44)
+                                            .glassEffect(
+                                                .regular.interactive(),
+                                                in: .circle
+                                            )
+                                            .contentShape(.circle)
+                                    } else {
+                                        Image(systemName: "xmark")
+                                            .font(.title2)
+                                            .fontWeight(.bold)
+                                            .foregroundStyle(.white)
+                                            .frame(width: 44, height: 44)
+                                            .background(.black.opacity(0.35), in: Circle())
+                                    }
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel("プレイヤーを閉じる")
 
                                 Spacer()
                             }
@@ -813,15 +1077,30 @@ struct PlayerOverlayView_iOS: View {
                             markMiniPlayerInteraction()
                             playerState.togglePlayPause()
                         } label: {
-                            Image(
-                                systemName: playerState.isPlaying ? "pause.fill" : "play.fill"
-                            )
-                            .font(.system(size: 40, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 82, height: 82)
-                            .background(.black.opacity(0.35), in: Circle())
+                            if #available(iOS 26, *) {
+                                let buttonSize = min(max(miniWidth * 0.44, 56), 68)
+                                Image(
+                                    systemName: playerState.isPlaying ? "pause.fill" : "play.fill"
+                                )
+                                .font(.system(size: buttonSize * 0.48, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: buttonSize, height: buttonSize)
+                                .glassEffect(
+                                    .regular.interactive(), in: .circle
+                                )
+                                .contentShape(.circle)
+                            } else {
+                                Image(
+                                    systemName: playerState.isPlaying ? "pause.fill" : "play.fill"
+                                )
+                                .font(.system(size: 40, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 82, height: 82)
+                                .background(.black.opacity(0.35), in: Circle())
+                            }
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(playerState.isPlaying ? "一時停止" : "再生")
 
                         VStack {
                             Spacer()
@@ -1206,118 +1485,20 @@ struct PlayerOverlayView_iOS: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
-            if isSeekActionAvailable && displayDuration > 0 {
-                HStack(spacing: 24) {
-                    Button {
-                        seekToBeginning()
-                    } label: {
-                        Image(systemName: "backward.end")
-                            .font(.system(size: 32, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 62, height: 62)
-                    }
-
-                    Button {
-                        seekBackward()
-                    } label: {
-                        Image(systemName: "gobackward.10")
-                            .font(.system(size: 40, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 62, height: 62)
-                    }
-
-                    Button {
-                        playerState.togglePlayPause()
-                    } label: {
-                        Image(systemName: playerState.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 56, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 84, height: 84)
-                    }
-
-                    Button {
-                        seekForward()
-                    } label: {
-                        Image(systemName: "goforward.10")
-                            .font(.system(size: 40, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 62, height: 62)
-                    }
-
-                    Color.clear.frame(width: 62)
-                }
-            } else {
-                Button {
-                    playerState.togglePlayPause()
-                } label: {
-                    Image(systemName: playerState.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 56, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 84, height: 84)
-                }
-            }
+            transportControls(width: geo.size.width, height: geo.size.height, isFullscreen: true)
 
             VStack {
-                if isPortraitFullscreen {
-                    VStack(alignment: .leading, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            BroadcastText(playerState.currentPlayable?.title ?? "")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-                            if let sub = playerState.currentPlayable?.subtitle,
-                                !sub.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            {
-                                BroadcastText(sub)
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.7))
-                                    .lineLimit(1)
-                            }
-                        }
-
-                        HStack {
-                            Spacer()
-                            topRightControlButtons(
-                                isFullscreen: true,
-                                showsFullscreenToggle: showsFullscreenToggleButton
-                            )
-                        }
-                    }
-                    .padding(.leading)
-                    .padding(.trailing, 8)
-                    .padding(.top, 8)
+                if #available(iOS 26, *) {
+                    fullscreenGlassTopControls(geo: geo)
                 } else {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            BroadcastText(playerState.currentPlayable?.title ?? "")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-                            if let sub = playerState.currentPlayable?.subtitle,
-                                !sub.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            {
-                                BroadcastText(sub)
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.7))
-                                    .lineLimit(1)
-                            }
-                        }
-                        .padding(.leading)
-
-                        Spacer()
-
-                        topRightControlButtons(
-                            isFullscreen: true,
-                            showsFullscreenToggle: showsFullscreenToggleButton
-                        )
-                        .padding(.trailing, 8)
-                    }
-                    .padding(.top, 8)
+                    legacyFullscreenTopControls(isPortraitFullscreen: isPortraitFullscreen)
                 }
 
                 Spacer()
+
+                if #available(iOS 26, *) {
+                    fullscreenGlassBottomMetadata(horizontalPadding: 16)
+                }
 
                 fullscreenSeekbar(
                     horizontalPadding: 16,
@@ -1328,16 +1509,134 @@ struct PlayerOverlayView_iOS: View {
         }
     }
 
+    @available(iOS 26.0, *)
+    private func fullscreenGlassTopControls(geo: GeometryProxy) -> some View {
+        HStack(spacing: 12) {
+            if showsFullscreenToggleButton {
+                Button {
+                    playerState.exitFullscreen()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 26, weight: .regular))
+                        .foregroundStyle(.white)
+                        .frame(width: 52, height: 52)
+                        .glassEffect(
+                            .regular.interactive(), in: .circle
+                        )
+                        .contentShape(.circle)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("フルスクリーンを終了")
+            }
+
+            Spacer(minLength: 12)
+
+            topRightControlButtons(
+                isFullscreen: true,
+                showsFullscreenToggle: false,
+                showsOptionsMenu: false
+            )
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+    }
+
+    @ViewBuilder
+    private func legacyFullscreenTopControls(isPortraitFullscreen: Bool) -> some View {
+        if isPortraitFullscreen {
+            VStack(alignment: .leading, spacing: 8) {
+                fullscreenTitleBlock(titleFont: .subheadline, subtitleFont: .caption)
+
+                HStack {
+                    Spacer()
+                    topRightControlButtons(
+                        isFullscreen: true,
+                        showsFullscreenToggle: showsFullscreenToggleButton
+                    )
+                }
+            }
+            .padding(.leading)
+            .padding(.trailing, 8)
+            .padding(.top, 8)
+        } else {
+            HStack {
+                fullscreenTitleBlock(titleFont: .subheadline, subtitleFont: .caption)
+                    .padding(.leading)
+
+                Spacer()
+
+                topRightControlButtons(
+                    isFullscreen: true,
+                    showsFullscreenToggle: showsFullscreenToggleButton
+                )
+                .padding(.trailing, 8)
+            }
+            .padding(.top, 8)
+        }
+    }
+
+    @ViewBuilder
+    private func fullscreenTitleBlock(titleFont: Font, subtitleFont: Font) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            BroadcastText(playerState.currentPlayable?.title ?? "")
+                .font(titleFont)
+                .fontWeight(.semibold)
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            if let sub = playerState.currentPlayable?.subtitle,
+                !sub.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                BroadcastText(sub)
+                    .font(subtitleFont)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private func fullscreenGlassBottomMetadata(horizontalPadding: CGFloat) -> some View {
+        HStack(alignment: .bottom, spacing: 6) {
+            fullscreenTitleBlock(titleFont: .title2, subtitleFont: .caption)
+                .fontWeight(.bold)
+                .layoutPriority(1)
+
+            Spacer(minLength: 4)
+
+            VStack(spacing: 10) {
+                if showsOrientationLockButton {
+                    orientationLockButton
+                }
+
+                topRightOptionsMenuButton(itemSize: 52, iconSize: 22, usesGlass: true)
+            }
+        }
+        .padding(.horizontal, horizontalPadding + 4)
+        .padding(.bottom, 4)
+    }
+
     private var orientationLockButton: some View {
         Button {
             toggleLandscapeOrientationLock()
         } label: {
-            Image(systemName: "arrow.trianglehead.2.clockwise")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .padding(6)
-                .rotationEffect(.degrees(orientationButtonRotation))
+            if #available(iOS 26, *) {
+                Image(systemName: "arrow.trianglehead.2.clockwise")
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .rotationEffect(.degrees(orientationButtonRotation))
+                    .glassEffect(
+                        .regular.interactive(), in: .circle
+                    )
+                    .contentShape(.circle)
+            } else {
+                Image(systemName: "arrow.trianglehead.2.clockwise")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .padding(6)
+                    .rotationEffect(.degrees(orientationButtonRotation))
+            }
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
@@ -1348,9 +1647,56 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @ViewBuilder
-    private func topRightControlButtons(isFullscreen: Bool, showsFullscreenToggle: Bool = true)
+    private func topRightControlButtons(
+        isFullscreen: Bool,
+        showsFullscreenToggle: Bool = true,
+        showsOptionsMenu: Bool = true,
+        separatesOptionsMenu: Bool = false
+    )
         -> some View
     {
+        if #available(iOS 26, *) {
+            HStack(spacing: separatesOptionsMenu && showsOptionsMenu ? 10 : 0) {
+                GlassEffectContainer(spacing: 12) {
+                    HStack(spacing: 0) {
+                        topRightControlButtonItems(
+                            isFullscreen: isFullscreen,
+                            showsFullscreenToggle: showsFullscreenToggle,
+                            showsOptionsMenu: showsOptionsMenu && !separatesOptionsMenu,
+                            itemSize: 44,
+                            iconSize: 20
+                        )
+                    }
+                    .padding(.horizontal, 8)
+                    .frame(height: 52)
+                    .contentShape(.capsule)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                }
+                .buttonStyle(.plain)
+
+                if separatesOptionsMenu && showsOptionsMenu {
+                    topRightOptionsMenuButton(itemSize: 52, iconSize: 20, usesGlass: true)
+                }
+            }
+        } else {
+            topRightControlButtonItems(
+                isFullscreen: isFullscreen,
+                showsFullscreenToggle: showsFullscreenToggle,
+                showsOptionsMenu: showsOptionsMenu,
+                itemSize: 44,
+                iconSize: 20
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func topRightControlButtonItems(
+        isFullscreen: Bool,
+        showsFullscreenToggle: Bool,
+        showsOptionsMenu: Bool,
+        itemSize: CGFloat,
+        iconSize: CGFloat
+    ) -> some View {
         if showsFullscreenToggle {
             Button {
                 if isFullscreen {
@@ -1364,10 +1710,14 @@ struct PlayerOverlayView_iOS: View {
                         ? "arrow.down.right.and.arrow.up.left"
                         : "arrow.up.left.and.arrow.down.right"
                 )
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: iconSize, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
+                .frame(width: itemSize, height: itemSize)
+                .contentShape(Rectangle())
             }
+            .accessibilityLabel(
+                isFullscreen ? "フルスクリーンを終了" : "フルスクリーンにする"
+            )
         }
 
         Button {
@@ -1377,54 +1727,98 @@ struct PlayerOverlayView_iOS: View {
                 systemName: playerState.isSubtitleEnabled
                     ? "captions.bubble.fill" : "captions.bubble"
             )
-            .font(.system(size: 20, weight: .semibold))
+            .font(.system(size: iconSize, weight: .semibold))
             .foregroundStyle(.white)
-            .frame(width: 44, height: 44)
+            .frame(width: itemSize, height: itemSize)
+            .contentShape(Rectangle())
         }
+        .accessibilityLabel(playerState.isSubtitleEnabled ? "字幕を非表示" : "字幕を表示")
 
         if playerState.isPipAvailable {
             Button {
                 playerState.togglePip()
             } label: {
                 Image(systemName: playerState.isPipEnabled ? "pip.exit" : "pip.enter")
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: iconSize, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
+                    .frame(width: itemSize, height: itemSize)
+                    .contentShape(Rectangle())
             }
+            .accessibilityLabel(
+                playerState.isPipEnabled ? "ピクチャインピクチャを終了" : "ピクチャインピクチャを開始"
+            )
         }
 
         Button {
             playerState.takeCapture()
         } label: {
             Image(systemName: "camera.fill")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: iconSize, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
+                .frame(width: itemSize, height: itemSize)
+                .contentShape(Rectangle())
         }
         .keyboardShortcut("s", modifiers: .command)
+        .accessibilityLabel("キャプチャを撮影")
 
         Button {
             playerState.toggleRecording()
         } label: {
             Image(systemName: playerState.isRecording ? "record.circle.fill" : "record.circle")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: iconSize, weight: .semibold))
                 .foregroundStyle(playerState.isRecording ? .red : .white)
-                .frame(width: 44, height: 44)
+                .frame(width: itemSize, height: itemSize)
+                .contentShape(Rectangle())
         }
         .keyboardShortcut("r", modifiers: .command)
+        .accessibilityLabel(playerState.isRecording ? "録画を停止" : "録画を開始")
 
+        if showsOptionsMenu {
+            Menu {
+                playerPlaybackOptionMenuEntries(
+                    playerState: playerState,
+                    isSeekActionAvailable: isSeekActionAvailable
+                )
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: iconSize, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: itemSize, height: itemSize)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("再生オプション")
+        }
+    }
+
+    private func topRightOptionsMenuButton(
+        itemSize: CGFloat,
+        iconSize: CGFloat,
+        usesGlass: Bool
+    ) -> some View {
         Menu {
             playerPlaybackOptionMenuEntries(
                 playerState: playerState,
                 isSeekActionAvailable: isSeekActionAvailable
             )
         } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 20, weight: .semibold))
+            let icon = Image(systemName: "ellipsis")
+                .font(.system(size: iconSize, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
+                .frame(width: itemSize, height: itemSize)
                 .contentShape(Rectangle())
+
+            if #available(iOS 26, *), usesGlass {
+                icon
+                    .glassEffect(
+                        .regular.interactive(), in: .circle
+                    )
+                    .contentShape(.circle)
+            } else {
+                icon
+            }
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("再生オプション")
     }
 
     private func seekForward() {
@@ -1442,7 +1836,35 @@ struct PlayerOverlayView_iOS: View {
         playerState.seek(to: 0)
     }
 
+    private func updateScrub(relativeX: CGFloat, availableWidth: CGFloat) {
+        guard availableWidth > 0 else { return }
+        if !playerState.isSeeking {
+            initialScrubPosition = playerState.playbackStatus.position
+            initialScrubTime = playerState.playbackStatus.time
+        }
+        playerState.isSeeking = true
+        let newProgress = min(max(0, relativeX / availableWidth), 1)
+        scrubPosition = Float(newProgress)
+        seekToPosition(Float(newProgress))
+    }
+
+    private func finishScrub() {
+        if playerState.isSeeking, let scrub = scrubPosition {
+            seekToPosition(scrub)
+        }
+        playerState.isSeeking = false
+        scrubPosition = nil
+        initialScrubPosition = nil
+        initialScrubTime = nil
+    }
+
     private func seekBarOverlay(horizontalPadding: CGFloat, bottomPadding: CGFloat) -> some View {
+        legacySeekBarOverlay(horizontalPadding: horizontalPadding, bottomPadding: bottomPadding)
+    }
+
+    private func legacySeekBarOverlay(horizontalPadding: CGFloat, bottomPadding: CGFloat)
+        -> some View
+    {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 if isSeekActionAvailable && displayDuration > 0 {
@@ -1571,6 +1993,22 @@ struct PlayerOverlayView_iOS: View {
     private func fullscreenSeekbar(horizontalPadding: CGFloat, bottomPadding: CGFloat)
         -> some View
     {
+        if #available(iOS 26, *) {
+            fullscreenGlassSeekbar(
+                horizontalPadding: horizontalPadding,
+                bottomPadding: bottomPadding
+            )
+        } else {
+            legacyFullscreenSeekbar(
+                horizontalPadding: horizontalPadding,
+                bottomPadding: bottomPadding
+            )
+        }
+    }
+
+    private func legacyFullscreenSeekbar(horizontalPadding: CGFloat, bottomPadding: CGFloat)
+        -> some View
+    {
         VStack(spacing: 10) {
             if isSeekActionAvailable {
                 GeometryReader { geo in
@@ -1649,7 +2087,6 @@ struct PlayerOverlayView_iOS: View {
                         .bold()
                         .monospacedDigit()
                         .foregroundStyle(.white.opacity(0.8))
-                        .padding(.trailing, showsOrientationLockButton ? 60 : 0)
                 } else if isSeekActionAvailable && displayTime > 0 {
                     Text(displayTime.playerTimeString)
                         .font(.caption)
@@ -1666,6 +2103,99 @@ struct PlayerOverlayView_iOS: View {
         .padding(.bottom, bottomPadding)
         .contentShape(Rectangle())
         .onTapGesture {}
+    }
+
+    @available(iOS 26.0, *)
+    @ViewBuilder
+    private func fullscreenGlassSeekbar(horizontalPadding: CGFloat, bottomPadding: CGFloat)
+        -> some View
+    {
+        if isSeekActionAvailable {
+            HStack(spacing: 14) {
+                if displayDuration > 0 {
+                    Text(displayTime.playerTimeString)
+                        .font(.system(size: 15, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.78))
+                        .frame(width: 52, alignment: .leading)
+                } else if displayTime > 0 {
+                    Text(displayTime.playerTimeString)
+                        .font(.system(size: 15, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.78))
+                        .frame(width: 52, alignment: .leading)
+                }
+
+                glassSeekTrack(trackHeight: playerState.isSeeking ? 8 : 6, showsThumb: false)
+
+                if displayDuration > 0 {
+                    Text("-\(max(0, displayDuration - displayTime).playerTimeString)")
+                        .font(.system(size: 15, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.78))
+                        .frame(width: 56, alignment: .trailing)
+                }
+            }
+            .padding(.horizontal, 18)
+            .frame(height: 56)
+            .glassEffect(.regular.interactive(), in: .capsule)
+            .padding(.horizontal, horizontalPadding)
+            .padding(.bottom, bottomPadding)
+            .contentShape(Rectangle())
+            .onTapGesture {}
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private func glassSeekTrack(trackHeight: CGFloat, showsThumb: Bool) -> some View {
+        GeometryReader { geo in
+            let progress = min(max(CGFloat(displayProgress), 0), 1)
+            let availableWidth = max(geo.size.width, 1)
+            let thumbSize = max(14, trackHeight + 8)
+            let interactionHeight: CGFloat = 30
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.36))
+                    .frame(height: trackHeight)
+
+                Capsule()
+                    .fill(.white)
+                    .frame(width: max(trackHeight, availableWidth * progress), height: trackHeight)
+
+                if showsThumb {
+                    Circle()
+                        .fill(.white)
+                        .frame(width: thumbSize, height: thumbSize)
+                        .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                        .position(x: availableWidth * progress, y: geo.size.height / 2)
+                        .allowsHitTesting(false)
+                }
+
+                Rectangle()
+                    .fill(Color.clear)
+                    .frame(width: availableWidth, height: interactionHeight)
+                    .position(x: availableWidth / 2, y: geo.size.height / 2)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 8)
+                            .onChanged { value in
+                                updateScrub(
+                                    relativeX: value.location.x,
+                                    availableWidth: availableWidth
+                                )
+                            }
+                            .onEnded { _ in
+                                finishScrub()
+                            }
+                    )
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(
+                .spring(response: 0.2, dampingFraction: 0.75),
+                value: playerState.isSeeking)
+        }
+        .frame(height: 30)
     }
 
     private var volumeIconName: String {
@@ -1991,6 +2521,7 @@ struct PlayerInfoSheet: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("閉じる")
     }
 
     @ViewBuilder
