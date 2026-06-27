@@ -900,21 +900,8 @@ struct PlayerOverlayView_iOS: View {
 
     @ViewBuilder
     private func seekFeedbackOverlay(height: CGFloat) -> some View {
-        if isSeekFeedbackVisible {
-            VStack {
-                Text(seekFeedbackText)
-                    .font(feedbackOverlayFont)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, feedbackOverlayHorizontalPadding)
-                    .padding(.vertical, feedbackOverlayVerticalPadding)
-                    .background(.black.opacity(0.35), in: Capsule())
-                    .padding(.top, max(24, height * 0.22))
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .transition(.opacity)
-            .animation(.easeInOut(duration: 0.2), value: isSeekFeedbackVisible)
-            .allowsHitTesting(false)
+        feedbackOverlay(isVisible: isSeekFeedbackVisible, height: height) {
+            feedbackLabel(text: seekFeedbackText)
         }
     }
 
@@ -2219,16 +2206,92 @@ struct PlayerOverlayView_iOS: View {
 
     private var feedbackOverlayFont: Font {
         verticalSizeClass == .compact
-            ? .title2.weight(.bold)
-            : .title3.weight(.semibold)
+            ? .headline.weight(.semibold)
+            : .subheadline.weight(.semibold)
     }
 
     private var feedbackOverlayHorizontalPadding: CGFloat {
-        verticalSizeClass == .compact ? 20 : 16
+        verticalSizeClass == .compact ? 18 : 16
     }
 
     private var feedbackOverlayVerticalPadding: CGFloat {
-        verticalSizeClass == .compact ? 10 : 8
+        verticalSizeClass == .compact ? 9 : 8
+    }
+
+    private var feedbackOverlayTransition: AnyTransition {
+        .asymmetric(
+            insertion: .move(edge: .top).combined(with: .opacity),
+            removal: .move(edge: .top).combined(with: .opacity)
+        )
+    }
+
+    private func feedbackOverlayTopPadding(height: CGFloat) -> CGFloat {
+        if playerState.showControls {
+            if usesFullscreenPlayerLayout {
+                return min(max(80, height * 0.14), 120)
+            }
+            return min(max(56, height * 0.22), 72)
+        }
+
+        if usesFullscreenPlayerLayout {
+            return min(max(42, height * 0.08), 72)
+        }
+        return min(max(20, height * 0.10), 34)
+    }
+
+    @ViewBuilder
+    private func feedbackOverlay<Content: View>(
+        isVisible: Bool,
+        height: CGFloat,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if isVisible {
+            VStack {
+                content()
+                    .padding(.top, feedbackOverlayTopPadding(height: height))
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .transition(feedbackOverlayTransition)
+            .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private func feedbackLabel(
+        text: String,
+        systemImage: String? = nil,
+        iconTint: Color = .white.opacity(0.94)
+    ) -> some View {
+        let label = HStack(spacing: 8) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(iconTint)
+            }
+
+            Text(text)
+                .lineLimit(1)
+        }
+        .font(feedbackOverlayFont)
+        .foregroundStyle(.white)
+        .padding(.horizontal, feedbackOverlayHorizontalPadding)
+        .padding(.vertical, feedbackOverlayVerticalPadding)
+        .frame(minHeight: verticalSizeClass == .compact ? 38 : 34)
+        .shadow(color: .black.opacity(0.28), radius: 4, y: 1)
+
+        if #available(iOS 26, *) {
+            label
+                .glassEffect(.regular, in: .capsule)
+        } else {
+            label
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay {
+                    Capsule()
+                        .stroke(.white.opacity(0.16), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.28), radius: 14, y: 6)
+        }
     }
 
     private func seek(to seconds: Double) {
@@ -2255,14 +2318,14 @@ struct PlayerOverlayView_iOS: View {
         if playerState.isMuted {
             volumeFeedbackText = "ミュート"
         } else {
-            volumeFeedbackText = "音量: \(Int(playerState.volume.rounded()))%"
+            volumeFeedbackText = "音量\(Int(playerState.volume.rounded()))%"
         }
         volumeFeedbackHideTask?.cancel()
-        withAnimation(.easeInOut(duration: 0.18)) {
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
             isVolumeFeedbackVisible = true
         }
         let task = DispatchWorkItem {
-            withAnimation(.easeInOut(duration: 0.24)) {
+            withAnimation(.easeIn(duration: 0.22)) {
                 isVolumeFeedbackVisible = false
             }
         }
@@ -2272,48 +2335,19 @@ struct PlayerOverlayView_iOS: View {
 
     @ViewBuilder
     private func captureFeedbackOverlay(height: CGFloat) -> some View {
-        if isCaptureFeedbackVisible {
-            VStack {
-                HStack(spacing: 8) {
-                    Image(systemName: captureFeedbackSystemImage)
-                        .foregroundStyle(captureFeedbackText == "録画開始" ? .red : .white)
-                    Text(captureFeedbackText)
-                }
-                .font(feedbackOverlayFont)
-                .foregroundStyle(.white)
-                .padding(.horizontal, feedbackOverlayHorizontalPadding)
-                .padding(.vertical, feedbackOverlayVerticalPadding)
-                .background(.black.opacity(0.35), in: Capsule())
-                .padding(.top, max(24, height * 0.22))
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .transition(.opacity)
-            .animation(.easeInOut(duration: 0.2), value: isCaptureFeedbackVisible)
-            .allowsHitTesting(false)
+        feedbackOverlay(isVisible: isCaptureFeedbackVisible, height: height) {
+            feedbackLabel(
+                text: captureFeedbackText,
+                systemImage: captureFeedbackSystemImage,
+                iconTint: captureFeedbackText == "録画開始" ? .red : .white.opacity(0.94)
+            )
         }
     }
 
     @ViewBuilder
     private func volumeFeedbackOverlay(height: CGFloat) -> some View {
-        if isVolumeFeedbackVisible {
-            VStack {
-                HStack(spacing: 8) {
-                    Image(systemName: volumeIconName)
-                    Text(volumeFeedbackText)
-                }
-                .font(feedbackOverlayFont)
-                .foregroundStyle(.white)
-                .padding(.horizontal, feedbackOverlayHorizontalPadding)
-                .padding(.vertical, feedbackOverlayVerticalPadding)
-                .background(.black.opacity(0.35), in: Capsule())
-                .padding(.top, max(24, height * 0.22))
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .transition(.opacity)
-            .animation(.easeInOut(duration: 0.2), value: isVolumeFeedbackVisible)
-            .allowsHitTesting(false)
+        feedbackOverlay(isVisible: isVolumeFeedbackVisible, height: height) {
+            feedbackLabel(text: volumeFeedbackText, systemImage: volumeIconName)
         }
     }
 
@@ -2344,11 +2378,11 @@ struct PlayerOverlayView_iOS: View {
         captureFeedbackText = text
         captureFeedbackSystemImage = systemImage
         captureFeedbackHideTask?.cancel()
-        withAnimation(.easeInOut(duration: 0.18)) {
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
             isCaptureFeedbackVisible = true
         }
         let task = DispatchWorkItem {
-            withAnimation(.easeInOut(duration: 0.24)) {
+            withAnimation(.easeIn(duration: 0.22)) {
                 isCaptureFeedbackVisible = false
             }
         }
@@ -2361,11 +2395,11 @@ struct PlayerOverlayView_iOS: View {
         let sign = delta > 0 ? "+" : "−"
         seekFeedbackText = "\(sign)\(Int(abs(delta).rounded()))秒"
         seekFeedbackHideTask?.cancel()
-        withAnimation(.easeInOut(duration: 0.18)) {
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
             isSeekFeedbackVisible = true
         }
         let task = DispatchWorkItem {
-            withAnimation(.easeInOut(duration: 0.24)) {
+            withAnimation(.easeIn(duration: 0.22)) {
                 isSeekFeedbackVisible = false
             }
         }

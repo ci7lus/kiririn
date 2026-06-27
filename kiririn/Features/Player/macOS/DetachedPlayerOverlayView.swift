@@ -637,70 +637,92 @@ struct DetachedPlayerOverlayView_macOS: View {
         program.duration <= 0 || program.duration == 604_065 || program.endAt <= program.startAt
     }
 
+    private var feedbackOverlayTransition: AnyTransition {
+        .asymmetric(
+            insertion: .move(edge: .top).combined(with: .opacity),
+            removal: .move(edge: .top).combined(with: .opacity)
+        )
+    }
+
     @ViewBuilder
-    private func seekFeedbackOverlay(scale: CGFloat) -> some View {
-        if isSeekFeedbackVisible {
+    private func feedbackOverlay<Content: View>(
+        isVisible: Bool,
+        scale: CGFloat,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if isVisible {
             VStack {
-                Text(seekFeedbackText)
-                    .font(.system(size: 22 * scale, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 20 * scale)
-                    .padding(.vertical, 10 * scale)
-                    .background(.black.opacity(0.35), in: Capsule())
-                    .padding(.top, 90 * scale)
+                content()
+                    .padding(.top, 34 * scale)
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .transition(.opacity)
-            .animation(.easeInOut(duration: 0.2), value: isSeekFeedbackVisible)
+            .transition(feedbackOverlayTransition)
             .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private func feedbackLabel(
+        text: String,
+        systemImage: String? = nil,
+        iconTint: Color = .white.opacity(0.94),
+        scale: CGFloat
+    ) -> some View {
+        let label = HStack(spacing: 8 * scale) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(iconTint)
+            }
+
+            Text(text)
+                .lineLimit(1)
+        }
+        .font(.system(size: 15, weight: .semibold))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 16 * scale)
+        .padding(.vertical, 8 * scale)
+        .frame(minHeight: 34 * scale)
+        .shadow(color: .black.opacity(0.28), radius: 4, y: 1)
+
+        if #available(macOS 26, *) {
+            label
+                .glassEffect(.regular.tint(.black.opacity(0.18)), in: .capsule)
+        } else {
+            label
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay {
+                    Capsule()
+                        .stroke(.white.opacity(0.16), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.28), radius: 14, y: 6)
+        }
+    }
+
+    @ViewBuilder
+    private func seekFeedbackOverlay(scale: CGFloat) -> some View {
+        feedbackOverlay(isVisible: isSeekFeedbackVisible, scale: scale) {
+            feedbackLabel(text: seekFeedbackText, scale: scale)
         }
     }
 
     @ViewBuilder
     private func volumeFeedbackOverlay(scale: CGFloat) -> some View {
-        if isVolumeFeedbackVisible {
-            VStack {
-                HStack(spacing: 8 * scale) {
-                    Image(systemName: volumeIconName)
-                    Text(volumeFeedbackText)
-                }
-                .font(.system(size: 22 * scale, weight: .bold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 20 * scale)
-                .padding(.vertical, 10 * scale)
-                .background(.black.opacity(0.35), in: Capsule())
-                .padding(.top, 90 * scale)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .transition(.opacity)
-            .animation(.easeInOut(duration: 0.2), value: isVolumeFeedbackVisible)
-            .allowsHitTesting(false)
+        feedbackOverlay(isVisible: isVolumeFeedbackVisible, scale: scale) {
+            feedbackLabel(text: volumeFeedbackText, systemImage: volumeIconName, scale: scale)
         }
     }
 
     @ViewBuilder
     private func captureFeedbackOverlay(scale: CGFloat) -> some View {
-        if isCaptureFeedbackVisible {
-            VStack {
-                HStack(spacing: 8 * scale) {
-                    Image(systemName: captureFeedbackSystemImage)
-                        .foregroundStyle(captureFeedbackText == "録画開始" ? .red : .white)
-                    Text(captureFeedbackText)
-                }
-                .font(.system(size: 22 * scale, weight: .bold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 20 * scale)
-                .padding(.vertical, 10 * scale)
-                .background(.black.opacity(0.35), in: Capsule())
-                .padding(.top, 90 * scale)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .transition(.opacity)
-            .animation(.easeInOut(duration: 0.2), value: isCaptureFeedbackVisible)
-            .allowsHitTesting(false)
+        feedbackOverlay(isVisible: isCaptureFeedbackVisible, scale: scale) {
+            feedbackLabel(
+                text: captureFeedbackText,
+                systemImage: captureFeedbackSystemImage,
+                iconTint: captureFeedbackText == "録画開始" ? .red : .white.opacity(0.94),
+                scale: scale
+            )
         }
     }
 
@@ -725,11 +747,11 @@ struct DetachedPlayerOverlayView_macOS: View {
         let sign = delta > 0 ? "+" : "−"
         seekFeedbackText = "\(sign)\(Int(abs(delta).rounded()))秒"
         seekFeedbackHideTask?.cancel()
-        withAnimation(.easeInOut(duration: 0.18)) {
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
             isSeekFeedbackVisible = true
         }
         let task = DispatchWorkItem {
-            withAnimation(.easeInOut(duration: 0.24)) {
+            withAnimation(.easeIn(duration: 0.22)) {
                 isSeekFeedbackVisible = false
             }
         }
@@ -741,14 +763,14 @@ struct DetachedPlayerOverlayView_macOS: View {
         if playerState.isMuted {
             volumeFeedbackText = "ミュート"
         } else {
-            volumeFeedbackText = "音量: \(Int(playerState.volume.rounded()))%"
+            volumeFeedbackText = "音量\(Int(playerState.volume.rounded()))%"
         }
         volumeFeedbackHideTask?.cancel()
-        withAnimation(.easeInOut(duration: 0.18)) {
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
             isVolumeFeedbackVisible = true
         }
         let task = DispatchWorkItem {
-            withAnimation(.easeInOut(duration: 0.24)) {
+            withAnimation(.easeIn(duration: 0.22)) {
                 isVolumeFeedbackVisible = false
             }
         }
@@ -760,11 +782,11 @@ struct DetachedPlayerOverlayView_macOS: View {
         captureFeedbackText = text
         captureFeedbackSystemImage = systemImage
         captureFeedbackHideTask?.cancel()
-        withAnimation(.easeInOut(duration: 0.18)) {
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
             isCaptureFeedbackVisible = true
         }
         let task = DispatchWorkItem {
-            withAnimation(.easeInOut(duration: 0.24)) {
+            withAnimation(.easeIn(duration: 0.22)) {
                 isCaptureFeedbackVisible = false
             }
         }
