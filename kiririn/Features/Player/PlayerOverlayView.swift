@@ -352,7 +352,7 @@ struct PlayerOverlayView_iOS: View {
 
                 VStack(spacing: 0) {
                     Spacer()
-                        .frame(height: videoHeight)
+                        .frame(height: videoHeight + 4)
 
                     ZStack(alignment: .bottom) {
                         lowerContextView
@@ -369,7 +369,12 @@ struct PlayerOverlayView_iOS: View {
                             infoSheetCollapsedBar
                         }
                     }
+                    .mask(alignment: .top) {
+                        Rectangle()
+                            .padding(.bottom, -(geo.safeAreaInsets.bottom + 80))
+                    }
                 }
+                .zIndex(0)
 
                 VStack(spacing: 0) {
                     ZStack(alignment: .top) {
@@ -415,8 +420,46 @@ struct PlayerOverlayView_iOS: View {
                             }
                         }
                 )
+
+                if isSeekActionAvailable && playerState.showControls && dragOffset == 0 {
+                    expandedSeekThumbHitArea(width: geo.size.width)
+                        .position(x: geo.size.width / 2, y: videoHeight)
+                        .zIndex(3)
+                }
             }
         }
+    }
+
+    private func expandedSeekThumbHitArea(width: CGFloat) -> some View {
+        GeometryReader { geo in
+            let hitWidth: CGFloat = 96
+            let hitHeight: CGFloat = 64
+            let availableWidth = max(geo.size.width, 1)
+            let progress = min(max(CGFloat(displayProgress), 0), 1)
+            let thumbCenterX = min(
+                max(hitWidth / 2, availableWidth * progress),
+                max(hitWidth / 2, availableWidth - hitWidth / 2)
+            )
+
+            Rectangle()
+                .fill(Color.clear)
+                .frame(width: hitWidth, height: hitHeight)
+                .position(x: thumbCenterX, y: hitHeight / 2)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            updateScrubFromThumbDrag(
+                                translationX: value.translation.width,
+                                availableWidth: availableWidth
+                            )
+                        }
+                        .onEnded { _ in
+                            finishScrub()
+                        }
+                )
+        }
+        .frame(width: width, height: 64)
     }
 
     @ViewBuilder
@@ -1834,6 +1877,24 @@ struct PlayerOverlayView_iOS: View {
         scrubPosition = Float(newProgress)
     }
 
+    private func updateScrubFromThumbDrag(translationX: CGFloat, availableWidth: CGFloat) {
+        guard availableWidth > 0 else { return }
+        let baseProgress: Float
+        if !playerState.isSeeking {
+            baseProgress = playerState.playbackStatus.position
+            initialScrubPosition = baseProgress
+            initialScrubTime = playerState.playbackStatus.time
+        } else {
+            baseProgress =
+                initialScrubPosition
+                ?? scrubPosition
+                ?? playerState.playbackStatus.position
+        }
+        playerState.isSeeking = true
+        let newProgress = min(max(0, CGFloat(baseProgress) + translationX / availableWidth), 1)
+        scrubPosition = Float(newProgress)
+    }
+
     private func finishScrub() {
         if playerState.isSeeking, let scrub = scrubPosition {
             seekToPosition(scrub)
@@ -1908,6 +1969,7 @@ struct PlayerOverlayView_iOS: View {
                     let trackHeight: CGFloat = 4
                     let thumbSize: CGFloat = 16
                     let interactionHeight: CGFloat = 24
+                    let trackCenterY = geo.size.height / 2 + 8
                     let progress = CGFloat(displayProgress)
                     let availableWidth = geo.size.width - horizontalPadding * 2
 
@@ -1917,7 +1979,7 @@ struct PlayerOverlayView_iOS: View {
                             .frame(width: availableWidth, height: interactionHeight)
                             .position(
                                 x: horizontalPadding + availableWidth / 2,
-                                y: geo.size.height / 2 + 8
+                                y: trackCenterY
                             )
                             .contentShape(Rectangle())
                             .gesture(
@@ -1948,7 +2010,7 @@ struct PlayerOverlayView_iOS: View {
                             .shadow(radius: 2)
                             .position(
                                 x: horizontalPadding + availableWidth * progress,
-                                y: geo.size.height / 2 + 8
+                                y: trackCenterY
                             )
                             .allowsHitTesting(false)
                     }
@@ -2418,7 +2480,7 @@ struct PlayerInfoSheet: View {
     @State private var didTriggerScrollDismiss = false
     private let headerHeight: CGFloat = 78
     private let contentTopPadding: CGFloat = 78
-    private let scrollDismissThreshold: CGFloat = 120
+    private let scrollDismissThreshold: CGFloat = 100
     private let sheetCornerRadius: CGFloat = 50
 
     var body: some View {
