@@ -378,7 +378,11 @@ struct PlayerOverlayView_iOS: View {
 
                 VStack(spacing: 0) {
                     ZStack(alignment: .top) {
-                        videoArea(width: geo.size.width, height: videoHeight)
+                        videoArea(
+                            width: geo.size.width,
+                            height: videoHeight,
+                            showsControlsOverlay: false
+                        )
 
                         videoControlsOverlay(width: geo.size.width, height: videoHeight)
                             .opacity(playerState.showControls && dragOffset == 0 ? 1 : 0)
@@ -473,7 +477,11 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @ViewBuilder
-    private func videoArea(width: CGFloat, height: CGFloat) -> some View {
+    private func videoArea(
+        width: CGFloat,
+        height: CGFloat,
+        showsControlsOverlay: Bool = true
+    ) -> some View {
         ZStack {
             Group {
                 if playerState.player == nil {
@@ -518,9 +526,11 @@ struct PlayerOverlayView_iOS: View {
             }
             .allowsHitTesting(true)
 
-            videoControlsOverlay(width: width, height: height)
-                .opacity(playerState.showControls && dragOffset == 0 ? 1 : 0)
-                .allowsHitTesting(playerState.showControls && dragOffset == 0)
+            if showsControlsOverlay {
+                videoControlsOverlay(width: width, height: height)
+                    .opacity(playerState.showControls && dragOffset == 0 ? 1 : 0)
+                    .allowsHitTesting(playerState.showControls && dragOffset == 0)
+            }
 
         }
         .frame(width: width, height: height)
