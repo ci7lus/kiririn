@@ -1832,7 +1832,6 @@ struct PlayerOverlayView_iOS: View {
         playerState.isSeeking = true
         let newProgress = min(max(0, relativeX / availableWidth), 1)
         scrubPosition = Float(newProgress)
-        seekToPosition(Float(newProgress))
     }
 
     private func finishScrub() {
@@ -1924,26 +1923,13 @@ struct PlayerOverlayView_iOS: View {
                             .gesture(
                                 DragGesture(minimumDistance: 8)
                                     .onChanged { value in
-                                        if !playerState.isSeeking {
-                                            initialScrubPosition =
-                                                playerState.playbackStatus.position
-                                            initialScrubTime = playerState.playbackStatus.time
-                                        }
-                                        playerState.isSeeking = true
-                                        let relativeX = value.location.x
-                                        let newProgress = min(
-                                            max(0, relativeX / availableWidth), 1)
-                                        scrubPosition = Float(newProgress)
-                                        seekToPosition(Float(newProgress))
+                                        updateScrub(
+                                            relativeX: value.location.x,
+                                            availableWidth: availableWidth
+                                        )
                                     }
                                     .onEnded { _ in
-                                        if playerState.isSeeking, let scrub = scrubPosition {
-                                            seekToPosition(scrub)
-                                        }
-                                        playerState.isSeeking = false
-                                        scrubPosition = nil
-                                        initialScrubPosition = nil
-                                        initialScrubTime = nil
+                                        finishScrub()
                                     }
                             )
 
@@ -2029,26 +2015,13 @@ struct PlayerOverlayView_iOS: View {
                             .gesture(
                                 DragGesture(minimumDistance: 8)
                                     .onChanged { value in
-                                        if !playerState.isSeeking {
-                                            initialScrubPosition =
-                                                playerState.playbackStatus.position
-                                            initialScrubTime = playerState.playbackStatus.time
-                                        }
-                                        playerState.isSeeking = true
-                                        let relativeX = value.location.x
-                                        let newProgress = min(
-                                            max(0, relativeX / availableWidth), 1)
-                                        scrubPosition = Float(newProgress)
-                                        seekToPosition(Float(newProgress))
+                                        updateScrub(
+                                            relativeX: value.location.x,
+                                            availableWidth: availableWidth
+                                        )
                                     }
                                     .onEnded { _ in
-                                        if playerState.isSeeking, let scrub = scrubPosition {
-                                            seekToPosition(scrub)
-                                        }
-                                        playerState.isSeeking = false
-                                        scrubPosition = nil
-                                        initialScrubPosition = nil
-                                        initialScrubTime = nil
+                                        finishScrub()
                                     }
                             )
                     }
@@ -2310,8 +2283,7 @@ struct PlayerOverlayView_iOS: View {
     }
 
     private func seekToPosition(_ position: Float) {
-        guard let player = playerState.player else { return }
-        player.position = Double(position)
+        playerState.seek(to: position)
     }
 
     private func showVolumeFeedback() {

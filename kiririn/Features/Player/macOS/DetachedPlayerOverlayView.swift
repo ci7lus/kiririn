@@ -276,14 +276,16 @@ struct DetachedPlayerOverlayView_macOS: View {
                             get: { displayProgress },
                             set: { newValue in
                                 seekValue = newValue
-                                playerState.player?.position = newValue
                             }
                         ),
                         range: 0...1,
                         scale: scale,
                         onEditingChanged: { editing in
-                            isSeeking = editing
-                            if !editing { isSeeking = false }
+                            if editing {
+                                isSeeking = true
+                            } else {
+                                finishSeek()
+                            }
                         }
                     )
                     .frame(height: 24 * scale)
@@ -757,6 +759,13 @@ struct DetachedPlayerOverlayView_macOS: View {
         }
         seekFeedbackHideTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: task)
+    }
+
+    private func finishSeek() {
+        if isSeeking {
+            playerState.seek(to: Float(seekValue))
+        }
+        isSeeking = false
     }
 
     private func showVolumeFeedback() {
