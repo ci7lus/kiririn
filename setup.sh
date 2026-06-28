@@ -3,12 +3,14 @@ set -euo pipefail
 
 # VLCKit
 # https://github.com/neneka/vlckit/releases
-REVISION="202606281534"
+REVISION="202606301122"
 VLCKIT_URL="https://github.com/neneka/vlckit/releases/download/$REVISION/VLCKit-iOS-REPLACEWITHVERSION.dmg"
 VLCKIT_DEST="./Packages/VLCKit"
 FRAMEWORK_DEST="${VLCKIT_DEST}/VLCKit.xcframework"
+LICENSE_NOTICES_DEST="${VLCKIT_DEST}/VLCKitAssets/LicenseNotices"
 
 rm -rf "$FRAMEWORK_DEST"
+rm -rf "$LICENSE_NOTICES_DEST"
 
 echo "Downloading VLCKit (DMG)..."
 MOUNT_DIR=$(mktemp -d)
@@ -21,10 +23,12 @@ hdiutil attach "$TEMP_DMG" -mountpoint "$MOUNT_DIR" -nobrowse -quiet
 echo "Extracting libraries from DMG..."
 cp -R "$MOUNT_DIR/VLCKit.xcframework" "$FRAMEWORK_DEST"
 
+echo "Extracting VLCKit license notices from DMG..."
+mkdir -p "$LICENSE_NOTICES_DEST"
+cp "$MOUNT_DIR/License Notices/licenses/"*.txt "$LICENSE_NOTICES_DEST"
+
 hdiutil detach "$MOUNT_DIR" -quiet
 rm -rf "$TEMP_DMG" "$MOUNT_DIR"
-
-curl -sL "https://raw.githubusercontent.com/neneka/vlckit/refs/tags/$REVISION/COPYING" -o "$VLCKIT_DEST/VLCKitAssets/COPYING"
 
 curl -sL "https://raw.githubusercontent.com/neneka/vlckit/refs/tags/$REVISION/share/hrtfs/dodeca_and_7channel_3DSL_HRTF.sofa" -o "$VLCKIT_DEST/VLCKitAssets/dodeca_and_7channel_3DSL_HRTF.sofa"
 

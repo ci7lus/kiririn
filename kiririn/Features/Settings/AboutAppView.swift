@@ -78,12 +78,6 @@ struct AboutAppView: View {
                 }
 
                 NavigationLink {
-                    VLCKitAboutView()
-                } label: {
-                    Label("VLCKitについて", systemImage: "info.circle")
-                }
-
-                NavigationLink {
                     PronamaAboutView()
                 } label: {
                     Label {
@@ -102,7 +96,7 @@ struct AboutAppView: View {
                 NavigationLink {
                     LicenseListView()
                 } label: {
-                    Label("ライセンス表示", systemImage: "doc.text")
+                    Label("権利表記", systemImage: "doc.text")
                 }
             }
         }

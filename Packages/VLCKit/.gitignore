@@ -7,5 +7,5 @@ DerivedData/
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
 /VLCKit.xcframework
-/VLCKitAssets/COPYING
+/VLCKitAssets/LicenseNotices
 /VLCKitAssets/dodeca_and_7channel_3DSL_HRTF.sofa

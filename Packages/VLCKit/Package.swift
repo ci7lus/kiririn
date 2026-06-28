@@ -20,7 +20,7 @@ let package = Package(
             name: "VLCKitAssets",
             path: "VLCKitAssets",
             resources: [
-                .copy("COPYING"),
+                .copy("LicenseNotices"),
                 .copy("dodeca_and_7channel_3DSL_HRTF.sofa"),
             ]
         ),
