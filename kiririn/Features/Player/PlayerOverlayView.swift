@@ -352,7 +352,7 @@ struct PlayerOverlayView_iOS: View {
 
                 VStack(spacing: 0) {
                     Spacer()
-                        .frame(height: videoHeight + 4)
+                        .frame(height: videoHeight)
 
                     ZStack(alignment: .bottom) {
                         lowerContextView
@@ -362,6 +362,7 @@ struct PlayerOverlayView_iOS: View {
                                 playable: playerState.currentPlayable,
                                 isVisible: $isInfoSheetVisible
                             )
+                            .padding(.top, 4)
                             .id(playerState.currentPlayable?.id)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                             .ignoresSafeArea()
@@ -1516,6 +1517,8 @@ struct PlayerOverlayView_iOS: View {
     @ViewBuilder
     private func fullscreenControlsOverlay(geo: GeometryProxy) -> some View {
         let isPortraitFullscreen = geo.size.height > geo.size.width
+        let metadataBottomPadding: CGFloat =
+            isPortraitFullscreen || isSeekActionAvailable ? 4 : 24
         ZStack {
             Color.clear
                 .contentShape(Rectangle())
@@ -1537,7 +1540,10 @@ struct PlayerOverlayView_iOS: View {
                 Spacer()
 
                 if #available(iOS 26, *) {
-                    fullscreenGlassBottomMetadata(horizontalPadding: 16)
+                    fullscreenGlassBottomMetadata(
+                        horizontalPadding: 16,
+                        bottomPadding: metadataBottomPadding
+                    )
                 }
 
                 fullscreenSeekbar(
@@ -1635,7 +1641,10 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @available(iOS 26.0, *)
-    private func fullscreenGlassBottomMetadata(horizontalPadding: CGFloat) -> some View {
+    private func fullscreenGlassBottomMetadata(
+        horizontalPadding: CGFloat,
+        bottomPadding: CGFloat
+    ) -> some View {
         HStack(alignment: .bottom, spacing: 6) {
             fullscreenTitleBlock(titleFont: .title2, subtitleFont: .caption)
                 .fontWeight(.bold)
@@ -1652,7 +1661,7 @@ struct PlayerOverlayView_iOS: View {
             }
         }
         .padding(.horizontal, horizontalPadding + 4)
-        .padding(.bottom, 4)
+        .padding(.bottom, bottomPadding)
     }
 
     private var orientationLockButton: some View {
