@@ -138,6 +138,17 @@ struct PlayerOverlayView_iOS: View {
         return false
     }
 
+    private func usesGlassFullscreenControls(in size: CGSize) -> Bool {
+        switch playerState.mode {
+        case .fullscreen:
+            return true
+        case .expanded:
+            return expandedModeUsesFullscreenLayout(in: size)
+        case .mini:
+            return false
+        }
+    }
+
     private var showsFullscreenToggleButton: Bool {
         guard showsLowerContext else { return false }
         return !(UIDevice.current.userInterfaceIdiom == .phone && verticalSizeClass == .compact)
@@ -501,10 +512,7 @@ struct PlayerOverlayView_iOS: View {
             videoTapZonesOverlay(width: width, height: height)
                 .allowsHitTesting(!playerState.showControls)
 
-            seekFeedbackOverlay(height: height)
-            volumeFeedbackOverlay(height: height)
-            captureFeedbackOverlay(height: height)
-            playbackErrorOverlay(height: height)
+            feedbackOverlays(height: height)
 
             Group {
                 Button {
@@ -542,17 +550,17 @@ struct PlayerOverlayView_iOS: View {
     @ViewBuilder
     private func floatingOrientationLockButton(geo: GeometryProxy) -> some View {
         if showsOrientationLockButton {
-            if #available(iOS 26, *), usesFullscreenPlayerLayout {
+            if #available(iOS 26, *), usesGlassFullscreenControls(in: geo.size) {
                 EmptyView()
             } else {
                 let frame = playerSurfaceFrame(in: geo)
                 let centerBottomInset =
                     usesFullscreenPlayerLayout
                     ? max(geo.safeAreaInsets.bottom + 104, 104)
-                    : 36
-                orientationLockButton
+                    : 28
+                orientationLockButton(usesGlass: false)
                     .position(
-                        x: frame.maxX - 30,
+                        x: frame.maxX - 28,
                         y: frame.maxY - centerBottomInset
                     )
                     .transition(.opacity)
@@ -574,7 +582,9 @@ struct PlayerOverlayView_iOS: View {
             Color.black.opacity(0.2)
                 .allowsHitTesting(false)
 
-            transportControls(width: width, height: height, isFullscreen: false)
+            videoTapZonesOverlay(width: width, height: height)
+
+            transportControls(width: width, height: height, isFullscreen: false, usesGlass: false)
 
             VStack {
                 HStack(spacing: 8) {
@@ -587,8 +597,7 @@ struct PlayerOverlayView_iOS: View {
 
                     topRightControlButtons(
                         isFullscreen: false,
-                        showsFullscreenToggle: showsFullscreenToggleButton,
-                        separatesOptionsMenu: true
+                        showsFullscreenToggle: showsFullscreenToggleButton
                     )
                 }
                 .padding(.top, 4)
@@ -604,15 +613,20 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @ViewBuilder
-    private func transportControls(width: CGFloat, height: CGFloat, isFullscreen: Bool)
+    private func transportControls(
+        width: CGFloat,
+        height: CGFloat,
+        isFullscreen: Bool,
+        usesGlass: Bool
+    )
         -> some View
     {
-        if #available(iOS 26, *) {
+        if #available(iOS 26, *), isFullscreen, usesGlass {
             glassTransportControls(width: width, height: height, isFullscreen: isFullscreen)
         } else if isFullscreen {
             legacyFullscreenTransportControls()
         } else {
-            legacyVideoTransportControls()
+            videoTransportControls()
         }
     }
 
@@ -620,7 +634,7 @@ struct PlayerOverlayView_iOS: View {
     private func glassTransportControls(width: CGFloat, height: CGFloat, isFullscreen: Bool)
         -> some View
     {
-        let metrics = glassTransportMetrics(
+        let metrics = transportMetrics(
             width: width, height: height, isFullscreen: isFullscreen)
         return GlassEffectContainer(spacing: metrics.spacing) {
             if isSeekActionAvailable && displayDuration > 0 {
@@ -718,7 +732,7 @@ struct PlayerOverlayView_iOS: View {
             .contentShape(.circle)
     }
 
-    private func glassTransportMetrics(width: CGFloat, height: CGFloat, isFullscreen: Bool)
+    private func transportMetrics(width: CGFloat, height: CGFloat, isFullscreen: Bool)
         -> TransportControlMetrics
     {
         let baseSideButtonSize: CGFloat = 64
@@ -753,7 +767,7 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @ViewBuilder
-    private func legacyVideoTransportControls() -> some View {
+    private func videoTransportControls() -> some View {
         if isSeekActionAvailable && displayDuration > 0 {
             HStack(spacing: 32) {
                 Button {
@@ -764,6 +778,7 @@ struct PlayerOverlayView_iOS: View {
                         .foregroundStyle(.white)
                         .frame(width: 32, height: 32)
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel("先頭に戻る")
 
                 Button {
@@ -773,6 +788,7 @@ struct PlayerOverlayView_iOS: View {
                         .font(.system(size: 32, weight: .medium))
                         .foregroundStyle(.white)
                 }
+                .buttonStyle(.plain)
                 .keyboardShortcut(.leftArrow, modifiers: [])
                 .accessibilityLabel("10秒戻る")
 
@@ -783,6 +799,7 @@ struct PlayerOverlayView_iOS: View {
                         .font(.system(size: 48, weight: .bold))
                         .foregroundStyle(.white)
                 }
+                .buttonStyle(.plain)
                 .keyboardShortcut(.space, modifiers: [])
                 .accessibilityLabel(playerState.isPlaying ? "一時停止" : "再生")
 
@@ -793,6 +810,7 @@ struct PlayerOverlayView_iOS: View {
                         .font(.system(size: 32, weight: .medium))
                         .foregroundStyle(.white)
                 }
+                .buttonStyle(.plain)
                 .keyboardShortcut(.rightArrow, modifiers: [])
                 .accessibilityLabel("10秒進む")
 
@@ -807,6 +825,7 @@ struct PlayerOverlayView_iOS: View {
                     .font(.system(size: 48, weight: .bold))
                     .foregroundStyle(.white)
             }
+            .buttonStyle(.plain)
             .keyboardShortcut(.space, modifiers: [])
             .accessibilityLabel(playerState.isPlaying ? "一時停止" : "再生")
         }
@@ -877,49 +896,30 @@ struct PlayerOverlayView_iOS: View {
                 playerState.collapse()
             }
         } label: {
-            if #available(iOS 26, *) {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 52, height: 52)
-                    .glassEffect(.regular.interactive(), in: .circle)
-                    .contentShape(.circle)
-            } else {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-            }
+            Image(systemName: "chevron.down")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .contentShape(.circle)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("プレイヤーをたたむ")
     }
 
-    @ViewBuilder
     private func videoTapZonesOverlay(width: CGFloat, height: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture { handleSingleTapInVideoArea() }
-                .onTapGesture(count: 2) {
-                    handleDoubleTapInVideoArea {
-                        seekBackward()
-                    }
+        VideoTapZonesOverlay(
+            onSingleTap: handleSingleTapInVideoArea,
+            onBackwardDoubleTap: {
+                handleDoubleTapInVideoArea {
+                    seekBackward()
                 }
-
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture { handleSingleTapInVideoArea() }
-
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture { handleSingleTapInVideoArea() }
-                .onTapGesture(count: 2) {
-                    handleDoubleTapInVideoArea {
-                        seekForward()
-                    }
+            },
+            onForwardDoubleTap: {
+                handleDoubleTapInVideoArea {
+                    seekForward()
                 }
-        }
+            }
+        )
         .frame(width: width, height: height)
     }
 
@@ -950,13 +950,6 @@ struct PlayerOverlayView_iOS: View {
         tapWindowInitialControlsState = nil
         tapWindowCount = 0
         action()
-    }
-
-    @ViewBuilder
-    private func seekFeedbackOverlay(height: CGFloat) -> some View {
-        feedbackOverlay(isVisible: isSeekFeedbackVisible, height: height) {
-            feedbackLabel(text: seekFeedbackText)
-        }
     }
 
     @ViewBuilder
@@ -1447,13 +1440,7 @@ struct PlayerOverlayView_iOS: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(!playerState.showControls)
 
-            seekFeedbackOverlay(height: geo.size.height)
-                .ignoresSafeArea()
-            volumeFeedbackOverlay(height: geo.size.height)
-                .ignoresSafeArea()
-            captureFeedbackOverlay(height: geo.size.height)
-                .ignoresSafeArea()
-            playbackErrorOverlay(height: geo.size.height)
+            feedbackOverlays(height: geo.size.height)
                 .ignoresSafeArea()
 
             Group {
@@ -1517,6 +1504,7 @@ struct PlayerOverlayView_iOS: View {
     @ViewBuilder
     private func fullscreenControlsOverlay(geo: GeometryProxy) -> some View {
         let isPortraitFullscreen = geo.size.height > geo.size.width
+        let usesGlassControls = usesGlassFullscreenControls(in: geo.size)
         let metadataBottomPadding: CGFloat =
             isPortraitFullscreen || isSeekActionAvailable ? 4 : 24
         ZStack {
@@ -1528,10 +1516,18 @@ struct PlayerOverlayView_iOS: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
-            transportControls(width: geo.size.width, height: geo.size.height, isFullscreen: true)
+            videoTapZonesOverlay(width: geo.size.width, height: geo.size.height)
+                .ignoresSafeArea()
+
+            transportControls(
+                width: geo.size.width,
+                height: geo.size.height,
+                isFullscreen: true,
+                usesGlass: usesGlassControls
+            )
 
             VStack {
-                if #available(iOS 26, *) {
+                if #available(iOS 26, *), usesGlassControls {
                     fullscreenGlassTopControls(geo: geo)
                 } else {
                     legacyFullscreenTopControls(isPortraitFullscreen: isPortraitFullscreen)
@@ -1539,7 +1535,7 @@ struct PlayerOverlayView_iOS: View {
 
                 Spacer()
 
-                if #available(iOS 26, *) {
+                if #available(iOS 26, *), usesGlassControls {
                     fullscreenGlassBottomMetadata(
                         horizontalPadding: 16,
                         bottomPadding: metadataBottomPadding
@@ -1548,7 +1544,8 @@ struct PlayerOverlayView_iOS: View {
 
                 fullscreenSeekbar(
                     horizontalPadding: 16,
-                    bottomPadding: 16
+                    bottomPadding: 16,
+                    usesGlass: usesGlassControls
                 )
             }
 
@@ -1654,7 +1651,7 @@ struct PlayerOverlayView_iOS: View {
 
             VStack(spacing: 10) {
                 if showsOrientationLockButton {
-                    orientationLockButton
+                    orientationLockButton(usesGlass: true)
                 }
 
                 topRightOptionsMenuButton(itemSize: 52, iconSize: 22, usesGlass: true)
@@ -1664,11 +1661,11 @@ struct PlayerOverlayView_iOS: View {
         .padding(.bottom, bottomPadding)
     }
 
-    private var orientationLockButton: some View {
+    private func orientationLockButton(usesGlass: Bool) -> some View {
         Button {
             toggleLandscapeOrientationLock()
         } label: {
-            if #available(iOS 26, *) {
+            if #available(iOS 26, *), usesGlass {
                 Image(systemName: "arrow.trianglehead.2.clockwise")
                     .font(.system(size: 21, weight: .semibold))
                     .foregroundStyle(.white)
@@ -1704,7 +1701,7 @@ struct PlayerOverlayView_iOS: View {
     )
         -> some View
     {
-        if #available(iOS 26, *) {
+        if #available(iOS 26, *), isFullscreen {
             HStack(spacing: separatesOptionsMenu && showsOptionsMenu ? 10 : 0) {
                 GlassEffectContainer(spacing: 12) {
                     HStack(spacing: 0) {
@@ -1726,6 +1723,39 @@ struct PlayerOverlayView_iOS: View {
                 if separatesOptionsMenu && showsOptionsMenu {
                     topRightOptionsMenuButton(itemSize: 52, iconSize: 20, usesGlass: true)
                 }
+            }
+        } else {
+            plainTopRightControlButtons(
+                isFullscreen: isFullscreen,
+                showsFullscreenToggle: showsFullscreenToggle,
+                showsOptionsMenu: showsOptionsMenu,
+                separatesOptionsMenu: separatesOptionsMenu
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func plainTopRightControlButtons(
+        isFullscreen: Bool,
+        showsFullscreenToggle: Bool,
+        showsOptionsMenu: Bool,
+        separatesOptionsMenu: Bool
+    ) -> some View {
+        if separatesOptionsMenu && showsOptionsMenu {
+            HStack(spacing: 10) {
+                HStack(spacing: 0) {
+                    topRightControlButtonItems(
+                        isFullscreen: isFullscreen,
+                        showsFullscreenToggle: showsFullscreenToggle,
+                        showsOptionsMenu: false,
+                        itemSize: 44,
+                        iconSize: 20
+                    )
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 52)
+
+                topRightOptionsMenuButton(itemSize: 52, iconSize: 20, usesGlass: false)
             }
         } else {
             topRightControlButtonItems(
@@ -2044,10 +2074,14 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @ViewBuilder
-    private func fullscreenSeekbar(horizontalPadding: CGFloat, bottomPadding: CGFloat)
+    private func fullscreenSeekbar(
+        horizontalPadding: CGFloat,
+        bottomPadding: CGFloat,
+        usesGlass: Bool
+    )
         -> some View
     {
-        if #available(iOS 26, *) {
+        if #available(iOS 26, *), usesGlass {
             fullscreenGlassSeekbar(
                 horizontalPadding: horizontalPadding,
                 bottomPadding: bottomPadding
@@ -2258,6 +2292,24 @@ struct PlayerOverlayView_iOS: View {
         return message
     }
 
+    private func feedbackOverlays(height: CGFloat) -> some View {
+        PlayerFeedbackOverlays(
+            height: height,
+            verticalSizeClass: verticalSizeClass,
+            usesFullscreenPlayerLayout: usesFullscreenPlayerLayout,
+            showControls: playerState.showControls,
+            isSeekFeedbackVisible: isSeekFeedbackVisible,
+            seekFeedbackText: seekFeedbackText,
+            isVolumeFeedbackVisible: isVolumeFeedbackVisible,
+            volumeFeedbackText: volumeFeedbackText,
+            volumeIconName: volumeIconName,
+            isCaptureFeedbackVisible: isCaptureFeedbackVisible,
+            captureFeedbackText: captureFeedbackText,
+            captureFeedbackSystemImage: captureFeedbackSystemImage,
+            playbackErrorText: playbackErrorBannerText
+        )
+    }
+
     private var feedbackOverlayFont: Font {
         verticalSizeClass == .compact
             ? .headline.weight(.semibold)
@@ -2270,82 +2322,6 @@ struct PlayerOverlayView_iOS: View {
 
     private var feedbackOverlayVerticalPadding: CGFloat {
         verticalSizeClass == .compact ? 9 : 8
-    }
-
-    private var feedbackOverlayTransition: AnyTransition {
-        .asymmetric(
-            insertion: .move(edge: .top).combined(with: .opacity),
-            removal: .move(edge: .top).combined(with: .opacity)
-        )
-    }
-
-    private func feedbackOverlayTopPadding(height: CGFloat) -> CGFloat {
-        if playerState.showControls {
-            if usesFullscreenPlayerLayout {
-                return min(max(80, height * 0.14), 120)
-            }
-            return min(max(56, height * 0.22), 72)
-        }
-
-        if usesFullscreenPlayerLayout {
-            return min(max(42, height * 0.08), 72)
-        }
-        return min(max(20, height * 0.10), 34)
-    }
-
-    @ViewBuilder
-    private func feedbackOverlay<Content: View>(
-        isVisible: Bool,
-        height: CGFloat,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        if isVisible {
-            VStack {
-                content()
-                    .padding(.top, feedbackOverlayTopPadding(height: height))
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .transition(feedbackOverlayTransition)
-            .allowsHitTesting(false)
-        }
-    }
-
-    @ViewBuilder
-    private func feedbackLabel(
-        text: String,
-        systemImage: String? = nil,
-        iconTint: Color = .white.opacity(0.94)
-    ) -> some View {
-        let label = HStack(spacing: 8) {
-            if let systemImage {
-                Image(systemName: systemImage)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(iconTint)
-            }
-
-            Text(text)
-                .lineLimit(1)
-        }
-        .font(feedbackOverlayFont)
-        .foregroundStyle(.white)
-        .padding(.horizontal, feedbackOverlayHorizontalPadding)
-        .padding(.vertical, feedbackOverlayVerticalPadding)
-        .frame(minHeight: verticalSizeClass == .compact ? 38 : 34)
-        .shadow(color: .black.opacity(0.28), radius: 4, y: 1)
-
-        if #available(iOS 26, *) {
-            label
-                .glassEffect(.regular, in: .capsule)
-        } else {
-            label
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay {
-                    Capsule()
-                        .stroke(.white.opacity(0.16), lineWidth: 1)
-                }
-                .shadow(color: .black.opacity(0.28), radius: 14, y: 6)
-        }
     }
 
     private func seek(to seconds: Double) {
@@ -2384,24 +2360,6 @@ struct PlayerOverlayView_iOS: View {
         }
         volumeFeedbackHideTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: task)
-    }
-
-    @ViewBuilder
-    private func captureFeedbackOverlay(height: CGFloat) -> some View {
-        feedbackOverlay(isVisible: isCaptureFeedbackVisible, height: height) {
-            feedbackLabel(
-                text: captureFeedbackText,
-                systemImage: captureFeedbackSystemImage,
-                iconTint: captureFeedbackText == "録画開始" ? .red : .white.opacity(0.94)
-            )
-        }
-    }
-
-    @ViewBuilder
-    private func volumeFeedbackOverlay(height: CGFloat) -> some View {
-        feedbackOverlay(isVisible: isVolumeFeedbackVisible, height: height) {
-            feedbackLabel(text: volumeFeedbackText, systemImage: volumeIconName)
-        }
     }
 
     @ViewBuilder
@@ -2489,6 +2447,229 @@ struct PlayerOverlayView_iOS: View {
     private func unlockLandscapeOrientation() {
         PlayerOrientationController.shared.unlockAndReturnToPortrait()
         isLandscapeOrientationLocked = false
+    }
+}
+
+@MainActor
+private struct VideoTapZonesOverlay: UIViewRepresentable {
+    let onSingleTap: () -> Void
+    let onBackwardDoubleTap: () -> Void
+    let onForwardDoubleTap: () -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = true
+
+        let singleTap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleSingleTap)
+        )
+        singleTap.numberOfTapsRequired = 1
+
+        let doubleTap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleDoubleTap(_:))
+        )
+        doubleTap.numberOfTapsRequired = 2
+        singleTap.require(toFail: doubleTap)
+
+        view.addGestureRecognizer(singleTap)
+        view.addGestureRecognizer(doubleTap)
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.onSingleTap = onSingleTap
+        context.coordinator.onBackwardDoubleTap = onBackwardDoubleTap
+        context.coordinator.onForwardDoubleTap = onForwardDoubleTap
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            onSingleTap: onSingleTap,
+            onBackwardDoubleTap: onBackwardDoubleTap,
+            onForwardDoubleTap: onForwardDoubleTap
+        )
+    }
+
+    final class Coordinator: NSObject {
+        var onSingleTap: () -> Void
+        var onBackwardDoubleTap: () -> Void
+        var onForwardDoubleTap: () -> Void
+
+        init(
+            onSingleTap: @escaping () -> Void,
+            onBackwardDoubleTap: @escaping () -> Void,
+            onForwardDoubleTap: @escaping () -> Void
+        ) {
+            self.onSingleTap = onSingleTap
+            self.onBackwardDoubleTap = onBackwardDoubleTap
+            self.onForwardDoubleTap = onForwardDoubleTap
+        }
+
+        @objc func handleSingleTap() {
+            onSingleTap()
+        }
+
+        @objc func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
+            guard let view = recognizer.view else { return }
+            let x = recognizer.location(in: view).x
+            let zoneWidth = view.bounds.width / 3
+            if x < zoneWidth {
+                onBackwardDoubleTap()
+            } else if x > zoneWidth * 2 {
+                onForwardDoubleTap()
+            }
+        }
+    }
+}
+
+@MainActor
+private struct PlayerFeedbackOverlays: View {
+    let height: CGFloat
+    let verticalSizeClass: UserInterfaceSizeClass?
+    let usesFullscreenPlayerLayout: Bool
+    let showControls: Bool
+    let isSeekFeedbackVisible: Bool
+    let seekFeedbackText: String
+    let isVolumeFeedbackVisible: Bool
+    let volumeFeedbackText: String
+    let volumeIconName: String
+    let isCaptureFeedbackVisible: Bool
+    let captureFeedbackText: String
+    let captureFeedbackSystemImage: String
+    let playbackErrorText: String?
+
+    var body: some View {
+        ZStack {
+            feedbackOverlay(isVisible: isSeekFeedbackVisible) {
+                feedbackLabel(text: seekFeedbackText)
+            }
+            feedbackOverlay(isVisible: isVolumeFeedbackVisible) {
+                feedbackLabel(text: volumeFeedbackText, systemImage: volumeIconName)
+            }
+            feedbackOverlay(isVisible: isCaptureFeedbackVisible) {
+                feedbackLabel(
+                    text: captureFeedbackText,
+                    systemImage: captureFeedbackSystemImage,
+                    iconTint: captureFeedbackText == "録画開始" ? .red : .white.opacity(0.94)
+                )
+            }
+            playbackErrorOverlay
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var feedbackOverlayFont: Font {
+        verticalSizeClass == .compact
+            ? .headline.weight(.semibold)
+            : .subheadline.weight(.semibold)
+    }
+
+    private var feedbackOverlayHorizontalPadding: CGFloat {
+        verticalSizeClass == .compact ? 18 : 16
+    }
+
+    private var feedbackOverlayVerticalPadding: CGFloat {
+        verticalSizeClass == .compact ? 9 : 8
+    }
+
+    private var feedbackOverlayTransition: AnyTransition {
+        .asymmetric(
+            insertion: .move(edge: .top).combined(with: .opacity),
+            removal: .move(edge: .top).combined(with: .opacity)
+        )
+    }
+
+    private func feedbackOverlayTopPadding() -> CGFloat {
+        if showControls {
+            if usesFullscreenPlayerLayout {
+                return min(max(80, height * 0.14), 120)
+            }
+            return min(max(56, height * 0.22), 72)
+        }
+
+        if usesFullscreenPlayerLayout {
+            return min(max(42, height * 0.08), 72)
+        }
+        return min(max(20, height * 0.10), 34)
+    }
+
+    @ViewBuilder
+    private func feedbackOverlay<Content: View>(
+        isVisible: Bool,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if isVisible {
+            VStack {
+                content()
+                    .padding(.top, feedbackOverlayTopPadding())
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .transition(feedbackOverlayTransition)
+        }
+    }
+
+    @ViewBuilder
+    private func feedbackLabel(
+        text: String,
+        systemImage: String? = nil,
+        iconTint: Color = .white.opacity(0.94)
+    ) -> some View {
+        let label = HStack(spacing: 8) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(iconTint)
+            }
+
+            Text(text)
+                .lineLimit(1)
+        }
+        .font(feedbackOverlayFont)
+        .foregroundStyle(.white)
+        .padding(.horizontal, feedbackOverlayHorizontalPadding)
+        .padding(.vertical, feedbackOverlayVerticalPadding)
+        .frame(minHeight: verticalSizeClass == .compact ? 38 : 34)
+        .shadow(color: .black.opacity(0.28), radius: 4, y: 1)
+
+        if #available(iOS 26, *) {
+            label
+                .glassEffect(.regular, in: .capsule)
+        } else {
+            label
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay {
+                    Capsule()
+                        .stroke(.white.opacity(0.16), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.28), radius: 14, y: 6)
+        }
+    }
+
+    @ViewBuilder
+    private var playbackErrorOverlay: some View {
+        if let playbackErrorText {
+            VStack {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.yellow)
+                    Text(playbackErrorText)
+                        .lineLimit(2)
+                }
+                .font(feedbackOverlayFont)
+                .foregroundStyle(.white)
+                .padding(.horizontal, feedbackOverlayHorizontalPadding)
+                .padding(.vertical, feedbackOverlayVerticalPadding)
+                .background(.black.opacity(0.5), in: Capsule())
+                .padding(.top, feedbackOverlayTopPadding())
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .transition(feedbackOverlayTransition)
+        }
     }
 }
 
@@ -2882,7 +3063,14 @@ private struct LowerContextPluginPanel: View {
 }
 
 private struct PlayerOverlayPreview: View {
-    @State private var playerState: PlayerState = {
+    @State private var playerState: PlayerState
+    private let appModel = AppModel.shared
+
+    init(isSeekable: Bool) {
+        _playerState = State(initialValue: Self.makePlayerState(isSeekable: isSeekable))
+    }
+
+    private static func makePlayerState(isSeekable: Bool) -> PlayerState {
         let state = PlayerState()
         state.mode = .fullscreen
         state.isPlaying = true
@@ -2893,7 +3081,7 @@ private struct PlayerOverlayPreview: View {
             source: .liveService(serviceUniqueId: "preview"),
             program: PlayerOverlayPreview.mockProgram()
         )
-        playable.isSeekable = true
+        playable.isSeekable = isSeekable
         playable.length = 5400
         state.currentPlayable = playable
         state.playbackStatus = PlayerPlaybackStatus(
@@ -2902,11 +3090,9 @@ private struct PlayerOverlayPreview: View {
             time: 5400 * 0.35,
             position: 0.35
         )
-        state.player = PreviewVLCMediaPlayer()
+        state.player = PreviewVLCMediaPlayer(isSeekable: isSeekable)
         return state
-    }()
-
-    private let appModel = AppModel.shared
+    }
 
     var body: some View {
         PlayerOverlayView_iOS(
@@ -2941,9 +3127,20 @@ private struct PlayerOverlayPreview: View {
 }
 
 private final class PreviewVLCMediaPlayer: VLCMediaPlayer {
-    override var isSeekable: Bool { true }
+    private let previewIsSeekable: Bool
+
+    init(isSeekable: Bool) {
+        previewIsSeekable = isSeekable
+        super.init()
+    }
+
+    override var isSeekable: Bool { previewIsSeekable }
 }
 
-#Preview {
-    PlayerOverlayPreview()
+#Preview("Seekable") {
+    PlayerOverlayPreview(isSeekable: true)
+}
+
+#Preview("Not Seekable") {
+    PlayerOverlayPreview(isSeekable: false)
 }
