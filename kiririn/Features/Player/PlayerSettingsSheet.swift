@@ -137,6 +137,16 @@ func playerPlaybackOptionMenuEntries(playerState: PlayerState, isSeekActionAvail
         }
     }
 
+    Button {
+        playerState.reloadCurrentPlayable()
+    } label: {
+        Label {
+            Text("再読み込み")
+        } icon: {
+            accentMenuIcon(systemName: "arrow.clockwise")
+        }
+    }
+
     if !playerState.availableOverlayPlugins.isEmpty {
         Button {
             playerState.showingPluginOverlay.toggle()

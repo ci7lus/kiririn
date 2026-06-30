@@ -460,6 +460,12 @@ struct DetachedPlayerOverlayView_macOS: View {
                         }
                     }
 
+                    Button {
+                        playerState.reloadCurrentPlayable()
+                    } label: {
+                        Label("再読み込み", systemImage: "arrow.clockwise")
+                    }
+
                     if !playerState.availableOverlayPlugins.isEmpty {
                         Button {
                             playerState.showingPluginOverlay.toggle()

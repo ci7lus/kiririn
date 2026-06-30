@@ -458,6 +458,13 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         }
     }
 
+    func reloadCurrentPlayable() {
+        guard let playable = currentPlayable else { return }
+        let currentMode = mode
+        play(playable: playable)
+        mode = currentMode
+    }
+
     func togglePlayPause() {
         guard let player = player else { return }
         if isPlaying {
