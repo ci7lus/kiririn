@@ -107,6 +107,7 @@ class BackendManager {
     private var logoImagesByServiceKey: [String: PlatformImage] = [:]
     var loadingTaskCount = 0
     var isDataLoading: Bool { loadingTaskCount > 0 }
+    private(set) var communicationFailureCount = 0
     private(set) var backendSyncCount = 0
 
     init(configStore: BackendConfigStore) {
@@ -195,6 +196,10 @@ class BackendManager {
         rebuildAggregatedData()
     }
 
+    private func noteCommunicationFailure() {
+        communicationFailureCount += 1
+    }
+
     private func createProvider(for config: BackendConfiguration) -> any BackendProvider {
         switch config.type {
         case .mirakurun:
@@ -267,6 +272,7 @@ class BackendManager {
             state.status = .error
             state.lastError = error.localizedDescription
             state.version = nil
+            noteCommunicationFailure()
             rebuildAggregatedData()
             return .failed(error.localizedDescription)
         }
@@ -314,6 +320,7 @@ class BackendManager {
                     return .refreshed
                 } catch {
                     state.lastError = error.localizedDescription
+                    noteCommunicationFailure()
                     logger.error(
                         "Failed to refresh program catalog for \(backendLogDescription(for: backendId)): \(error)"
                     )
@@ -325,6 +332,7 @@ class BackendManager {
             state.status = .error
             state.lastError = error.localizedDescription
             state.version = nil
+            noteCommunicationFailure()
             rebuildAggregatedData()
             return .failed(error.localizedDescription)
         }
@@ -871,7 +879,13 @@ class BackendManager {
         }
         loadingTaskCount += 1
         defer { loadingTaskCount = max(0, loadingTaskCount - 1) }
-        return try await provider.fetchRecords(pageToken: pageToken, limit: limit, keyword: keyword)
+        do {
+            return try await provider.fetchRecords(
+                pageToken: pageToken, limit: limit, keyword: keyword)
+        } catch {
+            noteCommunicationFailure()
+            throw error
+        }
     }
 
     func fetchRecord(backendId: String, id: String) async throws -> Recorded {
@@ -880,7 +894,12 @@ class BackendManager {
         }
         loadingTaskCount += 1
         defer { loadingTaskCount = max(0, loadingTaskCount - 1) }
-        return try await provider.fetchRecord(id: id)
+        do {
+            return try await provider.fetchRecord(id: id)
+        } catch {
+            noteCommunicationFailure()
+            throw error
+        }
     }
 
     func fetchRecordThumbnail(backendId: String, id: String) async throws -> Data? {

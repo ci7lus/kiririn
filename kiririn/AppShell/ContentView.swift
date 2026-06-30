@@ -21,6 +21,8 @@ struct ContentView: View {
 
     @State private var isLoadingIndicatorVisible = false
     @State private var loadingIndicatorHideTask: Task<Void, Never>?
+    @State private var communicationFailureToastVisible = false
+    @State private var communicationFailureToastHideTask: Task<Void, Never>?
     @State private var droppedPluginAlertMessage: String?
     @State private var externalInstallConfirmation: PluginInstallConfirmationRequest?
     @State private var externalInstallErrorMessage: String?
@@ -93,6 +95,8 @@ struct ContentView: View {
             .onDisappear {
                 loadingIndicatorHideTask?.cancel()
                 loadingIndicatorHideTask = nil
+                communicationFailureToastHideTask?.cancel()
+                communicationFailureToastHideTask = nil
             }
             .task {
                 appModel.setupIfNeeded()
@@ -111,6 +115,10 @@ struct ContentView: View {
                 guard let message = newValue else { return }
                 externalInstallErrorMessage = message
                 appModel.pendingPluginInstallErrorMessage = nil
+            }
+            .onChange(of: manager.communicationFailureCount) { _, newValue in
+                guard newValue > 0 else { return }
+                showCommunicationFailureToast()
             }
             .onChange(of: scenePhase) { _, newPhase in
                 guard newPhase == .active else { return }
@@ -262,32 +270,21 @@ struct ContentView: View {
             #endif
 
             if isLoadingIndicatorVisible && !playerState.isActive {
-                VStack {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("データ取得中…")
-                            .font(.footnote)
-                            .fontWeight(.medium)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay {
-                        Capsule()
-                            .strokeBorder(Color.kiririnSeparator.opacity(0.35), lineWidth: 0.8)
-                    }
-                    #if os(iOS)
-                        .padding(.top, 46)
-                    #else
-                        .padding(.top, 8)
-                    #endif
-                    Spacer()
+                appFeedbackOverlay(topPadding: feedbackTopPadding) {
+                    AppFeedbackLabel(text: "データ取得中…", showsProgress: true)
                 }
-                .padding(.horizontal, 12)
-                .transition(.opacity)
                 .zIndex(2)
-                .allowsHitTesting(false)
+            }
+
+            if communicationFailureToastVisible && !playerState.isActive {
+                appFeedbackOverlay(topPadding: feedbackTopPadding) {
+                    AppFeedbackLabel(
+                        text: "通信に失敗しました",
+                        systemImage: "exclamationmark.triangle.fill",
+                        iconTint: .yellow
+                    )
+                }
+                .zIndex(3)
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.86), value: playerState.isActive)
@@ -324,6 +321,45 @@ struct ContentView: View {
                     presentNextExternalInstallIfPossible()
                 }
             ))
+    }
+
+    private var feedbackTopPadding: CGFloat {
+        #if os(iOS)
+            46
+        #else
+            8
+        #endif
+    }
+
+    @ViewBuilder
+    private func appFeedbackOverlay<Content: View>(
+        topPadding: CGFloat,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack {
+            content()
+                .padding(.top, topPadding)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 12)
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .allowsHitTesting(false)
+    }
+
+    private func showCommunicationFailureToast() {
+        communicationFailureToastHideTask?.cancel()
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
+            communicationFailureToastVisible = true
+        }
+        communicationFailureToastHideTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeIn(duration: 0.22)) {
+                communicationFailureToastVisible = false
+            }
+            communicationFailureToastHideTask = nil
+        }
     }
 
     #if os(macOS)
