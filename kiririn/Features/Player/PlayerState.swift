@@ -2,7 +2,6 @@ import Foundation
 import KppxKit
 import Logging
 import OrderedCollections
-import Sentry
 import SwiftUI
 import VLCKit
 import VLCKitAssets
@@ -145,10 +144,8 @@ private final class VLCLogForwarder: NSObject, VLCLogging {
 
         let metadata = metadata(context: context)
         let fullMessage = formattedMessage(message: trimmedMessage, context: context)
-        let sentryMetadata = sentryAttributes(metadata)
 
         logToSwiftLog(message: fullMessage, level: logLevel, metadata: metadata)
-        logToSentry(message: fullMessage, level: logLevel, attributes: sentryMetadata)
     }
 
     private func logToSwiftLog(message: String, level: VLCLogLevel, metadata: Logger.Metadata) {
@@ -162,23 +159,6 @@ private final class VLCLogForwarder: NSObject, VLCLogging {
         default:
             #if false
                 logger.debug("\(message)", metadata: metadata)
-            #endif
-        }
-    }
-
-    private func logToSentry(
-        message: String, level: VLCLogLevel, attributes: [String: any Sendable]
-    ) {
-        switch level {
-        case .error:
-            SentrySDK.logger.error(message, attributes: attributes)
-        case .warning:
-            SentrySDK.logger.warn(message, attributes: attributes)
-        case .info:
-            SentrySDK.logger.info(message, attributes: attributes)
-        default:
-            #if false
-                SentrySDK.logger.debug(message, attributes: attributes)
             #endif
         }
     }
@@ -226,15 +206,6 @@ private final class VLCLogForwarder: NSObject, VLCLogging {
             metadata["vlc.function"] = .string(function)
         }
         return metadata
-    }
-
-    private func sentryAttributes(_ metadata: Logger.Metadata) -> [String: any Sendable] {
-        var attributes: [String: any Sendable] = [:]
-        attributes.reserveCapacity(metadata.count)
-        for (key, value) in metadata {
-            attributes[key] = value.description
-        }
-        return attributes
     }
 }
 

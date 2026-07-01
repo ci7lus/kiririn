@@ -1,4 +1,3 @@
-import Sentry
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -48,15 +47,6 @@ struct SettingsView: View {
                 }
             }
 
-            #if DEBUG
-                Section("デバッグ") {
-                    Button {
-                        sendSentryTestError()
-                    } label: {
-                        Label("Sentryテスト送信", systemImage: "exclamationmark.bubble")
-                    }
-                }
-            #endif
         }
         .formStyle(.grouped)
         .navigationTitle(isTabActive ? "設定" : "")
@@ -80,19 +70,4 @@ struct SettingsView: View {
         }
     }
 
-    private enum SentryManualTestError: Error {
-        case triggeredFromSettings
-    }
-
-    private func sendSentryTestError() {
-        do {
-            try throwSentryTestError()
-        } catch {
-            SentrySDK.capture(error: error)
-        }
-    }
-
-    private func throwSentryTestError() throws {
-        throw SentryManualTestError.triggeredFromSettings
-    }
 }

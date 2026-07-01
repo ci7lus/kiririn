@@ -1,6 +1,9 @@
 import CoreText
-import Sentry
 import SwiftUI
+
+#if !DEBUG
+    import Sentry
+#endif
 
 extension Notification.Name {
     static let requestOpenFile = Notification.Name("requestOpenFile")
@@ -171,7 +174,9 @@ struct KiririnApp: App {
     @State private var appModel = AppModel.shared
 
     init() {
-        SentryBootstrap.initializeIfAvailable()
+        #if !DEBUG
+            SentryBootstrap.initializeIfAvailable()
+        #endif
         registerFonts()
     }
 
@@ -230,27 +235,21 @@ struct KiririnApp: App {
     }
 }
 
-private enum SentryBootstrap {
-    static let dsn =
-        "https://f85557a0b48501e363aa402ebf5e2c74@o481625.ingest.us.sentry.io/4511399987183616"
+#if !DEBUG
+    private enum SentryBootstrap {
+        static let dsn =
+            "https://f85557a0b48501e363aa402ebf5e2c74@o481625.ingest.us.sentry.io/4511399987183616"
 
-    static func initializeIfAvailable() {
-        SentrySDK.start { options in
-            options.dsn = dsn
-            options.enableNetworkBreadcrumbs = false
-            options.enableCaptureFailedRequests = false
-            options.enableNetworkTracking = false
-            #if DEBUG
-                options.tracesSampleRate = 1.0
-                options.configureProfiling = {
-                    $0.sessionSampleRate = 1.0
-                    $0.lifecycle = .trace
-                }
-                options.enableLogs = true
-            #endif
+        static func initializeIfAvailable() {
+            SentrySDK.start { options in
+                options.dsn = dsn
+                options.enableNetworkBreadcrumbs = false
+                options.enableCaptureFailedRequests = false
+                options.enableNetworkTracking = false
+            }
         }
     }
-}
+#endif
 
 private struct AppCommands: Commands {
     let appModel: AppModel
