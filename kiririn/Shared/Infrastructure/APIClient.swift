@@ -5,14 +5,14 @@ nonisolated final class APIClient: Sendable {
     let baseURL: URL?
     let defaultHeaders: [String: String]
     private let session: URLSession
-    private let backendName: String
-    private let backendType: BackendType
+    private let serverName: String
+    private let serverType: ServerType
     private let logger = Logging.Logger(label: "APIClient")
 
-    init(configuration: BackendConfiguration) {
+    init(configuration: ServerConfiguration) {
         self.baseURL = configuration.effectiveBaseURL
-        self.backendName = configuration.name
-        self.backendType = configuration.type
+        self.serverName = configuration.name
+        self.serverType = configuration.type
 
         var headers = configuration.customHeaders
         switch configuration.auth {
@@ -72,14 +72,14 @@ nonisolated final class APIClient: Sendable {
                 do {
                     let decoded = try decoder.decode(T.self, from: sanitizedJSON.data)
                     logger.warning(
-                        "Recovered malformed JSON by removing \(sanitizedJSON.removedControlCharacterCount) invalid control character(s); backend=\(backendName); type=\(backendType.displayName); url=\(url.absoluteString)"
+                        "Recovered malformed JSON by removing \(sanitizedJSON.removedControlCharacterCount) invalid control character(s); server=\(serverName); type=\(serverType.displayName); url=\(url.absoluteString)"
                     )
                     return decoded
                 } catch {
                     diagnosticData = sanitizedJSON.data
                     diagnosticError = error
                     logger.error(
-                        "Malformed JSON recovery failed after removing \(sanitizedJSON.removedControlCharacterCount) invalid control character(s); backend=\(backendName); type=\(backendType.displayName); url=\(url.absoluteString); reason=\(error.localizedDescription)"
+                        "Malformed JSON recovery failed after removing \(sanitizedJSON.removedControlCharacterCount) invalid control character(s); server=\(serverName); type=\(serverType.displayName); url=\(url.absoluteString); reason=\(error.localizedDescription)"
                     )
                 }
             }
@@ -88,8 +88,8 @@ nonisolated final class APIClient: Sendable {
                 data: diagnosticData,
                 error: diagnosticError,
                 url: url,
-                backendName: backendName,
-                backendType: backendType,
+                serverName: serverName,
+                serverType: serverType,
                 contentType: httpResponse.value(forHTTPHeaderField: "Content-Type")
             )
             logger.error("\(diagnostic.detail)")
@@ -152,8 +152,8 @@ extension APIClient {
         data: Data,
         error: Error,
         url: URL,
-        backendName: String,
-        backendType: BackendType,
+        serverName: String,
+        serverType: ServerType,
         contentType: String?
     ) -> APIDecodingDiagnostic {
         let endpoint = endpointDescription(for: url)
@@ -162,15 +162,15 @@ extension APIClient {
         let diagnosticSnippet =
             errorIndex.map { snippet(around: $0, in: data) } ?? previewSnippet(from: data)
 
-        var summary = "\(backendName) (\(backendType.displayName)) の \(endpoint) が不正な JSON を返しました"
+        var summary = "\(serverName)（\(serverType.displayName)）の\(endpoint)が不正なJSONを返しました"
         if let errorIndex {
             summary += " [byte \(errorIndex)]"
         }
 
         var detailParts = [
             "JSON decoding failed",
-            "backend=\(backendName)",
-            "type=\(backendType.displayName)",
+            "server=\(serverName)",
+            "type=\(serverType.displayName)",
             "url=\(url.absoluteString)",
             "bytes=\(data.count)",
         ]

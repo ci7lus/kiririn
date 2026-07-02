@@ -21,7 +21,7 @@ func programGuideCurrentTimeControl(
 }
 
 @ViewBuilder
-func programGuideServiceLogo(for service: TVService, manager: BackendManager) -> some View {
+func programGuideServiceLogo(for service: TVService, manager: ServerManager) -> some View {
     if let image = manager.logoImage(for: service) {
         #if canImport(UIKit)
             Image(uiImage: image)

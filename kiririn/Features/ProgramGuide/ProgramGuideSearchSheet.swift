@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ProgramGuideSearchSheetView: View {
-    let manager: BackendManager
+    let manager: ServerManager
     @Binding var sheetSearchText: String
     @Binding var searchQueryResults: [ProgramSearchResult]
     @Binding var searchScrollRestoreID: ProgramSearchResult.ID?
@@ -166,7 +166,7 @@ struct ProgramGuideSearchSheetView: View {
 
         let servicesByCompositeKey = Dictionary(
             uniqueKeysWithValues: manager.services.map { service in
-                ("\(service.backendId)-\(service.networkId)-\(service.serviceId)", service)
+                ("\(service.serverId)-\(service.networkId)-\(service.serviceId)", service)
             }
         )
 
@@ -174,7 +174,7 @@ struct ProgramGuideSearchSheetView: View {
         guard !Task.isCancelled else { return }
 
         searchQueryResults = programs.compactMap { program in
-            let key = "\(program.backendId)-\(program.networkId)-\(program.serviceId)"
+            let key = "\(program.serverId)-\(program.networkId)-\(program.serviceId)"
             guard let service = servicesByCompositeKey[key] else { return nil }
             return ProgramSearchResult(program: program, service: service)
         }

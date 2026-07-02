@@ -6,27 +6,27 @@ import Testing
 
 struct ModelBehaviorTests {
 
-    @Test func backendTypeFlagsReflectSupportedFeatures() {
-        #expect(BackendType.mirakurun.requiresBaseURL)
-        #expect(BackendType.mirakurun.supportsLive)
-        #expect(!BackendType.mirakurun.supportsRecording)
+    @Test func serverTypeFlagsReflectSupportedFeatures() {
+        #expect(ServerType.mirakurun.requiresBaseURL)
+        #expect(ServerType.mirakurun.supportsLive)
+        #expect(!ServerType.mirakurun.supportsRecording)
 
-        #expect(!BackendType.googledrive.requiresBaseURL)
-        #expect(!BackendType.googledrive.supportsLive)
-        #expect(BackendType.googledrive.supportsRecording)
+        #expect(!ServerType.googledrive.requiresBaseURL)
+        #expect(!ServerType.googledrive.supportsLive)
+        #expect(ServerType.googledrive.supportsRecording)
     }
 
-    @Test func backendConfigurationDecodingDefaultsFeatureFlagsFromBackendType() throws {
+    @Test func serverConfigurationDecodingDefaultsFeatureFlagsFromServerType() throws {
         let json = """
             {
-              \"id\": \"backend\",
+              \"id\": \"server\",
               \"name\": \"Main\",
               \"type\": \"epgstation\",
               \"baseURL\": \"https://example.com/api\"
             }
             """.data(using: .utf8)!
 
-        let decoded = try JSONDecoder().decode(BackendConfiguration.self, from: json)
+        let decoded = try JSONDecoder().decode(ServerConfiguration.self, from: json)
 
         #expect(decoded.liveEnabled)
         #expect(decoded.recordingEnabled)
@@ -34,9 +34,9 @@ struct ModelBehaviorTests {
         #expect(decoded.effectiveBaseURL == URL(string: "https://example.com/api/"))
     }
 
-    @Test func backendConfigurationFeaturesRespectExplicitFlags() {
-        let configuration = BackendConfiguration(
-            id: "backend",
+    @Test func serverConfigurationFeaturesRespectExplicitFlags() {
+        let configuration = ServerConfiguration(
+            id: "server",
             name: "Drive",
             type: .googledrive,
             baseURL: nil,
@@ -61,7 +61,7 @@ struct ModelBehaviorTests {
             remoteControlKeyId: 1,
             hasLogoData: true,
             channel: .init(id: "gr011", type: "GR"),
-            backendId: "backend"
+            serverId: "server"
         )
 
         #expect(service.name == "🈐テストサービス")
@@ -85,18 +85,18 @@ struct ModelBehaviorTests {
             variants: [.init(id: "variant-a", name: "HD")],
             isRecording: false,
             hasThumbnail: false,
-            backendId: "backend"
+            serverId: "server"
         )
 
         #expect(recorded.displayDate == referenceDate)
-        #expect(recorded.playableID == "rec-backend-record-variant-a")
+        #expect(recorded.playableID == "rec-server-record-variant-a")
     }
 
     @Test func localRecordPathRecordIDPercentEncodesReservedCharacters() {
         let encoded = LocalRecordPath.recordID(
-            backendId: "backend/main", recordID: "record id?#1")
+            serverId: "server/main", recordID: "record id?#1")
 
-        #expect(encoded == "backendmainrecordid1")
+        #expect(encoded == "servermainrecordid1")
     }
 
     @Test func localRecordItemUsesPersistedStateWhileVideoFileIsMissing() throws {
@@ -114,14 +114,14 @@ struct ModelBehaviorTests {
                 variants: [.init(id: "variant", name: "HD")],
                 isRecording: false,
                 hasThumbnail: false,
-                backendId: "backend"
+                serverId: "server"
             )
         )
         let createdAt = Date(timeIntervalSince1970: 567)
 
         let downloading = LocalRecordItem(
             id: "item",
-            backendId: "backend",
+            serverId: "server",
             name: "動画",
             serviceName: nil,
             startAt: nil,
@@ -134,7 +134,7 @@ struct ModelBehaviorTests {
         )
         let failed = LocalRecordItem(
             id: "item",
-            backendId: "backend",
+            serverId: "server",
             name: "動画",
             serviceName: nil,
             startAt: nil,
@@ -148,7 +148,7 @@ struct ModelBehaviorTests {
         )
         let missing = LocalRecordItem(
             id: "item",
-            backendId: "backend",
+            serverId: "server",
             name: "動画",
             serviceName: nil,
             startAt: nil,
@@ -171,10 +171,10 @@ struct ModelBehaviorTests {
         )
     }
 
-    @Test func backendConnectionStateStartsDisconnected() {
-        let state = BackendConnectionState(backendId: "backend", isEnabled: false)
+    @Test func serverConnectionStateStartsDisconnected() {
+        let state = ServerConnectionState(serverId: "server", isEnabled: false)
 
-        #expect(state.backendId == "backend")
+        #expect(state.serverId == "server")
         #expect(!state.isEnabled)
         #expect(state.status == .disconnected)
         #expect(state.lastError == nil)
@@ -188,7 +188,7 @@ struct ModelBehaviorTests {
         let stale = now.addingTimeInterval(-(13 * 60 * 60))
 
         #expect(
-            BackendManager.resolveProgramCatalogRefreshDecision(
+            ServerManager.resolveProgramCatalogRefreshDecision(
                 policy: .automaticIfDue,
                 lastFetchedAt: recent,
                 now: now,
@@ -197,7 +197,7 @@ struct ModelBehaviorTests {
             ) == .skip
         )
         #expect(
-            BackendManager.resolveProgramCatalogRefreshDecision(
+            ServerManager.resolveProgramCatalogRefreshDecision(
                 policy: .automaticIfDue,
                 lastFetchedAt: stale,
                 now: now,
@@ -206,7 +206,7 @@ struct ModelBehaviorTests {
             ) == .fetchNow
         )
         #expect(
-            BackendManager.resolveProgramCatalogRefreshDecision(
+            ServerManager.resolveProgramCatalogRefreshDecision(
                 policy: .forceIgnoringNetwork,
                 lastFetchedAt: recent,
                 now: now,
@@ -221,10 +221,10 @@ struct ModelBehaviorTests {
         let interval = 12.0 * 60 * 60
         let stale = now.addingTimeInterval(-(13 * 60 * 60))
 
-        #expect(!BackendManager.allowsProgramCatalogRefresh(requiresWiFi: true, isOnWiFi: false))
-        #expect(BackendManager.allowsProgramCatalogRefresh(requiresWiFi: false, isOnWiFi: false))
+        #expect(!ServerManager.allowsProgramCatalogRefresh(requiresWiFi: true, isOnWiFi: false))
+        #expect(ServerManager.allowsProgramCatalogRefresh(requiresWiFi: false, isOnWiFi: false))
         #expect(
-            BackendManager.resolveProgramCatalogRefreshDecision(
+            ServerManager.resolveProgramCatalogRefreshDecision(
                 policy: .automaticIfDue,
                 lastFetchedAt: stale,
                 now: now,
@@ -233,7 +233,7 @@ struct ModelBehaviorTests {
             ) == .queueUntilWiFi
         )
         #expect(
-            BackendManager.resolveProgramCatalogRefreshDecision(
+            ServerManager.resolveProgramCatalogRefreshDecision(
                 policy: .force,
                 lastFetchedAt: now,
                 now: now,
@@ -242,7 +242,7 @@ struct ModelBehaviorTests {
             ) == .queueUntilWiFi
         )
         #expect(
-            BackendManager.resolveProgramCatalogRefreshDecision(
+            ServerManager.resolveProgramCatalogRefreshDecision(
                 policy: .forceIgnoringNetwork,
                 lastFetchedAt: now,
                 now: now,

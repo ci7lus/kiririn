@@ -8,16 +8,16 @@ nonisolated enum ConnectionStatus: String, Sendable {
 }
 
 @Observable
-class BackendConnectionState {
-    let backendId: String
+class ServerConnectionState {
+    let serverId: String
     var isEnabled: Bool
     var status: ConnectionStatus
     var lastError: String?
     var lastConnectedAt: Date?
     var version: String?
 
-    init(backendId: String, isEnabled: Bool = true) {
-        self.backendId = backendId
+    init(serverId: String, isEnabled: Bool = true) {
+        self.serverId = serverId
         self.isEnabled = isEnabled
         self.status = .disconnected
     }

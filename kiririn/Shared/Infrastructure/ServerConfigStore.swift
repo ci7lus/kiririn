@@ -1,13 +1,13 @@
 import Foundation
 
 @Observable
-class BackendConfigStore {
+class ServerConfigStore {
     private let localDefaults: UserDefaults
     private let keychainStore = KeychainCredentialStore()
-    private let configsKey = "kiririn.backend.configurations"
-    private let enabledKey = "kiririn.backend.enabled."
+    private let configsKey = "kiririn.server.configurations"
+    private let enabledKey = "kiririn.server.enabled."
 
-    var configurations: [BackendConfiguration] = []
+    var configurations: [ServerConfiguration] = []
     var enabledStates: [String: Bool] = [:]
 
     init(localDefaults: UserDefaults = .standard) {
@@ -23,9 +23,9 @@ class BackendConfigStore {
             return
         }
         let decoder = JSONDecoder()
-        var loaded = (try? decoder.decode([BackendConfiguration].self, from: data)) ?? []
+        var loaded = (try? decoder.decode([ServerConfiguration].self, from: data)) ?? []
         for index in loaded.indices {
-            if let auth = keychainStore.load(forBackendId: loaded[index].id) {
+            if let auth = keychainStore.load(forServerId: loaded[index].id) {
                 loaded[index].auth = auth
             }
         }
@@ -40,9 +40,9 @@ class BackendConfigStore {
 
     private func saveConfigurations() {
         for config in configurations {
-            keychainStore.save(config.auth, forBackendId: config.id)
+            keychainStore.save(config.auth, forServerId: config.id)
         }
-        let stripped = configurations.map { config -> BackendConfiguration in
+        let stripped = configurations.map { config -> ServerConfiguration in
             var c = config
             c.auth = .none
             return c
@@ -52,13 +52,13 @@ class BackendConfigStore {
         localDefaults.set(data, forKey: configsKey)
     }
 
-    func addConfiguration(_ config: BackendConfiguration) {
+    func addConfiguration(_ config: ServerConfiguration) {
         configurations.append(config)
         saveConfigurations()
         setEnabled(true, for: config.id)
     }
 
-    func updateConfiguration(_ config: BackendConfiguration) {
+    func updateConfiguration(_ config: ServerConfiguration) {
         if let index = configurations.firstIndex(where: { $0.id == config.id }) {
             configurations[index] = config
             saveConfigurations()
@@ -67,7 +67,7 @@ class BackendConfigStore {
 
     func removeConfiguration(id: String) {
         configurations.removeAll { $0.id == id }
-        keychainStore.delete(forBackendId: id)
+        keychainStore.delete(forServerId: id)
         saveConfigurations()
         enabledStates[id] = nil
         localDefaults.removeObject(forKey: enabledKey + id)
@@ -105,12 +105,12 @@ class BackendConfigStore {
         return true
     }
 
-    func isEnabled(_ backendId: String) -> Bool {
-        enabledStates[backendId] ?? true
+    func isEnabled(_ serverId: String) -> Bool {
+        enabledStates[serverId] ?? true
     }
 
-    func setEnabled(_ enabled: Bool, for backendId: String) {
-        enabledStates[backendId] = enabled
-        localDefaults.set(enabled, forKey: enabledKey + backendId)
+    func setEnabled(_ enabled: Bool, for serverId: String) {
+        enabledStates[serverId] = enabled
+        localDefaults.set(enabled, forKey: enabledKey + serverId)
     }
 }

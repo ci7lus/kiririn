@@ -18,7 +18,7 @@ nonisolated struct LocalRecordItem: Codable, FetchableRecord, PersistableRecord,
     }
 
     var id: String
-    var backendId: String
+    var serverId: String
     var name: String
     var serviceName: String?
     var startAt: Date?
@@ -32,13 +32,13 @@ nonisolated struct LocalRecordItem: Codable, FetchableRecord, PersistableRecord,
     var createdAt: Date
 
     enum Columns: String, ColumnExpression {
-        case id, backendId, name, serviceName, startAt, duration, data, videoFileName,
+        case id, serverId, name, serviceName, startAt, duration, data, videoFileName,
             thumbnailData, downloadStateRaw, downloadErrorMessage, downloadedAt, createdAt
     }
 
     init(
         id: String,
-        backendId: String,
+        serverId: String,
         name: String,
         serviceName: String?,
         startAt: Date?,
@@ -52,7 +52,7 @@ nonisolated struct LocalRecordItem: Codable, FetchableRecord, PersistableRecord,
         createdAt: Date
     ) {
         self.id = id
-        self.backendId = backendId
+        self.serverId = serverId
         self.name = name
         self.serviceName = serviceName
         self.startAt = startAt

@@ -28,8 +28,8 @@ final class RecordDownloadManager {
         LocalRecordPath.videoURL(fileName: fileName)
     }
 
-    static func localRecordID(backendId: String, recordID: String) -> String {
-        LocalRecordPath.recordID(backendId: backendId, recordID: recordID)
+    static func localRecordID(serverId: String, recordID: String) -> String {
+        LocalRecordPath.recordID(serverId: serverId, recordID: recordID)
     }
 
     private static let invalidLocalVideoFileNameCharacters = CharacterSet(
@@ -116,10 +116,10 @@ final class RecordDownloadManager {
 
     // MARK: - Download
 
-    func downloadRecord(_ record: Recorded, manager: BackendManager) {
-        guard let provider = manager.recordingProvider(for: record.backendId) else { return }
+    func downloadRecord(_ record: Recorded, manager: ServerManager) {
+        guard let provider = manager.recordingProvider(for: record.serverId) else { return }
         guard let variant = record.variants.first else { return }
-        let encodedId = Self.localRecordID(backendId: record.backendId, recordID: record.id)
+        let encodedId = Self.localRecordID(serverId: record.serverId, recordID: record.id)
 
         // Block duplicate starts while the same item is already downloading.
         if activeDownloadTaskById[encodedId] != nil || downloadProgressByItemId[encodedId] != nil {
@@ -134,7 +134,7 @@ final class RecordDownloadManager {
 
             var item = LocalRecordItem(
                 id: encodedId,
-                backendId: record.backendId,
+                serverId: record.serverId,
                 name: record.name,
                 serviceName: record.serviceName,
                 startAt: record.startAt,

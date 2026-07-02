@@ -25,8 +25,8 @@ struct APIClientDiagnosticsTests {
                 data: data,
                 error: error,
                 url: url,
-                backendName: "Main",
-                backendType: .mirakurun,
+                serverName: "Main",
+                serverType: .mirakurun,
                 contentType: "application/json"
             )
 

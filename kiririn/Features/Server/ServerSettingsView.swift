@@ -1,23 +1,23 @@
 import SwiftUI
 
-struct BackendSettingsView: View {
-    let configStore: BackendConfigStore
-    let manager: BackendManager
+struct ServerSettingsView: View {
+    let configStore: ServerConfigStore
+    let manager: ServerManager
     @State private var showingAddSheet = false
-    @State private var editingConfig: BackendConfiguration?
-    @State private var selectedBackendID: String?
+    @State private var editingConfig: ServerConfiguration?
+    @State private var selectedServerID: String?
     @State private var showingDeleteConfirmation = false
-    @State private var backendIDsToDelete: [String] = []
+    @State private var serverIDsToDelete: [String] = []
     @Environment(\.isTabActive) private var isTabActive
 
     var body: some View {
         listView
-            .navigationTitle("バックエンド")
+            .navigationTitle("サーバー設定")
             .toolbar {
                 toolbarContent
             }
             .alert(
-                "バックエンドを削除しますか？",
+                "サーバーを削除しますか？",
                 isPresented: $showingDeleteConfirmation
             ) {
                 deleteConfirmationButtons
@@ -25,14 +25,14 @@ struct BackendSettingsView: View {
                 Text("この操作は取り消せません。")
             }
             .sheet(isPresented: $showingAddSheet) {
-                BackendEditView(configStore: configStore, manager: manager)
+                ServerEditView(configStore: configStore, manager: manager)
             }
             .sheet(item: $editingConfig) { config in
-                BackendEditView(configStore: configStore, manager: manager, existingConfig: config)
+                ServerEditView(configStore: configStore, manager: manager, existingConfig: config)
             }
             .onChange(of: configStore.configurations.map(\.id)) { _, ids in
-                guard let selectedBackendID, !ids.contains(selectedBackendID) else { return }
-                self.selectedBackendID = nil
+                guard let selectedServerID, !ids.contains(selectedServerID) else { return }
+                self.selectedServerID = nil
             }
     }
 
@@ -49,7 +49,7 @@ struct BackendSettingsView: View {
     private var macosList: some View {
         if configStore.configurations.isEmpty {
             ContentUnavailableView(
-                "バックエンドがありません",
+                "サーバーがありません",
                 systemImage: "server.rack",
                 description: Text("追加は")
                     + Text(Image(systemName: "plus")).foregroundStyle(Color.accentColor)
@@ -57,9 +57,9 @@ struct BackendSettingsView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            List(selection: $selectedBackendID) {
+            List(selection: $selectedServerID) {
                 ForEach(configStore.configurations) { config in
-                    BackendRowView(
+                    ServerRowView(
                         config: config,
                         state: manager.connectionStates[config.id],
                         isEnabled: configStore.isEnabled(config.id),
@@ -67,14 +67,14 @@ struct BackendSettingsView: View {
                             configStore.setEnabled(enabled, for: config.id)
                             manager.connectionStates[config.id]?.isEnabled = enabled
                             if enabled {
-                                Task { await manager.connect(backendId: config.id) }
+                                Task { await manager.connect(serverId: config.id) }
                             } else {
                                 manager.connectionStates[config.id]?.status = .disconnected
-                                manager.backendAvailabilityDidChange()
+                                manager.serverAvailabilityDidChange()
                             }
                         },
                         onReconnect: {
-                            Task { await manager.connect(backendId: config.id) }
+                            Task { await manager.connect(serverId: config.id) }
                         },
                         onEdit: {
                             editingConfig = config
@@ -95,7 +95,7 @@ struct BackendSettingsView: View {
                     Divider()
 
                     Button("削除", role: .destructive) {
-                        backendIDsToDelete = [firstID]
+                        serverIDsToDelete = [firstID]
                         showingDeleteConfirmation = true
                     }
                 }
@@ -113,7 +113,7 @@ struct BackendSettingsView: View {
     private var iosList: some View {
         if configStore.configurations.isEmpty {
             ContentUnavailableView(
-                "バックエンドがありません",
+                "サーバーがありません",
                 systemImage: "server.rack",
                 description: Text("追加は")
                     + Text(Image(systemName: "plus")).foregroundStyle(Color.accentColor)
@@ -121,10 +121,10 @@ struct BackendSettingsView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            List(selection: $selectedBackendID) {
+            List(selection: $selectedServerID) {
                 Section {
                     ForEach(configStore.configurations) { config in
-                        BackendRowView(
+                        ServerRowView(
                             config: config,
                             state: manager.connectionStates[config.id],
                             isEnabled: configStore.isEnabled(config.id),
@@ -132,14 +132,14 @@ struct BackendSettingsView: View {
                                 configStore.setEnabled(enabled, for: config.id)
                                 manager.connectionStates[config.id]?.isEnabled = enabled
                                 if enabled {
-                                    Task { await manager.connect(backendId: config.id) }
+                                    Task { await manager.connect(serverId: config.id) }
                                 } else {
                                     manager.connectionStates[config.id]?.status = .disconnected
-                                    manager.backendAvailabilityDidChange()
+                                    manager.serverAvailabilityDidChange()
                                 }
                             },
                             onReconnect: {
-                                Task { await manager.connect(backendId: config.id) }
+                                Task { await manager.connect(serverId: config.id) }
                             },
                             onEdit: {
                                 editingConfig = config
@@ -147,7 +147,7 @@ struct BackendSettingsView: View {
                         )
                     }
                     .onDelete { indexSet in
-                        backendIDsToDelete = indexSet.map { configStore.configurations[$0].id }
+                        serverIDsToDelete = indexSet.map { configStore.configurations[$0].id }
                         showingDeleteConfirmation = true
                     }
                     .onMove(perform: moveConfigs)
@@ -194,7 +194,7 @@ struct BackendSettingsView: View {
     }
 
     private func confirmPendingDeletion() {
-        let ids = backendIDsToDelete
+        let ids = serverIDsToDelete
         clearPendingDeletion()
         for id in ids {
             removeConfig(id: id)
@@ -203,7 +203,7 @@ struct BackendSettingsView: View {
 
     private func clearPendingDeletion() {
         showingDeleteConfirmation = false
-        backendIDsToDelete = []
+        serverIDsToDelete = []
     }
 
     private func moveConfigs(from offsets: IndexSet, to destination: Int) {
@@ -214,15 +214,15 @@ struct BackendSettingsView: View {
     private func removeConfig(id: String) {
         configStore.removeConfiguration(id: id)
         manager.setupProviders()
-        if selectedBackendID == id {
-            selectedBackendID = nil
+        if selectedServerID == id {
+            selectedServerID = nil
         }
     }
 }
 
-struct BackendRowView: View {
-    let config: BackendConfiguration
-    let state: BackendConnectionState?
+struct ServerRowView: View {
+    let config: ServerConfiguration
+    let state: ServerConnectionState?
     let isEnabled: Bool
     let onToggle: (Bool) -> Void
     let onReconnect: () -> Void
@@ -235,7 +235,7 @@ struct BackendRowView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
                             Text(config.name)
-                            BackendBadge(typeName: config.type.displayName)
+                            ServerBadge(typeName: config.type.displayName)
                         }
                         if let baseURL = config.baseURL {
                             Text(baseURL)

@@ -6,8 +6,8 @@ import UniformTypeIdentifiers
 #endif
 
 struct SettingsView: View {
-    let configStore: BackendConfigStore
-    let manager: BackendManager
+    let configStore: ServerConfigStore
+    let manager: ServerManager
     let appModel: AppModel
     @State var pluginStore: PluginStore
     @State var playerState: PlayerState
@@ -19,12 +19,12 @@ struct SettingsView: View {
         Form {
             Section {
                 NavigationLink {
-                    BackendSettingsView(
+                    ServerSettingsView(
                         configStore: configStore,
                         manager: manager
                     )
                 } label: {
-                    Label("バックエンド設定", systemImage: "server.rack")
+                    Label("サーバー設定", systemImage: "server.rack")
                 }
 
                 NavigationLink {

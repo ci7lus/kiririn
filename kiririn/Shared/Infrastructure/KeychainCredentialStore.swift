@@ -2,17 +2,17 @@ import Foundation
 import Security
 
 struct KeychainCredentialStore {
-    private let service = "jp.pronama.kiririn.backend.auth"
-    private let label = "kiririn Backend Credential"
+    private let service = "jp.pronama.kiririn.server.auth"
+    private let label = "kiririn Server Credential"
 
-    func save(_ auth: BackendAuth, forBackendId backendId: String) {
+    func save(_ auth: ServerAuth, forServerId serverId: String) {
         guard case .none = auth else {
             guard let data = try? JSONEncoder().encode(auth) else { return }
 
             let query: [CFString: Any] = [
                 kSecClass: kSecClassGenericPassword,
                 kSecAttrService: service,
-                kSecAttrAccount: backendId,
+                kSecAttrAccount: serverId,
             ]
             let attributes: [CFString: Any] = [
                 kSecValueData: data,
@@ -29,28 +29,28 @@ struct KeychainCredentialStore {
             }
             return
         }
-        delete(forBackendId: backendId)
+        delete(forServerId: serverId)
     }
 
-    func load(forBackendId backendId: String) -> BackendAuth? {
+    func load(forServerId serverId: String) -> ServerAuth? {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
-            kSecAttrAccount: backendId,
+            kSecAttrAccount: serverId,
             kSecReturnData: true,
             kSecMatchLimit: kSecMatchLimitOne,
         ]
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         guard status == errSecSuccess, let data = result as? Data else { return nil }
-        return try? JSONDecoder().decode(BackendAuth.self, from: data)
+        return try? JSONDecoder().decode(ServerAuth.self, from: data)
     }
 
-    func delete(forBackendId backendId: String) {
+    func delete(forServerId serverId: String) {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
-            kSecAttrAccount: backendId,
+            kSecAttrAccount: serverId,
         ]
         SecItemDelete(query as CFDictionary)
     }

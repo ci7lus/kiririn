@@ -189,14 +189,14 @@ struct PlayerWindowView_macOS: View {
     }
 
     private func logWindowContext(trigger: String, playable: Playable?) {
-        let backendID = playable?.backendId ?? "nil"
+        let serverID = playable?.serverId ?? "nil"
         let sourceDescription: String
         switch playable?.source {
         case .liveService(let serviceUniqueId):
             sourceDescription = "liveService(\(serviceUniqueId))"
-        case .recordedFile(let recordId, let variantId, let backendId):
+        case .recordedFile(let recordId, let variantId, let serverId):
             sourceDescription =
-                "recordedFile(recordId=\(recordId), variantId=\(variantId), backendId=\(backendId))"
+                "recordedFile(recordId=\(recordId), variantId=\(variantId), serverId=\(serverId))"
         case .fileURL(let url, _):
             sourceDescription = "fileURL(\(url.absoluteString))"
         case .directURL(let url):
@@ -204,10 +204,10 @@ struct PlayerWindowView_macOS: View {
         case nil:
             sourceDescription = "nil"
         }
-        let backendState =
-            appModel.manager.connectionStates[backendID]?.status.rawValue ?? "unknown"
+        let serverState =
+            appModel.manager.connectionStates[serverID]?.status.rawValue ?? "unknown"
         logger.info(
-            "window context (\(trigger)): playableID=\(playable?.id ?? "nil"), source=\(sourceDescription), backendId=\(backendID), backendState=\(backendState), providerExists=\(appModel.manager.providers[backendID] != nil)"
+            "window context (\(trigger)): playableID=\(playable?.id ?? "nil"), source=\(sourceDescription), serverId=\(serverID), serverState=\(serverState), providerExists=\(appModel.manager.providers[serverID] != nil)"
         )
     }
 }

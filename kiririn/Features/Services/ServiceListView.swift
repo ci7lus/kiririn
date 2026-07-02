@@ -13,7 +13,7 @@ class ServiceListViewModel {
 }
 
 struct ServiceListView: View {
-    let manager: BackendManager
+    let manager: ServerManager
     @State var playerState: PlayerState
     let showsNavigationTitle: Bool
     let showsSearch: Bool
@@ -143,7 +143,7 @@ struct ServiceListView: View {
     }
 
     init(
-        manager: BackendManager,
+        manager: ServerManager,
         playerState: PlayerState,
         showsNavigationTitle: Bool = true,
         showsSearch: Bool = true
@@ -160,7 +160,7 @@ struct ServiceListView: View {
             ContentUnavailableView(
                 "チャンネルがありません",
                 systemImage: "tv",
-                description: Text("バックエンドに接続すると、チャンネルが表示されます")
+                description: Text("サーバーに接続すると、チャンネルが表示されます")
             )
         } else {
             ContentUnavailableView(
@@ -189,7 +189,7 @@ struct ServiceListView: View {
                         } onToggleFavorite: {
                             Task { await manager.toggleFavorite(item.service) }
                         }
-                        .playbackBackendSelectionDialog(
+                        .playbackServerSelectionDialog(
                             service: item.service,
                             selectedService: $serviceSelectionForPlayback,
                             manager: manager
@@ -238,7 +238,7 @@ struct ServiceListView: View {
     }
 
     private func playCandidate(_ service: TVService) async {
-        guard let provider = manager.liveProvider(for: service.backendId) else { return }
+        guard let provider = manager.liveProvider(for: service.serverId) else { return }
         let currentProgram = await manager.currentProgram(for: service)
         guard
             let playable = try? provider.buildLiveStreamPlayable(

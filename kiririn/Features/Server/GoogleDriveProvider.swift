@@ -36,10 +36,10 @@ private struct GoogleDriveCredentials {
     var redirectURI: String { "\(reversedClientID):/oauth2callback" }
 }
 
-final class GoogleDriveProvider: RecordingBackendProvider {
+final class GoogleDriveProvider: RecordingServerProvider {
     private let lock = NSLock()
-    private var _configuration: BackendConfiguration
-    var configuration: BackendConfiguration {
+    private var _configuration: ServerConfiguration
+    var configuration: ServerConfiguration {
         get {
             lock.lock()
             defer { lock.unlock() }
@@ -52,7 +52,7 @@ final class GoogleDriveProvider: RecordingBackendProvider {
         }
     }
 
-    var onConfigurationUpdated: (@Sendable (BackendConfiguration) -> Void)?
+    var onConfigurationUpdated: (@Sendable (ServerConfiguration) -> Void)?
 
     private let logger = Logging.Logger(label: "GoogleDriveProvider")
     private var _cachedFiles: [String: GoogleDriveFile] = [:]
@@ -69,7 +69,7 @@ final class GoogleDriveProvider: RecordingBackendProvider {
         }
     }
 
-    init(configuration: BackendConfiguration) {
+    init(configuration: ServerConfiguration) {
         self._configuration = configuration
     }
 
@@ -188,7 +188,7 @@ final class GoogleDriveProvider: RecordingBackendProvider {
             cachedFiles[file.id] = file
         }
 
-        let records = response.files.map { $0.toRecord(backendId: configuration.id) }
+        let records = response.files.map { $0.toRecord(serverId: configuration.id) }
         return RecordsResult(records: records, nextPageToken: response.nextPageToken)
     }
 
@@ -204,7 +204,7 @@ final class GoogleDriveProvider: RecordingBackendProvider {
             ]
         )
         cachedFiles[file.id] = file
-        return file.toRecord(backendId: configuration.id)
+        return file.toRecord(serverId: configuration.id)
     }
 
     func fetchRecordThumbnail(id: String) async throws -> Data? {
@@ -232,9 +232,9 @@ final class GoogleDriveProvider: RecordingBackendProvider {
         var playable = Playable(
             streamURL: streamURL,
             headers: [:],
-            backendId: configuration.id,
+            serverId: configuration.id,
             source: .recordedFile(
-                recordId: record.id, variantId: variant.id, backendId: record.backendId),
+                recordId: record.id, variantId: variant.id, serverId: record.serverId),
             program: nil,
             service: record.synthesizedService()
         )
@@ -358,7 +358,7 @@ private nonisolated struct GoogleDriveFile: Codable, Sendable {
     let thumbnailLink: String?
     let videoMediaMetadata: GoogleDriveFileVideoMetadata?
 
-    func toRecord(backendId: String) -> Recorded {
+    func toRecord(serverId: String) -> Recorded {
         let duration: Double? = videoMediaMetadata?.durationMillis.flatMap { Double($0) }.map {
             $0 / 1000
         }
@@ -377,7 +377,7 @@ private nonisolated struct GoogleDriveFile: Codable, Sendable {
             variants: [RecordedVariant(id: id, name: "Original")],
             isRecording: false,
             hasThumbnail: thumbnailLink != nil,
-            backendId: backendId
+            serverId: serverId
         )
     }
 }
@@ -421,7 +421,7 @@ private final class AuthenticationCoordinator: NSObject,
 }
 
 struct GoogleDriveAuthEditor: View {
-    @Binding var auth: BackendAuth
+    @Binding var auth: ServerAuth
     @Binding var name: String
 
     @State private var isAuthenticating = false
@@ -450,7 +450,7 @@ struct GoogleDriveAuthEditor: View {
                         } else {
                             Image(systemName: "link")
                         }
-                        Text("Google アカウントでログイン")
+                        Text("Googleアカウントでログイン")
                     }
                 }
                 .disabled(isAuthenticating)

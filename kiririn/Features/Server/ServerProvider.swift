@@ -1,18 +1,18 @@
 import Foundation
 
-protocol BackendProvider {
+protocol ServerProvider {
     func checkConnection() async throws -> String?
     func fetchHeaders() async throws -> [String: String]
 }
 
-protocol LiveBackendProvider: BackendProvider {
+protocol LiveServerProvider: ServerProvider {
     func fetchServices() async throws -> [TVService]
     func fetchPrograms() async throws -> [Program]
     func fetchServiceLogoData(for service: TVService) async throws -> Data?
     func buildLiveStreamPlayable(service: TVService, currentProgram: Program?) throws -> Playable
 }
 
-protocol RecordingBackendProvider: BackendProvider {
+protocol RecordingServerProvider: ServerProvider {
     func fetchRecords(pageToken: String?, limit: Int, keyword: String?) async throws
         -> RecordsResult
     func fetchRecord(id: String) async throws -> Recorded

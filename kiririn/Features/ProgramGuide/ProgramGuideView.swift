@@ -2,7 +2,7 @@ import OrderedCollections
 import SwiftUI
 
 struct ProgramGuideView: View {
-    let manager: BackendManager
+    let manager: ServerManager
     @State var playerState: PlayerState
     @Environment(\.scenePhase) private var scenePhase
     #if os(macOS)
@@ -104,7 +104,7 @@ struct ProgramGuideView: View {
             stride(from: minimumPastDays * 24, through: maximumFutureDays * 24, by: timelineHours))
     }
 
-    init(manager: BackendManager, playerState: PlayerState) {
+    init(manager: ServerManager, playerState: PlayerState) {
         self.manager = manager
         self._playerState = State(initialValue: playerState)
     }
@@ -507,7 +507,7 @@ struct ProgramGuideView: View {
                     id: channel.id, service: channel.service, programs: channel.programs)
             }
 
-        // バックエンド切断等でお気に入りチャンネルの番組が取得できない場合は「すべて」にフォールバック
+        // サーバー切断等でお気に入りチャンネルの番組が取得できない場合は「すべて」にフォールバック
         if displayChannels.isEmpty && selectedBroadcastType == favoriteBroadcastType
             && hasAttemptedLoad
         {
@@ -576,7 +576,7 @@ struct ProgramGuideView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .playbackBackendSelectionDialog(
+            .playbackServerSelectionDialog(
                 service: service,
                 selectedService: $serviceSelectionForPlayback,
                 manager: manager,
@@ -828,7 +828,7 @@ struct ProgramGuideView: View {
     }
 
     private func playCandidate(_ service: TVService) async {
-        guard let provider = manager.liveProvider(for: service.backendId) else { return }
+        guard let provider = manager.liveProvider(for: service.serverId) else { return }
         let currentProgram = await manager.currentProgram(for: service)
         guard
             let playable = try? provider.buildLiveStreamPlayable(

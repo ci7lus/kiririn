@@ -213,7 +213,7 @@ private final class VLCLogForwarder: NSObject, VLCLogging {
 @Observable
 final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     let id: String = UUID().uuidString
-    weak var manager: BackendManager?
+    weak var manager: ServerManager?
     var cacheStore: CacheStore?
     var currentPlayable: Playable?
     var nextProgram: Program?
@@ -373,12 +373,12 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         Task { @MainActor in
             // Fetch fresh auth headers before starting playback.
             // Not gated by isCacheReady; token refresh can happen anytime.
-            if let backendId = currentPlayable?.backendId,
-                let provider = manager?.providers[backendId]
+            if let serverId = currentPlayable?.serverId,
+                let provider = manager?.providers[serverId]
             {
                 do {
                     let freshHeaders = try await provider.fetchHeaders()
-                    if currentPlayable?.backendId == backendId {
+                    if currentPlayable?.serverId == serverId {
                         currentPlayable?.headers = freshHeaders
                     }
                 } catch {
@@ -428,7 +428,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
                 }
             }
 
-            // Refresh backend metadata (record info etc.) asynchronously after playback starts.
+            // Refresh server metadata (record info etc.) asynchronously after playback starts.
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 await self.refreshCurrentPlayableForPlaybackIfReady(
@@ -478,11 +478,11 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     private func refreshCurrentPlayableHeaders() async {
         guard let manager = manager,
             var playable = currentPlayable,
-            let backendId = playable.backendId,
-            let provider = manager.providers[backendId]
+            let serverId = playable.serverId,
+            let provider = manager.providers[serverId]
         else {
             logger.warning(
-                "Failed to fetch fresh headers: No manager, playable, backendId, or provider")
+                "Failed to fetch fresh headers: No manager, playable, serverId, or provider")
             return
         }
         do {
@@ -496,7 +496,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     private func refreshCurrentPlayableForPlaybackIfReady(expectedPlayableID: String) async {
         guard currentPlayable?.id == expectedPlayableID else { return }
         guard let manager, manager.isCacheReady else {
-            logger.debug("skip backend refresh before playback: cache not ready")
+            logger.debug("skip server refresh before playback: cache not ready")
             return
         }
         await refreshCurrentPlayableForPlayback()
@@ -508,9 +508,9 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         else { return }
         guard manager.isCacheReady else { return }
 
-        if case .recordedFile(let recordId, let variantId, let sourceBackendId) = playable.source {
-            let backendId = playable.backendId ?? sourceBackendId
-            if let provider = manager.recordingProvider(for: backendId) {
+        if case .recordedFile(let recordId, let variantId, let sourceServerId) = playable.source {
+            let serverId = playable.serverId ?? sourceServerId
+            if let provider = manager.recordingProvider(for: serverId) {
                 do {
                     let record = try await provider.fetchRecord(id: recordId)
                     let variant =
@@ -533,13 +533,13 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
                 }
             } else {
                 logger.debug(
-                    "Recording provider unavailable for backend=\(backendId); skipping recorded metadata refresh"
+                    "Recording provider unavailable for server=\(serverId); skipping recorded metadata refresh"
                 )
             }
         }
 
-        if let backendId = playable.backendId,
-            let provider = manager.providers[backendId]
+        if let serverId = playable.serverId,
+            let provider = manager.providers[serverId]
         {
             do {
                 playable.headers = try await provider.fetchHeaders()

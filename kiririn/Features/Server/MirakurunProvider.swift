@@ -2,11 +2,11 @@ import ARIBStandardKit
 import Foundation
 import OrderedCollections
 
-final class MirakurunProvider: LiveBackendProvider {
-    let configuration: BackendConfiguration
+final class MirakurunProvider: LiveServerProvider {
+    let configuration: ServerConfiguration
     private let client: APIClient
 
-    init(configuration: BackendConfiguration) {
+    init(configuration: ServerConfiguration) {
         self.configuration = configuration
         self.client = APIClient(configuration: configuration)
     }
@@ -22,12 +22,12 @@ final class MirakurunProvider: LiveBackendProvider {
 
     func fetchServices() async throws -> [TVService] {
         let raw: [MirakurunService] = try await client.request(path: "api/services")
-        return raw.map { $0.toTVService(backendId: configuration.id) }
+        return raw.map { $0.toTVService(serverId: configuration.id) }
     }
 
     func fetchPrograms() async throws -> [Program] {
         let raw: [MirakurunProgram] = try await client.request(path: "api/programs")
-        return raw.map { $0.toProgram(backendId: configuration.id) }
+        return raw.map { $0.toProgram(serverId: configuration.id) }
     }
 
     func fetchServiceLogoData(for service: TVService) async throws -> Data? {
@@ -47,7 +47,7 @@ final class MirakurunProvider: LiveBackendProvider {
         return Playable(
             streamURL: streamURL,
             headers: client.defaultHeaders,
-            backendId: configuration.id,
+            serverId: configuration.id,
             source: .liveService(serviceUniqueId: service.id),
             program: currentProgram,
             service: service
@@ -72,9 +72,9 @@ private nonisolated struct MirakurunService: Codable, Sendable {
     let transportStreamId: Int?
     let channel: MirakurunChannel?
 
-    func toTVService(backendId: String) -> TVService {
+    func toTVService(serverId: String) -> TVService {
         TVService(
-            id: "\(backendId)-\(id)",
+            id: "\(serverId)-\(id)",
             providerIdentifier: "\(id)",
             serviceId: serviceId,
             networkId: networkId,
@@ -89,7 +89,7 @@ private nonisolated struct MirakurunService: Codable, Sendable {
                 }
                 return nil
             }(),
-            backendId: backendId,
+            serverId: serverId,
         )
     }
 }
@@ -112,12 +112,12 @@ private nonisolated struct MirakurunProgram: Codable, Sendable {
     let extended: [String: String]?
     let genres: [MirakurunGenre]?
 
-    func toProgram(backendId: String) -> Program {
+    func toProgram(serverId: String) -> Program {
         let startAt = Date(timeIntervalSince1970: TimeInterval(startAt) / 1000.0)
         let duration = TimeInterval(duration) / 1000.0
         return Program(
             id: "\(id)",
-            backendId: backendId,
+            serverId: serverId,
             eventId: eventId,
             serviceId: serviceId,
             networkId: networkId,

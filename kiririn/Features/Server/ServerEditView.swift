@@ -1,15 +1,15 @@
 import SwiftUI
 
-struct BackendEditView: View {
-    let configStore: BackendConfigStore
-    let manager: BackendManager
-    var existingConfig: BackendConfiguration?
+struct ServerEditView: View {
+    let configStore: ServerConfigStore
+    let manager: ServerManager
+    var existingConfig: ServerConfiguration?
 
     @Environment(\.dismiss) private var dismiss
     @State private var name: String = ""
-    @State private var type: BackendType = .mirakurun
+    @State private var type: ServerType = .mirakurun
     @State private var baseURL: String = ""
-    @State private var auth: BackendAuth = .none
+    @State private var auth: ServerAuth = .none
     @State private var liveEnabled: Bool = true
     @State private var recordingEnabled: Bool = true
     @State private var isTesting = false
@@ -19,7 +19,7 @@ struct BackendEditView: View {
     @State private var programRefreshResult: ManualProgramCatalogRefreshResult?
 
     private var isEditing: Bool { existingConfig != nil }
-    private var manualProgramRefreshBackendID: String? {
+    private var manualProgramRefreshServerID: String? {
         guard let existingConfig, type.supportsLive, liveEnabled else { return nil }
         return existingConfig.id
     }
@@ -28,9 +28,9 @@ struct BackendEditView: View {
         return buildConfig() != existingConfig
     }
     private var isManualProgramRefreshDisabled: Bool {
-        guard let backendId = manualProgramRefreshBackendID else { return true }
+        guard let serverId = manualProgramRefreshServerID else { return true }
         return isTesting || isRefreshingPrograms || hasUnsavedChanges
-            || !configStore.isEnabled(backendId)
+            || !configStore.isEnabled(serverId)
     }
 
     var body: some View {
@@ -40,7 +40,7 @@ struct BackendEditView: View {
                     TextField("名前", text: $name)
                         .textContentType(.name)
                     Picker("タイプ", selection: $type) {
-                        ForEach(BackendType.allCases, id: \.self) { type in
+                        ForEach(ServerType.allCases, id: \.self) { type in
                             Text(type.displayName).tag(type)
                         }
                     }
@@ -92,7 +92,7 @@ struct BackendEditView: View {
                         .padding(.top, 4)
                     }
 
-                    if manualProgramRefreshBackendID != nil {
+                    if manualProgramRefreshServerID != nil {
                         Button {
                             Task { await refreshPrograms() }
                         } label: {
@@ -131,7 +131,7 @@ struct BackendEditView: View {
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle(isEditing ? "バックエンド編集" : "バックエンド追加")
+            .navigationTitle(isEditing ? "サーバー編集" : "サーバー追加")
             #if !os(macOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -186,14 +186,14 @@ struct BackendEditView: View {
     private var authSection: some View {
         switch type {
         case .mirakurun, .epgstation, .konomitv:
-            BackendAuthEditor(auth: $auth)
+            ServerAuthEditor(auth: $auth)
         case .googledrive:
             GoogleDriveAuthEditor(auth: $auth, name: $name)
         }
     }
 
-    private func buildConfig() -> BackendConfiguration {
-        BackendConfiguration(
+    private func buildConfig() -> ServerConfiguration {
+        ServerConfiguration(
             id: existingConfig?.id ?? UUID().uuidString,
             name: name,
             type: type,
@@ -222,7 +222,7 @@ struct BackendEditView: View {
         isTesting = true
         testResult = nil
         let config = buildConfig()
-        let provider: any BackendProvider = {
+        let provider: any ServerProvider = {
             switch config.type {
             case .mirakurun: return MirakurunProvider(configuration: config)
             case .epgstation: return EPGStationProvider(configuration: config)
@@ -247,11 +247,11 @@ struct BackendEditView: View {
     }
 
     private func refreshPrograms() async {
-        guard let backendId = manualProgramRefreshBackendID else { return }
+        guard let serverId = manualProgramRefreshServerID else { return }
 
         isRefreshingPrograms = true
         programRefreshResult = nil
-        programRefreshResult = await manager.refreshProgramsManually(backendId: backendId)
+        programRefreshResult = await manager.refreshProgramsManually(serverId: serverId)
         isRefreshingPrograms = false
     }
 
@@ -262,9 +262,9 @@ struct BackendEditView: View {
         case .refreshed:
             return ("checkmark.circle.fill", .green, "番組情報を再取得しました")
         case .queuedUntilWiFi:
-            return ("wifi.slash", .orange, "WiFi 接続時に番組情報を再取得します")
+            return ("wifi.slash", .orange, "WiFi接続時に番組情報を再取得します")
         case .unavailable:
-            return ("xmark.circle.fill", .red, "このバックエンドでは番組情報を再取得できません")
+            return ("xmark.circle.fill", .red, "このサーバーでは番組情報を再取得できません")
         case .failed(let message):
             return ("xmark.circle.fill", .red, message)
         }
@@ -280,18 +280,18 @@ struct BackendEditView: View {
         manager.setupProviders()
         if configStore.isEnabled(config.id) {
             Task {
-                await manager.connect(backendId: config.id, programRefreshPolicy: .automaticIfDue)
+                await manager.connect(serverId: config.id, programRefreshPolicy: .automaticIfDue)
             }
         } else {
             manager.connectionStates[config.id]?.status = .disconnected
             manager.connectionStates[config.id]?.lastError = nil
         }
-        manager.backendAvailabilityDidChange()
+        manager.serverAvailabilityDidChange()
         dismiss()
     }
 }
 
-private enum BackendAuthMethod: String, CaseIterable, Identifiable {
+private enum ServerAuthMethod: String, CaseIterable, Identifiable {
     case none
     case basic
     case bearer
@@ -307,9 +307,9 @@ private enum BackendAuthMethod: String, CaseIterable, Identifiable {
     }
 }
 
-private struct BackendAuthEditor: View {
-    @Binding var auth: BackendAuth
-    @State private var method: BackendAuthMethod = .none
+private struct ServerAuthEditor: View {
+    @Binding var auth: ServerAuth
+    @State private var method: ServerAuthMethod = .none
     @State private var username: String = ""
     @State private var password: String = ""
     @State private var token: String = ""
@@ -317,7 +317,7 @@ private struct BackendAuthEditor: View {
     var body: some View {
         Section("認証") {
             Picker("方式", selection: $method) {
-                ForEach(BackendAuthMethod.allCases) { method in
+                ForEach(ServerAuthMethod.allCases) { method in
                     Text(method.title).tag(method)
                 }
             }

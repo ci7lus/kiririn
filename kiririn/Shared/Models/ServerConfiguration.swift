@@ -1,6 +1,6 @@
 import Foundation
 
-nonisolated enum BackendType: String, Codable, Sendable, CaseIterable {
+nonisolated enum ServerType: String, Codable, Sendable, CaseIterable {
     case mirakurun
     case epgstation
     case googledrive
@@ -22,7 +22,7 @@ nonisolated enum BackendType: String, Codable, Sendable, CaseIterable {
         }
     }
 
-    var supportedFeatures: [BackendFeature] {
+    var supportedFeatures: [ServerFeature] {
         switch self {
         case .mirakurun:
             return [.live]
@@ -44,30 +44,30 @@ nonisolated enum BackendType: String, Codable, Sendable, CaseIterable {
     }
 }
 
-nonisolated enum BackendFeature: String, Codable, Sendable {
+nonisolated enum ServerFeature: String, Codable, Sendable {
     case live
     case recording
 }
 
-nonisolated enum BackendAuth: Codable, Equatable, Sendable {
+nonisolated enum ServerAuth: Codable, Equatable, Sendable {
     case none
     case basic(username: String, password: String)
     case bearer(token: String)
     case oauth2(accessToken: String?, refreshToken: String?, expiryDate: Date?)
 }
 
-nonisolated struct BackendConfiguration: Codable, Identifiable, Sendable, Equatable {
+nonisolated struct ServerConfiguration: Codable, Identifiable, Sendable, Equatable {
     var id: String
     var name: String
-    var type: BackendType
+    var type: ServerType
     var baseURL: String?
-    var auth: BackendAuth
+    var auth: ServerAuth
     var customHeaders: [String: String]
     var liveEnabled: Bool
     var recordingEnabled: Bool
 
-    var features: [BackendFeature] {
-        var result: [BackendFeature] = []
+    var features: [ServerFeature] {
+        var result: [ServerFeature] = []
         if supports(.live) && liveEnabled {
             result.append(.live)
         }
@@ -80,9 +80,9 @@ nonisolated struct BackendConfiguration: Codable, Identifiable, Sendable, Equata
     init(
         id: String = UUID().uuidString,
         name: String,
-        type: BackendType,
+        type: ServerType,
         baseURL: String?,
-        auth: BackendAuth = .none,
+        auth: ServerAuth = .none,
         customHeaders: [String: String] = [:],
         liveEnabled: Bool? = nil,
         recordingEnabled: Bool? = nil
@@ -110,13 +110,13 @@ nonisolated struct BackendConfiguration: Codable, Identifiable, Sendable, Equata
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let type = try container.decode(BackendType.self, forKey: .type)
+        let type = try container.decode(ServerType.self, forKey: .type)
 
         self.id = try container.decode(String.self, forKey: .id)
         self.name = try container.decode(String.self, forKey: .name)
         self.type = type
         self.baseURL = try container.decodeIfPresent(String.self, forKey: .baseURL)
-        self.auth = try container.decodeIfPresent(BackendAuth.self, forKey: .auth) ?? .none
+        self.auth = try container.decodeIfPresent(ServerAuth.self, forKey: .auth) ?? .none
         self.customHeaders =
             try container.decodeIfPresent([String: String].self, forKey: .customHeaders) ?? [:]
         self.liveEnabled =
@@ -126,7 +126,7 @@ nonisolated struct BackendConfiguration: Codable, Identifiable, Sendable, Equata
             ?? type.supportsRecording
     }
 
-    func supports(_ feature: BackendFeature) -> Bool {
+    func supports(_ feature: ServerFeature) -> Bool {
         type.supportedFeatures.contains(feature)
     }
 

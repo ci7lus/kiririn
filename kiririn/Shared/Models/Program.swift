@@ -8,7 +8,7 @@ nonisolated struct Program: Codable, Identifiable, Sendable, Equatable, Hashable
     PersistableRecord
 {
     var id: String
-    var backendId: String
+    var serverId: String
 
     var eventId: Int?
     var serviceId: Int
@@ -25,7 +25,7 @@ nonisolated struct Program: Codable, Identifiable, Sendable, Equatable, Hashable
 
     enum Columns {
         static let id = Column(CodingKeys.id)
-        static let backendId = Column(CodingKeys.backendId)
+        static let serverId = Column(CodingKeys.serverId)
         static let eventId = Column(CodingKeys.eventId)
         static let serviceId = Column(CodingKeys.serviceId)
         static let networkId = Column(CodingKeys.networkId)

@@ -1,12 +1,12 @@
 import SwiftUI
 
 struct RecordsListView: View {
-    let manager: BackendManager
+    let manager: ServerManager
     @Binding var searchText: String
     let showsNavigationTitle: Bool
     let showsSearch: Bool
     @State var playerState: PlayerState
-    @AppStorage("records.lastSelectedBackendId") private var selectedBackendId = ""
+    @AppStorage("records.lastSelectedServerId") private var selectedServerId = ""
     @State private var showingURLInput = false
     @State private var showingFilePicker = false
     @State private var urlInputText = ""
@@ -16,52 +16,52 @@ struct RecordsListView: View {
     #endif
     @Environment(\.isTabActive) private var isTabActive
 
-    private var recordingBackendIds: [String] {
-        let _ = manager.backendSyncCount
+    private var recordingServerIds: [String] {
+        let _ = manager.serverSyncCount
         var ids = ["download"]
         ids.append(
-            contentsOf: manager.recordingBackendIds.filter {
-                manager.isBackendEnabled($0) && manager.recordingProvider(for: $0) != nil
+            contentsOf: manager.recordingServerIds.filter {
+                manager.isServerEnabled($0) && manager.recordingProvider(for: $0) != nil
             })
         return ids
     }
 
-    private var currentBackendId: String? {
-        if !selectedBackendId.isEmpty, recordingBackendIds.contains(selectedBackendId) {
-            return selectedBackendId
+    private var currentServerId: String? {
+        if !selectedServerId.isEmpty, recordingServerIds.contains(selectedServerId) {
+            return selectedServerId
         }
-        return recordingBackendIds.first
+        return recordingServerIds.first
     }
 
     var body: some View {
         recordsContent
             .navigationTitle(showsNavigationTitle && isTabActive ? "録画" : "")
             .task {
-                ensureSelectedBackend()
+                ensureSelectedServer()
             }
-            .onChange(of: recordingBackendIds) { _, _ in
-                ensureSelectedBackend()
+            .onChange(of: recordingServerIds) { _, _ in
+                ensureSelectedServer()
             }
             .toolbar {
                 if isTabActive {
-                    if !recordingBackendIds.isEmpty {
+                    if !recordingServerIds.isEmpty {
                         ToolbarItem(placement: .principal) {
                             HStack(spacing: 2) {
-                                Picker("バックエンド", selection: selectedBackendBinding) {
-                                    ForEach(recordingBackendIds, id: \.self) { backendId in
-                                        if backendId == "download" {
+                                Picker("サーバー", selection: selectedServerBinding) {
+                                    ForEach(recordingServerIds, id: \.self) { serverId in
+                                        if serverId == "download" {
                                             Text("ダウンロード")
-                                                .tag(backendId)
+                                                .tag(serverId)
                                         } else {
-                                            Text(manager.backendName(backendId))
-                                                .tag(backendId)
+                                            Text(manager.serverName(serverId))
+                                                .tag(serverId)
                                         }
                                     }
                                 }
                                 .pickerStyle(.menu)
-                                if let backendId = currentBackendId, backendId != "download" {
-                                    BackendBadge(
-                                        typeName: manager.backendTypeName(backendId))
+                                if let serverId = currentServerId, serverId != "download" {
+                                    ServerBadge(
+                                        typeName: manager.serverTypeName(serverId))
                                 }
                             }
                             .padding(.horizontal, 2)
@@ -126,8 +126,8 @@ struct RecordsListView: View {
 
     @ViewBuilder
     private var recordsContent: some View {
-        if let backendId = currentBackendId {
-            if backendId == "download" {
+        if let serverId = currentServerId {
+            if serverId == "download" {
                 RecordDownloadView(
                     manager: manager,
                     playerState: playerState,
@@ -138,23 +138,23 @@ struct RecordsListView: View {
                 )
                 .id("download")
             } else {
-                BackendRecordsView(
+                ServerRecordsView(
                     manager: manager,
                     playerState: playerState,
-                    backendId: backendId,
+                    serverId: serverId,
                     refreshTrigger: refreshTrigger,
                     searchText: $searchText,
                     showsNavigationTitle: showsNavigationTitle,
                     showsSearch: showsSearch,
-                    viewModel: AppModel.shared.recordingsViewModel(for: backendId)
+                    viewModel: AppModel.shared.recordingsViewModel(for: serverId)
                 )
-                .id(backendId)
+                .id(serverId)
                 .refreshable {
                     refreshTrigger += 1
                 }
             }
         } else {
-            ContentUnavailableView("録画バックエンドがありません", systemImage: "internaldrive")
+            ContentUnavailableView("録画サーバーがありません", systemImage: "internaldrive")
         }
     }
 
@@ -162,17 +162,17 @@ struct RecordsListView: View {
         recordingsAddMenuPlacement
     }
 
-    private var selectedBackendBinding: Binding<String> {
+    private var selectedServerBinding: Binding<String> {
         Binding(
-            get: { currentBackendId ?? "" },
-            set: { selectedBackendId = $0 }
+            get: { currentServerId ?? "" },
+            set: { selectedServerId = $0 }
         )
     }
 
-    private func ensureSelectedBackend() {
-        guard let first = recordingBackendIds.first else { return }
-        if !selectedBackendId.isEmpty, recordingBackendIds.contains(selectedBackendId) { return }
-        selectedBackendId = first
+    private func ensureSelectedServer() {
+        guard let first = recordingServerIds.first else { return }
+        if !selectedServerId.isEmpty, recordingServerIds.contains(selectedServerId) { return }
+        selectedServerId = first
     }
 
     private func handleFileImport(_ result: Result<[URL], Error>) {

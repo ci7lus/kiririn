@@ -73,7 +73,7 @@ nonisolated struct TVService: Codable, Identifiable, Sendable, Hashable, Fetchab
 
     var channel: Channel?
 
-    var backendId: String
+    var serverId: String
     var favoritedAt: Date? = nil
 
     private enum CodingKeys: String, CodingKey {
@@ -87,7 +87,7 @@ nonisolated struct TVService: Codable, Identifiable, Sendable, Hashable, Fetchab
         case remoteControlKeyId
         case hasLogoData
         case channel
-        case backendId
+        case serverId
     }
 
     var unifiedServiceKey: String {
@@ -117,7 +117,7 @@ nonisolated struct TVService: Codable, Identifiable, Sendable, Hashable, Fetchab
         static let hasLogoData = Column(CodingKeys.hasLogoData)
         static let remoteControlKeyId = Column(CodingKeys.remoteControlKeyId)
         static let channel = Column(CodingKeys.channel)
-        static let backendId = Column(CodingKeys.backendId)
+        static let serverId = Column(CodingKeys.serverId)
     }
 }
 

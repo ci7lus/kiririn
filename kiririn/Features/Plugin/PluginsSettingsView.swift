@@ -133,7 +133,7 @@ struct PluginsSettingsView: View {
                 )
             #endif
         }
-        .navigationTitle("プラグイン")
+        .navigationTitle("プラグイン設定")
         .sheet(item: $editingPlugin) { plugin in
             PluginEditSheet(
                 appModel: appModel,

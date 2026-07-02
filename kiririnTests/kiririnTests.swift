@@ -40,7 +40,7 @@ struct KiririnTests {
     @Test func programAndRecordedKeepRawValuesForBroadcastTextRendering() {
         let program = Program(
             id: "program",
-            backendId: "backend",
+            serverId: "server",
             eventId: 1,
             serviceId: 10,
             networkId: 20,
@@ -65,7 +65,7 @@ struct KiririnTests {
             variants: [],
             isRecording: false,
             hasThumbnail: false,
-            backendId: "backend"
+            serverId: "server"
         )
 
         #expect(program.name == "🈑番組🆞")
@@ -85,7 +85,7 @@ struct KiririnTests {
     @Test func playableUsesRawValuesForBroadcastTextRendering() {
         let program = Program(
             id: "program",
-            backendId: "backend",
+            serverId: "server",
             eventId: 1,
             serviceId: 10,
             networkId: 20,
@@ -112,7 +112,7 @@ struct KiririnTests {
                 remoteControlKeyId: nil,
                 hasLogoData: false,
                 channel: nil,
-                backendId: "backend"
+                serverId: "server"
             )
         )
 
@@ -150,7 +150,7 @@ struct KiririnTests {
     @Test func playableProgramOverrideReplacesExtendedEntries() {
         let base = Program(
             id: "program",
-            backendId: "backend",
+            serverId: "server",
             eventId: 1,
             serviceId: 10,
             networkId: 20,
@@ -177,7 +177,7 @@ struct KiririnTests {
     @Test func playableProgramOverrideCanClearExtendedEntries() {
         let base = Program(
             id: "program",
-            backendId: "backend",
+            serverId: "server",
             eventId: 1,
             serviceId: 10,
             networkId: 20,

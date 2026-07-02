@@ -6,13 +6,13 @@ import Testing
 
 struct StoreBehaviorTests {
 
-    @Test func backendConfigStorePersistsConfigurationsAndEnabledStates() {
+    @Test func serverConfigStorePersistsConfigurationsAndEnabledStates() {
         let (defaults, suiteName) = makeIsolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let store = BackendConfigStore(localDefaults: defaults)
-        let config = BackendConfiguration(
-            id: "backend-1",
+        let store = ServerConfigStore(localDefaults: defaults)
+        let config = ServerConfiguration(
+            id: "server-1",
             name: "Main",
             type: .epgstation,
             baseURL: "https://example.com"
@@ -21,21 +21,21 @@ struct StoreBehaviorTests {
         store.addConfiguration(config)
         store.setEnabled(false, for: config.id)
 
-        let reloaded = BackendConfigStore(localDefaults: defaults)
+        let reloaded = ServerConfigStore(localDefaults: defaults)
         #expect(reloaded.configurations == [config])
         #expect(!reloaded.isEnabled(config.id))
     }
 
-    @Test func backendConfigStoreCanMoveUpdateAndRemoveConfigurations() {
+    @Test func serverConfigStoreCanMoveUpdateAndRemoveConfigurations() {
         let (defaults, suiteName) = makeIsolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let store = BackendConfigStore(localDefaults: defaults)
-        let first = BackendConfiguration(
+        let store = ServerConfigStore(localDefaults: defaults)
+        let first = ServerConfiguration(
             id: "a", name: "A", type: .mirakurun, baseURL: "https://a.example")
-        let second = BackendConfiguration(
+        let second = ServerConfiguration(
             id: "b", name: "B", type: .epgstation, baseURL: "https://b.example")
-        let third = BackendConfiguration(id: "c", name: "C", type: .googledrive, baseURL: nil)
+        let third = ServerConfiguration(id: "c", name: "C", type: .googledrive, baseURL: nil)
 
         store.addConfiguration(first)
         store.addConfiguration(second)
@@ -53,7 +53,7 @@ struct StoreBehaviorTests {
         store.updateConfiguration(updatedSecond)
         store.removeConfiguration(id: "c")
 
-        let reloaded = BackendConfigStore(localDefaults: defaults)
+        let reloaded = ServerConfigStore(localDefaults: defaults)
         #expect(reloaded.configurations.map(\.id) == ["b", "a"])
         #expect(reloaded.configurations.first?.name == "B Updated")
         #expect(reloaded.isEnabled("c"))
@@ -65,18 +65,18 @@ struct StoreBehaviorTests {
 
         await store.saveLastProgramFullFetchDate(
             Date(timeIntervalSince1970: 1_234),
-            backendId: "backend-1"
+            serverId: "server-1"
         )
         await store.saveLastProgramFullFetchDate(
             Date(timeIntervalSince1970: 5_678),
-            backendId: "backend-2"
+            serverId: "server-2"
         )
 
         let reloaded = CacheStore(databaseQueue: dbQueue)
         let dates = await reloaded.loadLastProgramFullFetchDates()
 
-        #expect(dates["backend-1"] == Date(timeIntervalSince1970: 1_234))
-        #expect(dates["backend-2"] == Date(timeIntervalSince1970: 5_678))
+        #expect(dates["server-1"] == Date(timeIntervalSince1970: 1_234))
+        #expect(dates["server-2"] == Date(timeIntervalSince1970: 5_678))
     }
 
     @MainActor @Test func cacheStorePersistsFavoriteServiceDisplayOrder() async throws {
@@ -94,7 +94,7 @@ struct StoreBehaviorTests {
             remoteControlKeyId: 1,
             hasLogoData: false,
             channel: .init(id: "gr011", type: "GR"),
-            backendId: "backend-1"
+            serverId: "server-1"
         )
         let second = TVService(
             id: "service-2",
@@ -107,7 +107,7 @@ struct StoreBehaviorTests {
             remoteControlKeyId: 2,
             hasLogoData: false,
             channel: .init(id: "gr021", type: "GR"),
-            backendId: "backend-1"
+            serverId: "server-1"
         )
         await store.saveFavoriteService(first)
         await store.saveFavoriteService(second)

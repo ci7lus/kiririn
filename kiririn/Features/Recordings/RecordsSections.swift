@@ -1,9 +1,9 @@
 import SwiftUI
 
-struct BackendRecordsView: View {
-    let manager: BackendManager
+struct ServerRecordsView: View {
+    let manager: ServerManager
     @State var playerState: PlayerState
-    let backendId: String
+    let serverId: String
     let refreshTrigger: Int
     @Binding var searchText: String
     let showsNavigationTitle: Bool
@@ -20,7 +20,7 @@ struct BackendRecordsView: View {
 
     private var visibleRecords: [Recorded] {
         viewModel.records.filter {
-            $0.backendId == backendId && manager.isBackendEnabled($0.backendId)
+            $0.serverId == serverId && manager.isServerEnabled($0.serverId)
         }
     }
 
@@ -57,7 +57,7 @@ struct BackendRecordsView: View {
                         List {
                             ForEach(visibleRecords) { record in
                                 let recordDownloadID = RecordDownloadManager.localRecordID(
-                                    backendId: record.backendId,
+                                    serverId: record.serverId,
                                     recordID: record.id
                                 )
                                 RecordRowView(
@@ -153,7 +153,7 @@ struct BackendRecordsView: View {
 
     private func playRecord(_ record: Recorded) {
         guard let variant = record.variants.first,
-            let provider = manager.recordingProvider(for: record.backendId)
+            let provider = manager.recordingProvider(for: record.serverId)
         else { return }
         guard let playable = try? provider.buildRecordedPlayable(record: record, variant: variant)
         else {
@@ -190,7 +190,7 @@ struct BackendRecordsView: View {
         viewModel.searchText = searchText
         await viewModel.loadRecords(
             manager: manager,
-            backendId: backendId,
+            serverId: serverId,
             reset: reset
         )
         if let cacheStore = AppModel.shared.cacheStore {
@@ -204,7 +204,7 @@ struct BackendRecordsView: View {
         viewModel.searchText = searchText
         await viewModel.loadRecords(
             manager: manager,
-            backendId: backendId,
+            serverId: serverId,
             reset: true,
             force: true
         )
@@ -229,7 +229,7 @@ private struct RecordsSearchableModifier: ViewModifier {
 }
 
 struct RecordDownloadView: View {
-    let manager: BackendManager
+    let manager: ServerManager
     @State var playerState: PlayerState
     let refreshTrigger: Int
     @Binding var searchText: String

@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct BackendBadge: View {
+struct ServerBadge: View {
     let typeName: String
 
     var body: some View {

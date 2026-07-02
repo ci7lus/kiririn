@@ -35,11 +35,11 @@ class CacheStore {
         try? Self.migrator.migrate(databaseQueue)
     }
 
-    func cacheServices(_ services: [TVService], backendId: String) async {
+    func cacheServices(_ services: [TVService], serverId: String) async {
         do {
             try await self.dbQueue.write { db in
                 try TVService
-                    .filter(TVService.Columns.backendId == backendId)
+                    .filter(TVService.Columns.serverId == serverId)
                     .deleteAll(db)
                 for service in services {
                     try service.insert(db, onConflict: .replace)
@@ -50,11 +50,11 @@ class CacheStore {
         }
     }
 
-    func loadCachedServices(backendId: String) async -> [TVService] {
+    func loadCachedServices(serverId: String) async -> [TVService] {
         guard
             let cached = try? await dbQueue.read({ db in
                 try TVService
-                    .filter(TVService.Columns.backendId == backendId)
+                    .filter(TVService.Columns.serverId == serverId)
                     .fetchAll(db)
             })
         else { return [] }
@@ -137,15 +137,15 @@ class CacheStore {
         }
     }
 
-    func cachePrograms(_ programs: [Program], backendId: String) async {
+    func cachePrograms(_ programs: [Program], serverId: String) async {
         let now = Date()
         let twoDaysAgo = now.addingTimeInterval(-2 * 24 * 60 * 60)
         do {
             try await self.dbQueue.write { db in
                 try db.execute(
                     sql:
-                        "DELETE FROM program WHERE backendId = :backendId AND (endAt > :now OR startAt < :twoDaysAgo)",
-                    arguments: ["backendId": backendId, "now": now, "twoDaysAgo": twoDaysAgo]
+                        "DELETE FROM program WHERE serverId = :serverId AND (endAt > :now OR startAt < :twoDaysAgo)",
+                    arguments: ["serverId": serverId, "now": now, "twoDaysAgo": twoDaysAgo]
                 )
 
                 for var program in programs {
@@ -153,10 +153,10 @@ class CacheStore {
                     try program.insert(db, onConflict: .replace)
                 }
 
-                try Self.upsertLastProgramFullFetchDate(now, backendId: backendId, in: db)
+                try Self.upsertLastProgramFullFetchDate(now, serverId: serverId, in: db)
             }
         } catch {
-            self.logger.error("Failed to cache programs for backend \(backendId): \(error)")
+            self.logger.error("Failed to cache programs for server \(serverId): \(error)")
         }
     }
 
@@ -166,13 +166,13 @@ class CacheStore {
                 let rows = try Row.fetchAll(
                     db,
                     sql:
-                        "SELECT backendId, lastSuccessfulProgramFullFetchAt FROM program_fetch_status"
+                        "SELECT serverId, lastSuccessfulProgramFullFetchAt FROM program_fetch_status"
                 )
                 return Dictionary(
                     uniqueKeysWithValues: rows.map { row in
-                        let backendId: String = row["backendId"]
+                        let serverId: String = row["serverId"]
                         let fetchedAt: Date = row["lastSuccessfulProgramFullFetchAt"]
-                        return (backendId, fetchedAt)
+                        return (serverId, fetchedAt)
                     })
             })
         else {
@@ -182,14 +182,14 @@ class CacheStore {
         return dates
     }
 
-    func saveLastProgramFullFetchDate(_ date: Date, backendId: String) async {
+    func saveLastProgramFullFetchDate(_ date: Date, serverId: String) async {
         do {
             try await dbQueue.write { db in
-                try Self.upsertLastProgramFullFetchDate(date, backendId: backendId, in: db)
+                try Self.upsertLastProgramFullFetchDate(date, serverId: serverId, in: db)
             }
         } catch {
             logger.error(
-                "Failed to save last program full fetch date for backend \(backendId): \(error)")
+                "Failed to save last program full fetch date for server \(serverId): \(error)")
         }
     }
 
@@ -248,13 +248,13 @@ class CacheStore {
                     FROM (
                         SELECT *,
                                ROW_NUMBER() OVER (
-                                   PARTITION BY backendId, serviceId, networkId, startAt
+                                   PARTITION BY serverId, serviceId, networkId, startAt
                                    ORDER BY updatedAt DESC
                                ) AS rn
                         FROM program
                     ) p
                     INNER JOIN service s
-                        ON s.backendId = p.backendId
+                        ON s.serverId = p.serverId
                        AND s.serviceId = p.serviceId
                        AND s.networkId = p.networkId
                     WHERE p.rn = 1
@@ -709,17 +709,17 @@ extension CacheStore {
 
     nonisolated fileprivate static func upsertLastProgramFullFetchDate(
         _ date: Date,
-        backendId: String,
+        serverId: String,
         in db: Database
     ) throws {
         try db.execute(
             sql: """
-                INSERT INTO program_fetch_status (backendId, lastSuccessfulProgramFullFetchAt)
-                VALUES (:backendId, :fetchedAt)
-                ON CONFLICT(backendId)
+                INSERT INTO program_fetch_status (serverId, lastSuccessfulProgramFullFetchAt)
+                VALUES (:serverId, :fetchedAt)
+                ON CONFLICT(serverId)
                 DO UPDATE SET lastSuccessfulProgramFullFetchAt = excluded.lastSuccessfulProgramFullFetchAt
                 """,
-            arguments: ["backendId": backendId, "fetchedAt": date]
+            arguments: ["serverId": serverId, "fetchedAt": date]
         )
     }
 
@@ -829,6 +829,45 @@ extension CacheStore {
             try db.create(
                 index: "index_program_on_serviceId_networkId_startAt", on: "program",
                 columns: ["serviceId", "networkId", "startAt"])
+        }
+
+        migrator.registerMigration("rename-server-id-columns-20260702") { db in
+            try db.execute(sql: "DROP INDEX IF EXISTS index_program_on_backendId")
+
+            let serviceColumns = Set(
+                try Row.fetchAll(db, sql: "PRAGMA table_info(service)")
+                    .map { row -> String in row["name"] })
+            if serviceColumns.contains("backendId"), !serviceColumns.contains("serverId") {
+                try db.execute(sql: "ALTER TABLE service RENAME COLUMN backendId TO serverId")
+            }
+
+            let programColumns = Set(
+                try Row.fetchAll(db, sql: "PRAGMA table_info(program)")
+                    .map { row -> String in row["name"] })
+            if programColumns.contains("backendId"), !programColumns.contains("serverId") {
+                try db.execute(sql: "ALTER TABLE program RENAME COLUMN backendId TO serverId")
+            }
+
+            let localRecordColumns = Set(
+                try Row.fetchAll(db, sql: "PRAGMA table_info(local_record)")
+                    .map { row -> String in row["name"] })
+            if localRecordColumns.contains("backendId"), !localRecordColumns.contains("serverId") {
+                try db.execute(sql: "ALTER TABLE local_record RENAME COLUMN backendId TO serverId")
+            }
+
+            let programFetchStatusColumns = Set(
+                try Row.fetchAll(db, sql: "PRAGMA table_info(program_fetch_status)")
+                    .map { row -> String in row["name"] })
+            if programFetchStatusColumns.contains("backendId"),
+                !programFetchStatusColumns.contains("serverId")
+            {
+                try db.execute(
+                    sql: "ALTER TABLE program_fetch_status RENAME COLUMN backendId TO serverId")
+            }
+
+            try db.execute(
+                sql: "CREATE INDEX IF NOT EXISTS index_program_on_serverId ON program(serverId)"
+            )
         }
 
         return migrator

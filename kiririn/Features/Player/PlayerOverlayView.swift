@@ -28,7 +28,7 @@ struct PlayerOverlayView_iOS: View {
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
     #endif
-    let manager: BackendManager
+    let manager: ServerManager
     let pluginStore: PluginStore
     let appModel: AppModel
     let showsLowerContext: Bool
@@ -70,7 +70,7 @@ struct PlayerOverlayView_iOS: View {
 
     init(
         playerState: PlayerState,
-        manager: BackendManager,
+        manager: ServerManager,
         pluginStore: PluginStore,
         appModel: AppModel? = nil,
         showsLowerContext: Bool = true
@@ -3126,7 +3126,7 @@ private struct PlayerOverlayPreview: View {
         let startAt = Date()
         return Program(
             id: "preview-program",
-            backendId: "preview",
+            serverId: "preview",
             eventId: 1,
             serviceId: 1,
             networkId: 1,

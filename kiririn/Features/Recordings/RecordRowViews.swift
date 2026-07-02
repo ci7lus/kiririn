@@ -7,7 +7,7 @@ struct RecordRowView: View {
     let playbackPosition: Float?
     let downloadProgress: Double?
     let onCancelDownload: (() -> Void)?
-    let manager: BackendManager
+    let manager: ServerManager
     let onTap: () -> Void
 
     @State private var decodedThumbnail: Image?
@@ -173,7 +173,7 @@ struct RecordDownloadRowView: View {
     let playbackPosition: Float?
     let downloadProgress: Double?
     let isDeleting: Bool
-    let manager: BackendManager
+    let manager: ServerManager
     let onTap: () -> Void
     let onCancel: () -> Void
     let onDelete: () -> Void

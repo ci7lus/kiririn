@@ -12,13 +12,13 @@ import Network
     typealias PlatformImage = Any
 #endif
 
-enum BackendManagerError: LocalizedError {
-    case recordingBackendUnavailable
+enum ServerManagerError: LocalizedError {
+    case recordingServerUnavailable
 
     var errorDescription: String? {
         switch self {
-        case .recordingBackendUnavailable:
-            return "バックエンドが利用できません"
+        case .recordingServerUnavailable:
+            return "サーバーが利用できません"
         }
     }
 }
@@ -59,28 +59,28 @@ nonisolated enum ProgramCatalogRefreshExecutionResult: Sendable, Equatable {
 #endif
 
 @Observable
-class BackendManager {
+class ServerManager {
     private struct FavoriteServiceState: Sendable {
         var displayOrder: Int?
     }
 
-    private let logger = Logging.Logger(label: "BackendManager")
+    private let logger = Logging.Logger(label: "ServerManager")
     private let programFullFetchInterval: TimeInterval = 12 * 60 * 60
     private let periodicProgramRefreshCheckInterval: Duration = .seconds(60 * 60)
-    let configStore: BackendConfigStore
-    var connectionStates: [String: BackendConnectionState] = [:]
-    var providers: [String: any BackendProvider] = [:]
-    private var providerConfigurations: [String: BackendConfiguration] = [:]
+    let configStore: ServerConfigStore
+    var connectionStates: [String: ServerConnectionState] = [:]
+    var providers: [String: any ServerProvider] = [:]
+    private var providerConfigurations: [String: ServerConfiguration] = [:]
 
     private var cacheStore: CacheStore!
     private var serviceVariantsByAggregatedServiceId: [String: [TVService]] = [:]
     private var servicesByUniqueId: [String: TVService] = [:]
-    private var cachedServicesByBackend: [String: [TVService]] = [:]
+    private var cachedServicesByServer: [String: [TVService]] = [:]
     private var favoriteStatesByUnifiedKey: [String: FavoriteServiceState] = [:]
     @ObservationIgnored
-    private var lastProgramFullFetchDatesByBackend: [String: Date] = [:]
+    private var lastProgramFullFetchDatesByServer: [String: Date] = [:]
     @ObservationIgnored
-    private var pendingProgramFullFetchBackendIDs: Set<String> = []
+    private var pendingProgramFullFetchServerIDs: Set<String> = []
     @ObservationIgnored
     private var periodicProgramRefreshTask: Task<Void, Never>?
     @ObservationIgnored
@@ -91,7 +91,7 @@ class BackendManager {
         @ObservationIgnored
         private var initialNetworkStateContinuations: [CheckedContinuation<Void, Never>] = []
         @ObservationIgnored
-        private let networkMonitorQueue = DispatchQueue(label: "BackendManager.NetworkPathMonitor")
+        private let networkMonitorQueue = DispatchQueue(label: "ServerManager.NetworkPathMonitor")
         @ObservationIgnored
         private var programFetchNetworkState: ProgramFetchNetworkState = .unresolved
     #endif
@@ -108,9 +108,9 @@ class BackendManager {
     var loadingTaskCount = 0
     var isDataLoading: Bool { loadingTaskCount > 0 }
     private(set) var communicationFailureCount = 0
-    private(set) var backendSyncCount = 0
+    private(set) var serverSyncCount = 0
 
-    init(configStore: BackendConfigStore) {
+    init(configStore: ServerConfigStore) {
         self.configStore = configStore
         setupProviders()
         #if !os(macOS)
@@ -133,12 +133,12 @@ class BackendManager {
     }
 
     private func loadCachedData() async {
-        var servicesByBackend: [String: [TVService]] = [:]
+        var servicesByServer: [String: [TVService]] = [:]
 
         for config in configStore.configurations {
-            servicesByBackend[config.id] = await cacheStore.loadCachedServices(backendId: config.id)
+            servicesByServer[config.id] = await cacheStore.loadCachedServices(serverId: config.id)
         }
-        cachedServicesByBackend = servicesByBackend
+        cachedServicesByServer = servicesByServer
         favoriteStatesByUnifiedKey = Dictionary(
             uniqueKeysWithValues: await cacheStore.loadFavoriteServices().map { favorite in
                 (
@@ -149,7 +149,7 @@ class BackendManager {
                 )
             }
         )
-        lastProgramFullFetchDatesByBackend = await cacheStore.loadLastProgramFullFetchDates()
+        lastProgramFullFetchDatesByServer = await cacheStore.loadLastProgramFullFetchDates()
 
         rebuildAggregatedData()
 
@@ -174,8 +174,8 @@ class BackendManager {
                 providerConfigurations[config.id] = config
             }
             if connectionStates[config.id] == nil {
-                let state = BackendConnectionState(
-                    backendId: config.id,
+                let state = ServerConnectionState(
+                    serverId: config.id,
                     isEnabled: configStore.isEnabled(config.id)
                 )
                 connectionStates[config.id] = state
@@ -187,12 +187,12 @@ class BackendManager {
             providers.removeValue(forKey: key)
             providerConfigurations.removeValue(forKey: key)
             connectionStates.removeValue(forKey: key)
-            cachedServicesByBackend[key] = nil
-            lastProgramFullFetchDatesByBackend[key] = nil
-            pendingProgramFullFetchBackendIDs.remove(key)
+            cachedServicesByServer[key] = nil
+            lastProgramFullFetchDatesByServer[key] = nil
+            pendingProgramFullFetchServerIDs.remove(key)
         }
 
-        backendSyncCount += 1
+        serverSyncCount += 1
         rebuildAggregatedData()
     }
 
@@ -200,7 +200,7 @@ class BackendManager {
         communicationFailureCount += 1
     }
 
-    private func createProvider(for config: BackendConfiguration) -> any BackendProvider {
+    private func createProvider(for config: ServerConfiguration) -> any ServerProvider {
         switch config.type {
         case .mirakurun:
             return MirakurunProvider(configuration: config)
@@ -220,13 +220,13 @@ class BackendManager {
         }
     }
 
-    private func backendLogDescription(for backendId: String) -> String {
-        if let config = providerConfigurations[backendId]
-            ?? configStore.configurations.first(where: { $0.id == backendId })
+    private func serverLogDescription(for serverId: String) -> String {
+        if let config = providerConfigurations[serverId]
+            ?? configStore.configurations.first(where: { $0.id == serverId })
         {
-            return "backend \(config.name) (\(config.type.displayName), id: \(config.id))"
+            return "server \(config.name) (\(config.type.displayName), id: \(config.id))"
         }
-        return "backend id \(backendId)"
+        return "server id \(serverId)"
     }
 
     func connectAll() async {
@@ -235,17 +235,17 @@ class BackendManager {
 
         for config in configStore.configurations {
             guard let state = connectionStates[config.id], state.isEnabled else { continue }
-            await connect(backendId: config.id, programRefreshPolicy: .automaticIfDue)
+            await connect(serverId: config.id, programRefreshPolicy: .automaticIfDue)
         }
     }
 
     @discardableResult
     func connect(
-        backendId: String,
+        serverId: String,
         programRefreshPolicy: ProgramCatalogRefreshPolicy = .none
     ) async -> ProgramCatalogRefreshExecutionResult {
-        guard let provider = providers[backendId],
-            let state = connectionStates[backendId]
+        guard let provider = providers[serverId],
+            let state = connectionStates[serverId]
         else { return .skipped }
         guard state.isEnabled else {
             state.status = .disconnected
@@ -267,7 +267,7 @@ class BackendManager {
             state.lastConnectedAt = Date()
             state.version = version
             return await refreshData(
-                backendId: backendId, programRefreshPolicy: programRefreshPolicy)
+                serverId: serverId, programRefreshPolicy: programRefreshPolicy)
         } catch {
             state.status = .error
             state.lastError = error.localizedDescription
@@ -280,11 +280,11 @@ class BackendManager {
 
     @discardableResult
     func refreshData(
-        backendId: String,
+        serverId: String,
         programRefreshPolicy: ProgramCatalogRefreshPolicy = .none
     ) async -> ProgramCatalogRefreshExecutionResult {
-        guard let provider = liveProvider(for: backendId),
-            let state = connectionStates[backendId],
+        guard let provider = liveProvider(for: serverId),
+            let state = connectionStates[serverId],
             state.status == .connected
         else { return .skipped }
         loadingTaskCount += 1
@@ -292,16 +292,16 @@ class BackendManager {
 
         do {
             let fetchedServices = try await provider.fetchServices()
-            cachedServicesByBackend[backendId] = fetchedServices
-            await cacheStore.cacheServices(fetchedServices, backendId: backendId)
+            cachedServicesByServer[serverId] = fetchedServices
+            await cacheStore.cacheServices(fetchedServices, serverId: serverId)
             rebuildAggregatedData()
 
-            let fetchedLogos = await fetchLogoData(for: fetchedServices, backendId: backendId)
+            let fetchedLogos = await fetchLogoData(for: fetchedServices, serverId: serverId)
             mergeLogos(fetchedLogos)
             await cacheStore.cacheLogos(fetchedLogos)
             rebuildAggregatedData()
 
-            switch await programCatalogRefreshDecision(for: backendId, policy: programRefreshPolicy)
+            switch await programCatalogRefreshDecision(for: serverId, policy: programRefreshPolicy)
             {
             case .skip:
                 rebuildAggregatedData()
@@ -312,17 +312,17 @@ class BackendManager {
             case .fetchNow:
                 do {
                     let fetchedPrograms = try await provider.fetchPrograms()
-                    await cacheStore.cachePrograms(fetchedPrograms, backendId: backendId)
+                    await cacheStore.cachePrograms(fetchedPrograms, serverId: serverId)
                     state.lastError = nil
-                    lastProgramFullFetchDatesByBackend[backendId] = Date()
-                    pendingProgramFullFetchBackendIDs.remove(backendId)
+                    lastProgramFullFetchDatesByServer[serverId] = Date()
+                    pendingProgramFullFetchServerIDs.remove(serverId)
                     rebuildAggregatedData()
                     return .refreshed
                 } catch {
                     state.lastError = error.localizedDescription
                     noteCommunicationFailure()
                     logger.error(
-                        "Failed to refresh program catalog for \(backendLogDescription(for: backendId)): \(error)"
+                        "Failed to refresh program catalog for \(serverLogDescription(for: serverId)): \(error)"
                     )
                     rebuildAggregatedData()
                     return .failed(error.localizedDescription)
@@ -343,7 +343,7 @@ class BackendManager {
             guard let state = connectionStates[config.id],
                 state.isEnabled, state.status == .connected
             else { continue }
-            await refreshData(backendId: config.id, programRefreshPolicy: .force)
+            await refreshData(serverId: config.id, programRefreshPolicy: .force)
         }
     }
 
@@ -356,24 +356,24 @@ class BackendManager {
         await reevaluateAutomaticProgramCatalogRefreshes()
     }
 
-    func refreshProgramsManually(backendId: String) async -> ManualProgramCatalogRefreshResult {
+    func refreshProgramsManually(serverId: String) async -> ManualProgramCatalogRefreshResult {
         guard cacheStore != nil,
-            isBackendEnabled(backendId),
-            backendSupports(.live, backendId: backendId)
+            isServerEnabled(serverId),
+            serverSupports(.live, serverId: serverId)
         else {
             return .unavailable
         }
 
         let refreshResult: ProgramCatalogRefreshExecutionResult
 
-        if connectionStates[backendId]?.status == .connected {
+        if connectionStates[serverId]?.status == .connected {
             refreshResult = await refreshData(
-                backendId: backendId,
+                serverId: serverId,
                 programRefreshPolicy: .forceIgnoringNetwork
             )
         } else {
             refreshResult = await connect(
-                backendId: backendId,
+                serverId: serverId,
                 programRefreshPolicy: .forceIgnoringNetwork
             )
         }
@@ -386,7 +386,7 @@ class BackendManager {
             return .failed(message)
         }
 
-        if let state = connectionStates[backendId], state.status == .error {
+        if let state = connectionStates[serverId], state.status == .error {
             return .failed(state.lastError ?? "番組情報の再取得に失敗しました")
         }
 
@@ -437,17 +437,17 @@ class BackendManager {
     }
 
     private func programCatalogRefreshDecision(
-        for backendId: String,
+        for serverId: String,
         policy: ProgramCatalogRefreshPolicy,
         now: Date = Date()
     ) async -> ProgramCatalogRefreshDecision {
         guard policy != .none else { return .skip }
-        guard backendSupports(.live, backendId: backendId), isBackendEnabled(backendId) else {
-            pendingProgramFullFetchBackendIDs.remove(backendId)
+        guard serverSupports(.live, serverId: serverId), isServerEnabled(serverId) else {
+            pendingProgramFullFetchServerIDs.remove(serverId)
             return .skip
         }
 
-        let lastFetchedAt = lastProgramFullFetchDatesByBackend[backendId]
+        let lastFetchedAt = lastProgramFullFetchDatesByServer[serverId]
         if policy == .automaticIfDue,
             !Self.isProgramCatalogRefreshDue(
                 lastFetchedAt: lastFetchedAt,
@@ -455,7 +455,7 @@ class BackendManager {
                 interval: programFullFetchInterval
             )
         {
-            pendingProgramFullFetchBackendIDs.remove(backendId)
+            pendingProgramFullFetchServerIDs.remove(serverId)
             return .skip
         }
 
@@ -468,7 +468,7 @@ class BackendManager {
         )
 
         if decision == .queueUntilWiFi {
-            pendingProgramFullFetchBackendIDs.insert(backendId)
+            pendingProgramFullFetchServerIDs.insert(serverId)
         }
 
         return decision
@@ -489,27 +489,27 @@ class BackendManager {
                 continue
             }
 
-            await refreshData(backendId: config.id, programRefreshPolicy: .automaticIfDue)
+            await refreshData(serverId: config.id, programRefreshPolicy: .automaticIfDue)
         }
     }
 
     private func retryPendingProgramCatalogRefreshes() async {
-        let queuedBackendIDs = configStore.configurations.map(\.id).filter {
-            pendingProgramFullFetchBackendIDs.contains($0)
+        let queuedServerIDs = configStore.configurations.map(\.id).filter {
+            pendingProgramFullFetchServerIDs.contains($0)
         }
 
-        for backendId in queuedBackendIDs {
-            guard isBackendEnabled(backendId), backendSupports(.live, backendId: backendId) else {
-                pendingProgramFullFetchBackendIDs.remove(backendId)
+        for serverId in queuedServerIDs {
+            guard isServerEnabled(serverId), serverSupports(.live, serverId: serverId) else {
+                pendingProgramFullFetchServerIDs.remove(serverId)
                 continue
             }
 
-            pendingProgramFullFetchBackendIDs.remove(backendId)
+            pendingProgramFullFetchServerIDs.remove(serverId)
 
-            if connectionStates[backendId]?.status == .connected {
-                await refreshData(backendId: backendId, programRefreshPolicy: .force)
+            if connectionStates[serverId]?.status == .connected {
+                await refreshData(serverId: serverId, programRefreshPolicy: .force)
             } else {
-                await connect(backendId: backendId, programRefreshPolicy: .force)
+                await connect(serverId: serverId, programRefreshPolicy: .force)
             }
         }
     }
@@ -594,8 +594,8 @@ class BackendManager {
         }
     #endif
 
-    func backendAvailabilityDidChange() {
-        backendSyncCount += 1
+    func serverAvailabilityDidChange() {
+        serverSyncCount += 1
         rebuildAggregatedData()
     }
 
@@ -605,9 +605,9 @@ class BackendManager {
         var resolvedServicesByUniqueId: [String: TVService] = [:]
 
         for config in configStore.configurations {
-            guard shouldIncludeBackendInAggregation(backendId: config.id) else { continue }
+            guard shouldIncludeServerInAggregation(serverId: config.id) else { continue }
 
-            let cachedServices = cachedServicesByBackend[config.id] ?? []
+            let cachedServices = cachedServicesByServer[config.id] ?? []
 
             for service in cachedServices {
                 let mergedKey = service.unifiedServiceKey
@@ -621,7 +621,7 @@ class BackendManager {
 
         var mergedServices: [TVService] = []
         for (_, variants) in variantsByMergedKey {
-            let sortedVariants = sortServicesByBackendPriority(variants)
+            let sortedVariants = sortServicesByServerPriority(variants)
             guard let preferred = preferredServiceVariant(from: sortedVariants) else { continue }
 
             mergedServices.append(preferred)
@@ -674,23 +674,23 @@ class BackendManager {
         logos = mergedLogos
     }
 
-    private func shouldIncludeBackendInAggregation(backendId: String) -> Bool {
-        guard isBackendEnabled(backendId) else { return false }
-        guard backendSupports(.live, backendId: backendId) else { return false }
-        guard let state = connectionStates[backendId] else { return true }
+    private func shouldIncludeServerInAggregation(serverId: String) -> Bool {
+        guard isServerEnabled(serverId) else { return false }
+        guard serverSupports(.live, serverId: serverId) else { return false }
+        guard let state = connectionStates[serverId] else { return true }
         return state.status != .error
     }
 
-    private func sortServicesByBackendPriority(_ services: [TVService]) -> [TVService] {
+    private func sortServicesByServerPriority(_ services: [TVService]) -> [TVService] {
         let order = Dictionary(
             uniqueKeysWithValues: configStore.configurations.enumerated().map { ($1.id, $0) })
         return services.sorted { lhs, rhs in
-            let lConnected = connectionStates[lhs.backendId]?.status == .connected
-            let rConnected = connectionStates[rhs.backendId]?.status == .connected
+            let lConnected = connectionStates[lhs.serverId]?.status == .connected
+            let rConnected = connectionStates[rhs.serverId]?.status == .connected
             if lConnected != rConnected {
                 return lConnected
             }
-            return (order[lhs.backendId] ?? Int.max) < (order[rhs.backendId] ?? Int.max)
+            return (order[lhs.serverId] ?? Int.max) < (order[rhs.serverId] ?? Int.max)
         }
     }
 
@@ -698,10 +698,10 @@ class BackendManager {
         variants.first
     }
 
-    private func fetchLogoData(for services: [TVService], backendId: String) async
+    private func fetchLogoData(for services: [TVService], serverId: String) async
         -> [TVServiceLogo]
     {
-        guard let provider = providers[backendId] as? any LiveBackendProvider else { return [] }
+        guard let provider = providers[serverId] as? any LiveServerProvider else { return [] }
 
         return await withTaskGroup(of: TVServiceLogo?.self) { group in
             let oneweekago = Date().addingTimeInterval(-86400 * 7)
@@ -820,62 +820,62 @@ class BackendManager {
 
     func playbackCandidates(for service: TVService) -> [TVService] {
         if let variants = serviceVariantsByAggregatedServiceId[service.id] {
-            return sortServicesByBackendPriority(variants).filter {
-                isBackendEnabled($0.backendId) && backendSupports(.live, backendId: $0.backendId)
+            return sortServicesByServerPriority(variants).filter {
+                isServerEnabled($0.serverId) && serverSupports(.live, serverId: $0.serverId)
             }
         }
-        guard isBackendEnabled(service.backendId),
-            backendSupports(.live, backendId: service.backendId)
+        guard isServerEnabled(service.serverId),
+            serverSupports(.live, serverId: service.serverId)
         else { return [] }
         return [service]
     }
 
-    func backendDisplayName(_ backendId: String) -> String {
-        backendName(backendId)
+    func serverDisplayName(_ serverId: String) -> String {
+        serverName(serverId)
     }
 
-    func backendFullDisplayName(_ backendId: String) -> String {
-        let name = backendName(backendId)
-        let typeName = backendTypeName(backendId)
+    func serverFullDisplayName(_ serverId: String) -> String {
+        let name = serverName(serverId)
+        let typeName = serverTypeName(serverId)
         if typeName.isEmpty {
             return name
         }
         return "\(name) (\(typeName))"
     }
 
-    func backendName(_ backendId: String) -> String {
-        let config = configStore.configurations.first(where: { $0.id == backendId })
+    func serverName(_ serverId: String) -> String {
+        let config = configStore.configurations.first(where: { $0.id == serverId })
         if let config {
             return config.name
         }
-        return backendId
+        return serverId
     }
 
-    func backendTypeName(_ backendId: String) -> String {
-        let config = configStore.configurations.first(where: { $0.id == backendId })
+    func serverTypeName(_ serverId: String) -> String {
+        let config = configStore.configurations.first(where: { $0.id == serverId })
         if let config {
             return config.type.displayName
         }
         return ""
     }
 
-    func liveProvider(for backendId: String) -> (any LiveBackendProvider)? {
-        guard isBackendEnabled(backendId) else { return nil }
-        guard backendSupports(.live, backendId: backendId) else { return nil }
-        return providers[backendId] as? (any LiveBackendProvider)
+    func liveProvider(for serverId: String) -> (any LiveServerProvider)? {
+        guard isServerEnabled(serverId) else { return nil }
+        guard serverSupports(.live, serverId: serverId) else { return nil }
+        return providers[serverId] as? (any LiveServerProvider)
     }
 
-    func recordingProvider(for backendId: String) -> (any RecordingBackendProvider)? {
-        guard isBackendEnabled(backendId) else { return nil }
-        guard backendSupports(.recording, backendId: backendId) else { return nil }
-        return providers[backendId] as? (any RecordingBackendProvider)
+    func recordingProvider(for serverId: String) -> (any RecordingServerProvider)? {
+        guard isServerEnabled(serverId) else { return nil }
+        guard serverSupports(.recording, serverId: serverId) else { return nil }
+        return providers[serverId] as? (any RecordingServerProvider)
     }
 
-    func fetchRecords(backendId: String, pageToken: String?, limit: Int, keyword: String?)
+    func fetchRecords(serverId: String, pageToken: String?, limit: Int, keyword: String?)
         async throws -> RecordsResult
     {
-        guard let provider = recordingProvider(for: backendId) else {
-            throw BackendManagerError.recordingBackendUnavailable
+        guard let provider = recordingProvider(for: serverId) else {
+            throw ServerManagerError.recordingServerUnavailable
         }
         loadingTaskCount += 1
         defer { loadingTaskCount = max(0, loadingTaskCount - 1) }
@@ -888,9 +888,9 @@ class BackendManager {
         }
     }
 
-    func fetchRecord(backendId: String, id: String) async throws -> Recorded {
-        guard let provider = recordingProvider(for: backendId) else {
-            throw BackendManagerError.recordingBackendUnavailable
+    func fetchRecord(serverId: String, id: String) async throws -> Recorded {
+        guard let provider = recordingProvider(for: serverId) else {
+            throw ServerManagerError.recordingServerUnavailable
         }
         loadingTaskCount += 1
         defer { loadingTaskCount = max(0, loadingTaskCount - 1) }
@@ -902,28 +902,28 @@ class BackendManager {
         }
     }
 
-    func fetchRecordThumbnail(backendId: String, id: String) async throws -> Data? {
-        guard let provider = recordingProvider(for: backendId) else {
-            throw BackendManagerError.recordingBackendUnavailable
+    func fetchRecordThumbnail(serverId: String, id: String) async throws -> Data? {
+        guard let provider = recordingProvider(for: serverId) else {
+            throw ServerManagerError.recordingServerUnavailable
         }
         return try await provider.fetchRecordThumbnail(id: id)
     }
 
-    var recordingBackendIds: [String] {
-        let _ = backendSyncCount
+    var recordingServerIds: [String] {
+        let _ = serverSyncCount
         let ids = configStore.configurations
-            .filter { $0.features.contains(.recording) && isBackendEnabled($0.id) }
+            .filter { $0.features.contains(.recording) && isServerEnabled($0.id) }
             .map(\.id)
         return ids
     }
 
-    func isBackendEnabled(_ backendId: String) -> Bool {
-        return configStore.isEnabled(backendId)
+    func isServerEnabled(_ serverId: String) -> Bool {
+        return configStore.isEnabled(serverId)
     }
 
-    private func backendSupports(_ feature: BackendFeature, backendId: String) -> Bool {
+    private func serverSupports(_ feature: ServerFeature, serverId: String) -> Bool {
         return configStore.configurations
-            .first(where: { $0.id == backendId })?
+            .first(where: { $0.id == serverId })?
             .features.contains(feature) == true
     }
 

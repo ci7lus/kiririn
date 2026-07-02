@@ -2,8 +2,8 @@ import ARIBStandardKit
 import Foundation
 import OrderedCollections
 
-final class EPGStationProvider: LiveBackendProvider, RecordingBackendProvider {
-    let configuration: BackendConfiguration
+final class EPGStationProvider: LiveServerProvider, RecordingServerProvider {
+    let configuration: ServerConfiguration
     private let client: APIClient
     private var channels: [Int64: EPGStationChannel] = [:]
     private var recordedItems: [Int64: EPGStationRecordedItem] = [:]
@@ -17,7 +17,7 @@ final class EPGStationProvider: LiveBackendProvider, RecordingBackendProvider {
         configuration.features.contains(.recording)
     }
 
-    init(configuration: BackendConfiguration) {
+    init(configuration: ServerConfiguration) {
         self.configuration = configuration
         self.client = APIClient(configuration: configuration)
     }
@@ -59,7 +59,7 @@ final class EPGStationProvider: LiveBackendProvider, RecordingBackendProvider {
     func fetchServices() async throws -> [TVService] {
         guard isLiveEnabled else { return [] }
         return (try await fetchEPGStationServices()).values.map {
-            $0.toTVService(backendId: configuration.id)
+            $0.toTVService(serverId: configuration.id)
         }
     }
 
@@ -85,7 +85,7 @@ final class EPGStationProvider: LiveBackendProvider, RecordingBackendProvider {
         )
         return response.flatMap { channel in
             channel.programs.map {
-                $0.toProgram(channel: channel.channel, backendId: configuration.id)
+                $0.toProgram(channel: channel.channel, serverId: configuration.id)
             }
         }
     }
@@ -102,7 +102,7 @@ final class EPGStationProvider: LiveBackendProvider, RecordingBackendProvider {
         return Playable(
             streamURL: streamURL,
             headers: client.defaultHeaders,
-            backendId: configuration.id,
+            serverId: configuration.id,
             source: .liveService(serviceUniqueId: service.id),
             program: currentProgram,
             service: service
@@ -128,7 +128,7 @@ final class EPGStationProvider: LiveBackendProvider, RecordingBackendProvider {
         )
         let chs = try await fetchEPGStationServices(isCacheAllowed: true)
         let records = response.records.map {
-            $0.toRecord(backendId: configuration.id, channel: chs[$0.channelId ?? 0] ?? nil)
+            $0.toRecord(serverId: configuration.id, channel: chs[$0.channelId ?? 0] ?? nil)
         }
         for record in response.records {
             recordedItems[record.id] = record
@@ -150,7 +150,7 @@ final class EPGStationProvider: LiveBackendProvider, RecordingBackendProvider {
         )
         recordedItems[raw.id] = raw
         let chs = try await fetchEPGStationServices(isCacheAllowed: true)
-        return raw.toRecord(backendId: configuration.id, channel: chs[raw.channelId ?? 0] ?? nil)
+        return raw.toRecord(serverId: configuration.id, channel: chs[raw.channelId ?? 0] ?? nil)
     }
 
     func fetchServiceLogoData(for service: TVService) async throws -> Data? {
@@ -183,9 +183,9 @@ final class EPGStationProvider: LiveBackendProvider, RecordingBackendProvider {
         return Playable(
             streamURL: streamURL,
             headers: client.defaultHeaders,
-            backendId: configuration.id,
+            serverId: configuration.id,
             source: .recordedFile(
-                recordId: record.id, variantId: variant.id, backendId: record.backendId),
+                recordId: record.id, variantId: variant.id, serverId: record.serverId),
             program: buildRecordedProgram(record: record),
             service: record.synthesizedService()
         )
@@ -227,9 +227,9 @@ private nonisolated struct EPGStationChannel: Codable, Sendable {
     let type: Int?
     let remoteControlKeyId: Int?
 
-    func toTVService(backendId: String) -> TVService {
+    func toTVService(serverId: String) -> TVService {
         TVService(
-            id: "\(backendId)-\(id)",
+            id: "\(serverId)-\(id)",
             providerIdentifier: "\(id)",
             serviceId: serviceId,
             networkId: networkId,
@@ -241,7 +241,7 @@ private nonisolated struct EPGStationChannel: Codable, Sendable {
             hasLogoData: hasLogoData,
             channel: channelType != nil
                 ? TVService.Channel(id: channelType!, type: channelType!) : nil,
-            backendId: backendId
+            serverId: serverId
         )
     }
 }
@@ -270,13 +270,13 @@ private nonisolated struct EPGStationProgram: Codable, Sendable {
     let halfWidthExtended: String?
     let genres: [EPGStationGenre]?
 
-    func toProgram(channel: EPGStationChannel, backendId: String) -> Program {
+    func toProgram(channel: EPGStationChannel, serverId: String) -> Program {
         let start = Date(timeIntervalSince1970: TimeInterval(startAt) / 1000.0)
         let end = Date(timeIntervalSince1970: TimeInterval(endAt) / 1000.0)
         let computedDuration = end.timeIntervalSince(start)
         return Program(
             id: "\(id)",
-            backendId: backendId,
+            serverId: serverId,
             eventId: nil,
             serviceId: channel.serviceId,
             networkId: channel.networkId,
@@ -336,7 +336,7 @@ private nonisolated struct EPGStationRecordedItem: Codable, Sendable {
     let isProtected: Bool?
     let thumbnails: [Int64]?
 
-    func toRecord(backendId: String, channel: EPGStationChannel?) -> Recorded {
+    func toRecord(serverId: String, channel: EPGStationChannel?) -> Recorded {
         let start = Date(timeIntervalSince1970: TimeInterval(startAt) / 1000.0)
         let end = Date(timeIntervalSince1970: TimeInterval(endAt) / 1000.0)
         return Recorded(
@@ -353,7 +353,7 @@ private nonisolated struct EPGStationRecordedItem: Codable, Sendable {
             variants: videoFiles?.map { $0.toRecordedVariant() } ?? [],
             isRecording: isRecording ?? false,
             hasThumbnail: (thumbnails?.count ?? 0) > 0,
-            backendId: backendId
+            serverId: serverId
         )
     }
 }

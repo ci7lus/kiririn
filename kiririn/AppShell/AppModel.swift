@@ -23,8 +23,8 @@ final class AppModel {
         }
     }()
 
-    let configStore: BackendConfigStore
-    let manager: BackendManager
+    let configStore: ServerConfigStore
+    let manager: ServerManager
     let playerState: PlayerState
     let pluginStore: PluginStore
     private(set) var cacheStore: CacheStore?
@@ -39,12 +39,12 @@ final class AppModel {
     @ObservationIgnored
     private var recordingsViewModelStore: [String: RecordsViewModel] = [:]
 
-    func recordingsViewModel(for backendId: String) -> RecordsViewModel {
-        if let existing = recordingsViewModelStore[backendId] {
+    func recordingsViewModel(for serverId: String) -> RecordsViewModel {
+        if let existing = recordingsViewModelStore[serverId] {
             return existing
         }
         let vm = RecordsViewModel()
-        recordingsViewModelStore[backendId] = vm
+        recordingsViewModelStore[serverId] = vm
         return vm
     }
 
@@ -66,9 +66,9 @@ final class AppModel {
     }
 
     private init() {
-        let store = BackendConfigStore()
+        let store = ServerConfigStore()
         configStore = store
-        let manager = BackendManager(configStore: store)
+        let manager = ServerManager(configStore: store)
         self.manager = manager
         playerState = PlayerState()
         playerState.manager = manager

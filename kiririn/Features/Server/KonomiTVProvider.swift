@@ -1,15 +1,15 @@
 import ARIBStandardKit
 import Foundation
 
-final class KonomiTVProvider: RecordingBackendProvider {
-    let configuration: BackendConfiguration
+final class KonomiTVProvider: RecordingServerProvider {
+    let configuration: ServerConfiguration
     private let client: APIClient
 
     private var isRecordingEnabled: Bool {
         configuration.features.contains(.recording)
     }
 
-    init(configuration: BackendConfiguration) {
+    init(configuration: ServerConfiguration) {
         self.configuration = configuration
         self.client = APIClient(configuration: configuration)
     }
@@ -47,7 +47,7 @@ final class KonomiTVProvider: RecordingBackendProvider {
             queryItems: queryItems
         )
 
-        let records = response.recordedPrograms.map { $0.toRecord(backendId: configuration.id) }
+        let records = response.recordedPrograms.map { $0.toRecord(serverId: configuration.id) }
 
         // KonomiTVの1ページは30件固定
         let pageSize = 30
@@ -63,7 +63,7 @@ final class KonomiTVProvider: RecordingBackendProvider {
             throw URLError(.dataNotAllowed)
         }
         let program: KonomiTVRecordedProgram = try await client.request(path: "api/videos/\(id)")
-        return program.toRecord(backendId: configuration.id)
+        return program.toRecord(serverId: configuration.id)
     }
 
     func fetchRecordThumbnail(id: String) async throws -> Data? {
@@ -77,9 +77,9 @@ final class KonomiTVProvider: RecordingBackendProvider {
         return Playable(
             streamURL: streamURL,
             headers: client.defaultHeaders,
-            backendId: configuration.id,
+            serverId: configuration.id,
             source: .recordedFile(
-                recordId: record.id, variantId: variant.id, backendId: record.backendId),
+                recordId: record.id, variantId: variant.id, serverId: record.serverId),
             program: buildRecordedProgram(record: record),
             service: record.synthesizedService()
         )
@@ -129,7 +129,7 @@ private nonisolated struct KonomiTVRecordedProgram: Codable, Sendable {
         case recordedVideo = "recorded_video"
     }
 
-    func toRecord(backendId: String) -> Recorded {
+    func toRecord(serverId: String) -> Recorded {
         let start = parseDate(startTime) ?? Date()
 
         let programGenres = genres?.compactMap { $0.toProgramGenre() } ?? []
@@ -148,7 +148,7 @@ private nonisolated struct KonomiTVRecordedProgram: Codable, Sendable {
             variants: [RecordedVariant(id: "default", name: "Default")],
             isRecording: recordedVideo?.status == "Recording",
             hasThumbnail: true,
-            backendId: backendId
+            serverId: serverId
         )
     }
 

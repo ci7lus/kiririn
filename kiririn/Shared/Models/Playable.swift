@@ -4,7 +4,7 @@ import OrderedCollections
 
 nonisolated enum PlayableSource: Codable, Hashable, Sendable {
     case liveService(serviceUniqueId: String)
-    case recordedFile(recordId: String, variantId: String, backendId: String)
+    case recordedFile(recordId: String, variantId: String, serverId: String)
     case fileURL(URL, bookmarkData: Data?)
     case directURL(URL)
 
@@ -22,7 +22,7 @@ nonisolated enum PlayableSource: Codable, Hashable, Sendable {
     private enum RecordedFileKeys: String, CodingKey {
         case recordId
         case variantId
-        case backendId
+        case serverId
     }
 
     private enum FileURLKeys: String, CodingKey {
@@ -53,7 +53,7 @@ nonisolated enum PlayableSource: Codable, Hashable, Sendable {
             self = .recordedFile(
                 recordId: try nested.decode(String.self, forKey: .recordId),
                 variantId: try nested.decode(String.self, forKey: .variantId),
-                backendId: try nested.decode(String.self, forKey: .backendId)
+                serverId: try nested.decode(String.self, forKey: .serverId)
             )
             return
         }
@@ -110,12 +110,12 @@ nonisolated enum PlayableSource: Codable, Hashable, Sendable {
             var nested = container.nestedContainer(
                 keyedBy: LiveServiceKeys.self, forKey: .liveService)
             try nested.encode(serviceUniqueId, forKey: .serviceUniqueId)
-        case .recordedFile(let recordId, let variantId, let backendId):
+        case .recordedFile(let recordId, let variantId, let serverId):
             var nested = container.nestedContainer(
                 keyedBy: RecordedFileKeys.self, forKey: .recordedFile)
             try nested.encode(recordId, forKey: .recordId)
             try nested.encode(variantId, forKey: .variantId)
-            try nested.encode(backendId, forKey: .backendId)
+            try nested.encode(serverId, forKey: .serverId)
         case .fileURL(let url, let bookmarkData):
             var nested = container.nestedContainer(keyedBy: FileURLKeys.self, forKey: .fileURL)
             try nested.encode(url, forKey: .url)
@@ -189,7 +189,7 @@ nonisolated struct PlayableProgramOverride: Codable, Sendable, Equatable, Hashab
     func applying(to base: Program) -> Program {
         return Program(
             id: base.id,
-            backendId: base.backendId,
+            serverId: base.serverId,
             eventId: eventId ?? base.eventId,
             serviceId: serviceId ?? base.serviceId,
             networkId: networkId ?? base.networkId,
@@ -233,7 +233,7 @@ nonisolated struct PlayableProgramOverride: Codable, Sendable, Equatable, Hashab
         return Program(
             id:
                 "override-\(Int(startAt.timeIntervalSince1970))-\(serviceId ?? 0)-\(networkId ?? 0)",
-            backendId: "override",
+            serverId: "override",
             eventId: eventId,
             serviceId: serviceId ?? 0,
             networkId: networkId ?? 0,
@@ -282,7 +282,7 @@ nonisolated struct PlayableServiceOverride: Codable, Sendable, Equatable, Hashab
             remoteControlKeyId: base.remoteControlKeyId,
             hasLogoData: base.hasLogoData,
             channel: base.channel,
-            backendId: base.backendId
+            serverId: base.serverId
         )
     }
 
@@ -301,7 +301,7 @@ nonisolated struct PlayableServiceOverride: Codable, Sendable, Equatable, Hashab
             remoteControlKeyId: nil,
             hasLogoData: false,
             channel: nil,
-            backendId: "override"
+            serverId: "override"
         )
     }
 }
@@ -310,7 +310,7 @@ nonisolated struct Playable: Codable, Hashable, Identifiable, Sendable {
     var id: String
     var streamURL: URL
     var headers: [String: String]
-    var backendId: String?
+    var serverId: String?
     var source: PlayableSource
     var program: Program?
     var service: TVService?
@@ -346,7 +346,7 @@ nonisolated struct Playable: Codable, Hashable, Identifiable, Sendable {
                 remoteControlKeyId: nil,
                 hasLogoData: false,
                 channel: nil,
-                backendId: "inferred"
+                serverId: "inferred"
             )
         } else {
             base = nil
@@ -394,7 +394,7 @@ nonisolated struct Playable: Codable, Hashable, Identifiable, Sendable {
     init(
         streamURL: URL,
         headers: [String: String] = [:],
-        backendId: String? = nil,
+        serverId: String? = nil,
         source: PlayableSource,
         program: Program? = nil,
         service: TVService? = nil
@@ -402,7 +402,7 @@ nonisolated struct Playable: Codable, Hashable, Identifiable, Sendable {
         self.id = Self.stableID(for: source)
         self.streamURL = streamURL
         self.headers = headers
-        self.backendId = backendId
+        self.serverId = serverId
         self.source = source
         self.program = program
         self.service = service
@@ -416,8 +416,8 @@ nonisolated struct Playable: Codable, Hashable, Identifiable, Sendable {
         switch source {
         case .liveService(let serviceUniqueId):
             return "live-\(serviceUniqueId)"
-        case .recordedFile(let recordId, let variantId, let backendId):
-            return "rec-\(backendId)-\(recordId)-\(variantId)"
+        case .recordedFile(let recordId, let variantId, let serverId):
+            return "rec-\(serverId)-\(recordId)-\(variantId)"
         case .fileURL(let url, _), .directURL(let url):
             return "direct-\(url.absoluteString)"
         }

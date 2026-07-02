@@ -20,8 +20,8 @@ nonisolated enum LocalRecordPath {
         directoryURL.appendingPathComponent(fileName)
     }
 
-    static func recordID(backendId: String, recordID: String) -> String {
-        "\(backendId)_\(recordID)".addingPercentEncoding(withAllowedCharacters: .alphanumerics)
+    static func recordID(serverId: String, recordID: String) -> String {
+        "\(serverId)_\(recordID)".addingPercentEncoding(withAllowedCharacters: .alphanumerics)
             ?? UUID().uuidString
     }
 }

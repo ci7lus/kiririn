@@ -31,7 +31,7 @@ class RecordsViewModel {
     }
 
     private func thumbnailKey(for record: Recorded) -> String {
-        "\(record.backendId)-\(record.id)"
+        "\(record.serverId)-\(record.id)"
     }
 
     func thumbnailData(for record: Recorded) -> Data? {
@@ -65,13 +65,13 @@ class RecordsViewModel {
         }
     }
 
-    func loadThumbnailIfNeeded(for record: Recorded, manager: BackendManager) async {
+    func loadThumbnailIfNeeded(for record: Recorded, manager: ServerManager) async {
         guard record.hasThumbnail else { return }
         let key = thumbnailKey(for: record)
         guard thumbnailDataByRecordKey[key] == nil else { return }
         guard !failedThumbnailKeys.contains(key) else { return }
         guard !loadingThumbnailKeys.contains(key) else { return }
-        guard manager.recordingProvider(for: record.backendId) != nil else {
+        guard manager.recordingProvider(for: record.serverId) != nil else {
             failedThumbnailKeys.insert(key)
             return
         }
@@ -81,7 +81,7 @@ class RecordsViewModel {
 
         do {
             if let data = try await manager.fetchRecordThumbnail(
-                backendId: record.backendId, id: record.id), !data.isEmpty
+                serverId: record.serverId, id: record.id), !data.isEmpty
             {
                 thumbnailDataByRecordKey[key] = data
             } else {
@@ -94,7 +94,7 @@ class RecordsViewModel {
     }
 
     func loadRecords(
-        manager: BackendManager, backendId: String, reset: Bool = false, force: Bool = false
+        manager: ServerManager, serverId: String, reset: Bool = false, force: Bool = false
     ) async {
         if isLoading {
             guard force else { return }
@@ -120,8 +120,8 @@ class RecordsViewModel {
         isLoading = true
         errorMessage = nil
 
-        guard manager.recordingProvider(for: backendId) != nil else {
-            errorMessage = "バックエンドが利用できません"
+        guard manager.recordingProvider(for: serverId) != nil else {
+            errorMessage = "サーバーが利用できません"
             hasMore = false
             isLoading = false
             return
@@ -129,7 +129,7 @@ class RecordsViewModel {
 
         do {
             let result = try await manager.fetchRecords(
-                backendId: backendId,
+                serverId: serverId,
                 pageToken: pageToken,
                 limit: limit,
                 keyword: searchText.isEmpty ? nil : searchText

@@ -18,7 +18,7 @@ nonisolated struct Recorded: Codable, Identifiable, Sendable {
     var variants: [RecordedVariant]
     var isRecording: Bool
     var hasThumbnail: Bool
-    var backendId: String
+    var serverId: String
 
     var endAt: Date? {
         guard let startAt, let duration else { return nil }
@@ -33,7 +33,7 @@ nonisolated struct Recorded: Codable, Identifiable, Sendable {
     var playableID: String? {
         guard let variant = variants.first else { return nil }
         return Playable.stableID(
-            for: .recordedFile(recordId: id, variantId: variant.id, backendId: backendId))
+            for: .recordedFile(recordId: id, variantId: variant.id, serverId: serverId))
     }
 
     func synthesizedService() -> TVService? {
@@ -42,7 +42,7 @@ nonisolated struct Recorded: Codable, Identifiable, Sendable {
         let serviceIdValue = serviceId ?? 0
         let networkIdValue = networkId ?? 0
         return TVService(
-            id: "record-\(backendId)-\(networkIdValue)-\(serviceIdValue)-\(id)",
+            id: "record-\(serverId)-\(networkIdValue)-\(serviceIdValue)-\(id)",
             providerIdentifier: nil,
             serviceId: serviceIdValue,
             networkId: networkIdValue,
@@ -52,15 +52,15 @@ nonisolated struct Recorded: Codable, Identifiable, Sendable {
             remoteControlKeyId: nil,
             hasLogoData: false,
             channel: nil,
-            backendId: backendId
+            serverId: serverId
         )
     }
 
     func toProgram() -> Program? {
         guard let startAt, let duration, let endAt else { return nil }
         return Program(
-            id: "record-\(backendId)-\(id)",
-            backendId: backendId,
+            id: "record-\(serverId)-\(id)",
+            serverId: serverId,
             eventId: nil,
             serviceId: serviceId ?? 0,
             networkId: networkId ?? 0,

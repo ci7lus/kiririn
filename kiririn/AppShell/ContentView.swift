@@ -63,8 +63,8 @@ struct ContentView: View {
         @State private var showingFilePicker = false
     #endif
 
-    private var configStore: BackendConfigStore { appModel.configStore }
-    private var manager: BackendManager { appModel.manager }
+    private var configStore: ServerConfigStore { appModel.configStore }
+    private var manager: ServerManager { appModel.manager }
     private var playerState: PlayerState { appModel.playerState }
     private var pluginStore: PluginStore { appModel.pluginStore }
 

@@ -1,14 +1,14 @@
 import SwiftUI
 
-private struct PlaybackBackendSelectionDialogModifier: ViewModifier {
+private struct PlaybackServerSelectionDialogModifier: ViewModifier {
     let service: TVService
     @Binding var selectedService: TVService?
-    let manager: BackendManager
+    let manager: ServerManager
     let onSelect: (TVService) -> Void
 
     func body(content: Content) -> some View {
         content.confirmationDialog(
-            "再生するバックエンドを選択",
+            "再生するサーバーを選択",
             isPresented: Binding(
                 get: { selectedService?.id == service.id },
                 set: { isPresented in
@@ -19,8 +19,8 @@ private struct PlaybackBackendSelectionDialogModifier: ViewModifier {
             titleVisibility: .visible
         ) {
             let candidates = manager.playbackCandidates(for: service)
-            ForEach(candidates, id: \.backendId) { candidate in
-                Button(manager.backendFullDisplayName(candidate.backendId)) {
+            ForEach(candidates, id: \.serverId) { candidate in
+                Button(manager.serverFullDisplayName(candidate.serverId)) {
                     selectedService = nil
                     onSelect(candidate)
                 }
@@ -33,14 +33,14 @@ private struct PlaybackBackendSelectionDialogModifier: ViewModifier {
 }
 
 extension View {
-    func playbackBackendSelectionDialog(
+    func playbackServerSelectionDialog(
         service: TVService,
         selectedService: Binding<TVService?>,
-        manager: BackendManager,
+        manager: ServerManager,
         onSelect: @escaping (TVService) -> Void
     ) -> some View {
         modifier(
-            PlaybackBackendSelectionDialogModifier(
+            PlaybackServerSelectionDialogModifier(
                 service: service,
                 selectedService: selectedService,
                 manager: manager,
