@@ -220,6 +220,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     var mode: PlayerMode = .expanded
     var player: VLCMediaPlayer?
     var isPlaying = false
+    var isPlaybackLoading = false
     var showControls = true
     var playbackRate: Float = 1.0
     var volume: Float = 100
@@ -267,6 +268,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     private var selectedTextTrackID: String?
     private var securityScopedPlaybackURL: URL?
     private var lastSavedPlaybackPosition: Float = -1
+    private var didStartPlayback = false
     private var didApplyInitialPlaybackRestore = false
     private var didObservePlayingForRestore = false
     private var didObservePlaybackProgressForRestore = false
@@ -296,6 +298,10 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
     var isActive: Bool { currentPlayable != nil }
 
+    var showsPlaybackLoadingIndicator: Bool {
+        player == nil || isPlaybackLoading
+    }
+
     private var pendingCapturePath: URL?
     private var pendingPluginOverlayTask: Task<CGImage?, Never>?
     private var pendingOverlayManifestIDs: [String] = []
@@ -309,6 +315,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         let previousPlayableID = currentPlayable?.id
         cleanup(releasePlayer: true)
         clearPlaybackError()
+        isPlaybackLoading = true
         var playableForPlayback = playable
         playableForPlayback.normalizeIdentity()
         if let previousPlayableID, previousPlayableID != playableForPlayback.id {
@@ -352,6 +359,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         playbackStatus.rate = playbackRate
         lastSavedPlaybackPosition = -1
         didApplyInitialPlaybackRestore = false
+        didStartPlayback = false
         didObservePlayingForRestore = false
         didObservePlaybackProgressForRestore = false
         restoreAfterPlayingTask?.cancel()
@@ -384,6 +392,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
                 let media = VLCMedia(url: activePlayable.streamURL)
             else {
                 isPlaying = false
+                isPlaybackLoading = false
                 return
             }
             logger.debug("play(playable: \(activePlayable.streamURL))")
@@ -1056,6 +1065,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
     func stop() {
         player?.stop()
+        isPlaybackLoading = false
         playbackStatus = .init(
             playerID: self.id, playableID: nil, isPlaying: false, time: 0, position: 0,
             rate: playbackRate)
@@ -1066,6 +1076,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         restoreAfterPlayingTask?.cancel()
         restoreAfterPlayingTask = nil
         didObservePlayingForRestore = false
+        didStartPlayback = false
         didObservePlaybackProgressForRestore = false
         refreshTimer?.invalidate()
         refreshTimer = nil
@@ -1084,6 +1095,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         }
 
         isPlaying = false
+        isPlaybackLoading = false
         isPipEnabled = false
         isPipAvailable = false
         availableAudioTracks = []
@@ -1445,7 +1457,11 @@ extension PlayerState {
         let errorMessageOnCallbackThread = (state == .error) ? VLCLibrary.currentErrorMessage : nil
         Task { @MainActor in
             switch state {
+            case .opening, .buffering:
+                isPlaybackLoading = !didStartPlayback
             case .playing:
+                didStartPlayback = true
+                isPlaybackLoading = false
                 isPlaying = true
                 clearPlaybackError()
                 didObservePlayingForRestore = true
@@ -1453,10 +1469,12 @@ extension PlayerState {
                 applyAudioOutput()
                 requestPlaybackRestoreIfPossible(trigger: "state.playing")
             case .error:
+                isPlaybackLoading = false
                 isPlaying = false
                 playbackErrorMessage = resolvePlaybackErrorMessage(
                     preferredMessage: errorMessageOnCallbackThread)
-            case .paused, .stopped:
+            case .paused, .stopped, .stopping:
+                isPlaybackLoading = false
                 isPlaying = false
             default:
                 break
@@ -1476,6 +1494,8 @@ extension PlayerState {
             }
             playbackStatus.position = Float(player.position)
             if playbackStatus.time > 0 || playbackStatus.position > 0.001 {
+                didStartPlayback = true
+                isPlaybackLoading = false
                 didObservePlaybackProgressForRestore = true
                 requestPlaybackRestoreIfPossible(trigger: "time.changed")
             }

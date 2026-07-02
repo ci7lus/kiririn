@@ -67,7 +67,7 @@ struct DetachedPlayerOverlayView_macOS: View {
                                 }
                             )
                         } else {
-                            ProgressView().tint(.white)
+                            Color.black
                         }
 
                         if !playerState.availableOverlayPlugins.isEmpty {
@@ -89,6 +89,10 @@ struct DetachedPlayerOverlayView_macOS: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
+                }
+
+                if playerState.showsPlaybackLoadingIndicator {
+                    playbackLoadingIndicator
                 }
 
                 WindowDragSurface(
@@ -128,6 +132,10 @@ struct DetachedPlayerOverlayView_macOS: View {
             }
             .ignoresSafeArea()
             .contentShape(Rectangle())
+            .animation(
+                .easeInOut(duration: 0.18),
+                value: playerState.showsPlaybackLoadingIndicator
+            )
             .onTapGesture(count: 2) {
                 onToggleFullscreen()
             }
@@ -518,6 +526,15 @@ struct DetachedPlayerOverlayView_macOS: View {
     private func playerControlBackground(scale: CGFloat) -> some View {
         RoundedRectangle(cornerRadius: 8 * scale, style: .continuous)
             .fill(.ultraThinMaterial)
+    }
+
+    private var playbackLoadingIndicator: some View {
+        ProgressView()
+            .tint(.white)
+            .controlSize(.regular)
+            .allowsHitTesting(false)
+            .accessibilityLabel("動画を読み込み中")
+            .transition(.opacity)
     }
 
     private func controlScale(for containerSize: CGSize) -> CGFloat {

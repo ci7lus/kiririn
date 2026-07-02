@@ -504,9 +504,8 @@ struct PlayerOverlayView_iOS: View {
             }
             .frame(width: width, height: height)
 
-            if playerState.player == nil {
-                ProgressView()
-                    .tint(.white)
+            if playerState.showsPlaybackLoadingIndicator {
+                playbackLoadingIndicator
             }
 
             videoTapZonesOverlay(width: width, height: height)
@@ -544,6 +543,7 @@ struct PlayerOverlayView_iOS: View {
         }
         .frame(width: width, height: height)
         .clipped()
+        .animation(.easeInOut(duration: 0.18), value: playerState.showsPlaybackLoadingIndicator)
         .animation(.easeInOut(duration: 0.2), value: playerState.showControls)
     }
 
@@ -1055,13 +1055,15 @@ struct PlayerOverlayView_iOS: View {
             ZStack(alignment: .bottom) {
                 if playerState.player == nil {
                     Color.black
-                    ProgressView()
-                        .tint(.white)
                 } else {
                     Color.black.opacity(0.001)
                 }
 
                 Color.black.opacity(0.001)
+
+                if playerState.showsPlaybackLoadingIndicator {
+                    playbackLoadingIndicator
+                }
 
                 if miniOverlayVisible {
                     LinearGradient(
@@ -1161,6 +1163,7 @@ struct PlayerOverlayView_iOS: View {
                 playbackErrorOverlay(height: miniSize.height)
             }
             .frame(width: miniSize.width, height: miniSize.height)
+            .animation(.easeInOut(duration: 0.18), value: playerState.showsPlaybackLoadingIndicator)
             .clipShape(.rect(cornerRadius: 14))
             .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
             .position(
@@ -1440,6 +1443,11 @@ struct PlayerOverlayView_iOS: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(!playerState.showControls)
 
+            if playerState.showsPlaybackLoadingIndicator {
+                playbackLoadingIndicator
+                    .ignoresSafeArea()
+            }
+
             feedbackOverlays(height: geo.size.height)
                 .ignoresSafeArea()
 
@@ -1469,6 +1477,7 @@ struct PlayerOverlayView_iOS: View {
                 .allowsHitTesting(playerState.showControls)
 
         }
+        .animation(.easeInOut(duration: 0.18), value: playerState.showsPlaybackLoadingIndicator)
         #if os(macOS)
             .animation(.easeInOut(duration: 0.2), value: playerState.showControls)
         #else
@@ -1499,6 +1508,16 @@ struct PlayerOverlayView_iOS: View {
                     }
                 }
         )
+    }
+
+    @ViewBuilder
+    private var playbackLoadingIndicator: some View {
+        ProgressView()
+            .tint(.white)
+            .controlSize(.regular)
+            .allowsHitTesting(false)
+            .accessibilityLabel("動画を読み込み中")
+            .transition(.opacity)
     }
 
     @ViewBuilder
