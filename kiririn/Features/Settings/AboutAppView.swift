@@ -5,9 +5,7 @@ import SwiftUI
 #endif
 
 private struct AboutAppHeaderView: View {
-    let appVersion: String
-    let buildNumber: String
-    let githubURL: URL
+    let buildInfo: AppBuildInfo
 
     var body: some View {
         VStack(spacing: 20) {
@@ -19,9 +17,9 @@ private struct AboutAppHeaderView: View {
             VStack(spacing: 6) {
                 Text("kiririn")
                     .font(.title2.bold())
-                Text("バージョン \(appVersion) (\(buildNumber))")
+                Text("バージョン\(buildInfo.versionDescription)")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary.opacity(0.72))
             }
             .multilineTextAlignment(.center)
         }
@@ -31,12 +29,7 @@ private struct AboutAppHeaderView: View {
 }
 
 struct AboutAppView: View {
-    private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "-"
-    }
-    private var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "-"
-    }
+    private let buildInfo = AppBuildInfo.current
     private let githubURL = URL(string: "https://github.com/ci7lus/kiririn")!
     private let githubIssuesURL = URL(string: "https://github.com/ci7lus/kiririn/issues")!
 
@@ -46,19 +39,11 @@ struct AboutAppView: View {
             Section {
                 EmptyView()
             } header: {
-                AboutAppHeaderView(
-                    appVersion: appVersion,
-                    buildNumber: buildNumber,
-                    githubURL: githubURL
-                )
+                AboutAppHeaderView(buildInfo: buildInfo)
             }
         #else
             Section {
-                AboutAppHeaderView(
-                    appVersion: appVersion,
-                    buildNumber: buildNumber,
-                    githubURL: githubURL
-                )
+                AboutAppHeaderView(buildInfo: buildInfo)
             }
             .listRowBackground(Color.clear)
         #endif

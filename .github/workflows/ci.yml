@@ -1,0 +1,103 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+    PROJECT: kiririn.xcodeproj
+    SCHEME: kiririn
+
+jobs:
+    lint:
+        name: Lint & Format Check
+        runs-on: macos-26
+        timeout-minutes: 10
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+
+            - name: Show Xcode version
+              run: xcodebuild -version
+
+            - name: swift-format lint
+              run: |
+                  xcrun swift-format lint --recursive --strict \
+                    kiririn/ kiririnTests/ kiririnUITests/ Packages/
+
+    build:
+        name: Build ${{ matrix.platform.name }}
+        needs: lint
+        runs-on: macos-26
+        timeout-minutes: 60
+        permissions:
+            contents: write
+        strategy:
+            matrix:
+                platform:
+                    - name: iOS
+                      destination: "generic/platform=iOS"
+                      id: ios
+                    - name: macOS
+                      destination: "generic/platform=macOS"
+                      id: macos
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+
+            - name: Cache SPM packages
+              uses: actions/cache@v6
+              with:
+                  path: ${{ runner.temp }}/DerivedData/SourcePackages
+                  key: spm-${{ hashFiles('kiririn.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+
+            - name: Cache setup.sh
+              id: cache-setup
+              uses: actions/cache@v6
+              with:
+                  path: |
+                      ./Packages/VLCKit/VLCKit.xcframework
+                      ./Packages/VLCKit/VLCKitAssets/LicenseNotices/
+                      ./Packages/VLCKit/VLCKitAssets/dodeca_and_7channel_3DSL_HRTF.sofa
+                      ./kiririn/rounded-mplus-1m-wadalab-comp-arib.ttf
+                  key: setup-${{ hashFiles('setup.sh') }}
+
+            - name: Setup dependencies
+              if: steps.cache-setup.outputs.cache-hit != 'true'
+              run: ./setup.sh
+
+            - name: Build archive
+              run: |
+                  xcodebuild archive \
+                    -project "$PROJECT" \
+                    -scheme "$SCHEME" \
+                    -destination "${{ matrix.platform.destination }}" \
+                    -archivePath "$RUNNER_TEMP/${{ matrix.platform.id }}/kiririn-${{ matrix.platform.id }}.xcarchive" \
+                    -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+                    -skipPackagePluginValidation \
+                    CODE_SIGNING_ALLOWED=NO \
+                    CODE_SIGNING_REQUIRED=NO \
+                    CODE_SIGN_IDENTITY=""
+
+            - name: Create XCArchive ZIP
+              run: |
+                  ditto -c -k --sequesterRsrc --keepParent \
+                    "$RUNNER_TEMP/${{ matrix.platform.id }}/kiririn-${{ matrix.platform.id }}.xcarchive" \
+                    "$RUNNER_TEMP/kiririn-${{ matrix.platform.id }}.xcarchive.zip"
+
+            - name: Upload XCArchive ZIP
+              uses: actions/upload-artifact@v7
+              with:
+                  name: kiririn-${{ matrix.platform.id }}.xcarchive.zip
+                  path: ${{ runner.temp }}/kiririn-${{ matrix.platform.id }}.xcarchive.zip
+                  compression-level: 0
+                  if-no-files-found: error
+                  archive: false

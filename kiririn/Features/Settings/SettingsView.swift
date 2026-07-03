@@ -14,6 +14,7 @@ struct SettingsView: View {
     @ObservedObject private var captureService = CaptureService.shared
     @State private var isFolderPickerPresented = false
     @Environment(\.isTabActive) private var isTabActive
+    private let buildInfo = AppBuildInfo.current
 
     var body: some View {
         Form {
@@ -45,8 +46,13 @@ struct SettingsView: View {
                 } label: {
                     Label("このアプリについて", systemImage: "info.circle")
                 }
+            } footer: {
+                Text(buildInfo.appVersionDescription)
+                    .font(.callout)
+                    .foregroundStyle(.primary.opacity(0.72))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 4)
             }
-
         }
         .formStyle(.grouped)
         .navigationTitle(isTabActive ? "設定" : "")

@@ -51,13 +51,50 @@ struct ContentView: View {
             }
         }
 
+        private enum SettingsNavigationDestination: Hashable {
+            case about
+        }
+
+        private struct MacCommandNotificationModifier: ViewModifier {
+            @Binding var selectedTab: AppTab?
+            @Binding var settingsNavigationPath: NavigationPath
+            @Environment(\.openWindow) private var openWindow
+
+            func body(content: Content) -> some View {
+                content
+                    .onReceive(
+                        NotificationCenter.default.publisher(for: .requestOpenPlayable)
+                    ) { notification in
+                        guard let playable = notification.object as? Playable else { return }
+                        openWindow(id: AppWindowID.player.rawValue, value: playable)
+                    }
+                    .onReceive(
+                        NotificationCenter.default.publisher(for: .requestOpenPluginWindow)
+                    ) { notification in
+                        guard let pluginID = notification.object as? UUID else { return }
+                        openWindow(id: AppWindowID.plugin.rawValue, value: pluginID)
+                    }
+                    .onReceive(
+                        NotificationCenter.default.publisher(for: .requestOpenSettings)
+                    ) { _ in
+                        selectedTab = .settings
+                        settingsNavigationPath = NavigationPath()
+                    }
+                    .onReceive(
+                        NotificationCenter.default.publisher(for: .requestOpenAboutApp)
+                    ) { _ in
+                        selectedTab = .settings
+                        settingsNavigationPath = NavigationPath()
+                        settingsNavigationPath.append(SettingsNavigationDestination.about)
+                    }
+            }
+        }
+
         @State private var selectedMacTab: AppTab? = .nowPlaying
         @State private var visitedMacTabs: Set<AppTab> = [.nowPlaying]
+        @State private var settingsNavigationPath = NavigationPath()
     #endif
     @Environment(\.scenePhase) private var scenePhase
-    #if os(macOS)
-        @Environment(\.openWindow) private var openWindow
-    #endif
     #if !os(macOS)
         @Environment(\.verticalSizeClass) private var verticalSizeClass
         @State private var showingFilePicker = false
@@ -137,20 +174,11 @@ struct ContentView: View {
                 }
             }
             #if os(macOS)
-                .onReceive(NotificationCenter.default.publisher(for: .requestOpenPlayable)) {
-                    notification in
-                    guard let playable = notification.object as? Playable else { return }
-                    openWindow(id: AppWindowID.player.rawValue, value: playable)
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .requestOpenPluginWindow)) {
-                    notification in
-                    guard let pluginID = notification.object as? UUID else { return }
-                    openWindow(id: AppWindowID.plugin.rawValue, value: pluginID)
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .requestOpenSettings)) {
-                    _ in
-                    selectedMacTab = .settings
-                }
+                .modifier(
+                    MacCommandNotificationModifier(
+                        selectedTab: $selectedMacTab,
+                        settingsNavigationPath: $settingsNavigationPath
+                    ))
             #endif
             #if !os(macOS)
                 .onReceive(NotificationCenter.default.publisher(for: .requestOpenFile)) { _ in
@@ -404,7 +432,7 @@ struct ContentView: View {
                     )
                 }
             case .settings:
-                NavigationStack {
+                NavigationStack(path: $settingsNavigationPath) {
                     SettingsView(
                         configStore: configStore,
                         manager: manager,
@@ -412,6 +440,13 @@ struct ContentView: View {
                         pluginStore: pluginStore,
                         playerState: playerState
                     )
+                    .navigationDestination(for: SettingsNavigationDestination.self) {
+                        destination in
+                        switch destination {
+                        case .about:
+                            AboutAppView()
+                        }
+                    }
                 }
             }
         }
