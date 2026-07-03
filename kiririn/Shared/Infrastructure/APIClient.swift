@@ -56,7 +56,13 @@ nonisolated final class APIClient: Sendable {
             throw APIError.invalidResponse
         }
         guard (200...299).contains(httpResponse.statusCode) else {
-            throw APIError.httpError(statusCode: httpResponse.statusCode)
+            let diagnostic = Self.makeHTTPErrorDiagnostic(
+                data: data,
+                response: httpResponse,
+                url: url
+            )
+            logger.error("\(diagnostic.detail)")
+            throw APIError.httpError(statusCode: httpResponse.statusCode, diagnostic: diagnostic)
         }
 
         let decoder = JSONDecoder()
@@ -93,7 +99,7 @@ nonisolated final class APIClient: Sendable {
                 contentType: httpResponse.value(forHTTPHeaderField: "Content-Type")
             )
             logger.error("\(diagnostic.detail)")
-            throw APIError.decodingError(diagnostic.summary)
+            throw APIError.decodingError(diagnostic)
         }
     }
 
@@ -114,7 +120,13 @@ nonisolated final class APIClient: Sendable {
             throw APIError.invalidResponse
         }
         guard (200...299).contains(httpResponse.statusCode) else {
-            throw APIError.httpError(statusCode: httpResponse.statusCode)
+            let diagnostic = Self.makeHTTPErrorDiagnostic(
+                data: data,
+                response: httpResponse,
+                url: url
+            )
+            logger.error("\(diagnostic.detail)")
+            throw APIError.httpError(statusCode: httpResponse.statusCode, diagnostic: diagnostic)
         }
 
         return data
@@ -138,8 +150,55 @@ nonisolated final class APIClient: Sendable {
 nonisolated struct APIDecodingDiagnostic: Sendable {
     let summary: String
     let detail: String
+    let reason: String
+    let contentType: String?
     let errorIndex: Int?
     let snippet: String?
+
+    var userDescription: String {
+        var lines = [
+            "データの解析に失敗しました:\(summary)",
+            "理由:\(reason)",
+        ]
+        if let contentType, !contentType.isEmpty {
+            lines.append("Content-Type: \(contentType)")
+        }
+        if let snippet {
+            lines.append("レスポンス:\(snippet)")
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
+nonisolated struct APIHTTPErrorDiagnostic: Sendable {
+    let statusCode: Int
+    let reason: String
+    let url: String
+    let contentType: String?
+    let responseByteCount: Int
+    let responseBody: String?
+    let detail: String
+
+    var userDescription: String {
+        var firstLine = "HTTPエラー: \(statusCode)"
+        if !reason.isEmpty {
+            firstLine += " \(reason)"
+        }
+
+        var lines = [
+            firstLine,
+            "URL: \(url)",
+        ]
+        if let contentType, !contentType.isEmpty {
+            lines.append("Content-Type: \(contentType)")
+        }
+        if let responseBody {
+            lines.append("レスポンス:\(responseBody)")
+        } else {
+            lines.append("レスポンス:空です")
+        }
+        return lines.joined(separator: "\n")
+    }
 }
 
 nonisolated struct APIJSONSanitizationResult: Sendable {
@@ -148,6 +207,40 @@ nonisolated struct APIJSONSanitizationResult: Sendable {
 }
 
 extension APIClient {
+    nonisolated static func makeHTTPErrorDiagnostic(
+        data: Data,
+        response: HTTPURLResponse,
+        url: URL
+    ) -> APIHTTPErrorDiagnostic {
+        let reason = HTTPURLResponse.localizedString(forStatusCode: response.statusCode)
+        let contentType = response.value(forHTTPHeaderField: "Content-Type")
+        let responseBody = responseBodyPreview(from: data)
+
+        var detailParts = [
+            "HTTP request failed",
+            "statusCode=\(response.statusCode)",
+            "reason=\(reason)",
+            "url=\(url.absoluteString)",
+            "bytes=\(data.count)",
+        ]
+        if let contentType, !contentType.isEmpty {
+            detailParts.append("contentType=\(contentType)")
+        }
+        if let responseBody {
+            detailParts.append("response=\(responseBody)")
+        }
+
+        return APIHTTPErrorDiagnostic(
+            statusCode: response.statusCode,
+            reason: reason,
+            url: url.absoluteString,
+            contentType: contentType,
+            responseByteCount: data.count,
+            responseBody: responseBody,
+            detail: detailParts.joined(separator: "; ")
+        )
+    }
+
     nonisolated static func makeDecodingDiagnostic(
         data: Data,
         error: Error,
@@ -162,7 +255,7 @@ extension APIClient {
         let diagnosticSnippet =
             errorIndex.map { snippet(around: $0, in: data) } ?? previewSnippet(from: data)
 
-        var summary = "\(serverName)（\(serverType.displayName)）の\(endpoint)が不正なJSONを返しました"
+        var summary = "\(serverName)（\(serverType.displayName)の\(endpoint)が解析できないレスポンスを返しました"
         if let errorIndex {
             summary += " [byte \(errorIndex)]"
         }
@@ -188,6 +281,8 @@ extension APIClient {
         return APIDecodingDiagnostic(
             summary: summary,
             detail: detailParts.joined(separator: "; "),
+            reason: reason,
+            contentType: contentType,
             errorIndex: errorIndex,
             snippet: diagnosticSnippet
         )
@@ -264,6 +359,17 @@ extension APIClient {
         let prefix = Data(data.prefix(upperBound))
         let suffix = data.count > limit ? "..." : ""
         return "text=\(sanitizedText(from: prefix))\(suffix)"
+    }
+
+    private nonisolated static func responseBodyPreview(from data: Data, limit: Int = 1024)
+        -> String?
+    {
+        guard !data.isEmpty else { return nil }
+
+        let upperBound = min(data.count, limit)
+        let prefix = Data(data.prefix(upperBound))
+        let suffix = data.count > limit ? "..." : ""
+        return "\(sanitizedText(from: prefix))\(suffix)"
     }
 
     private nonisolated static func snippet(around index: Int, in data: Data, radius: Int = 48)
@@ -374,9 +480,8 @@ extension APIClient {
 nonisolated enum APIError: Error, Sendable, LocalizedError {
     case invalidURL
     case invalidResponse
-    case httpError(statusCode: Int)
-    //...
-    case decodingError(String)
+    case httpError(statusCode: Int, diagnostic: APIHTTPErrorDiagnostic?)
+    case decodingError(APIDecodingDiagnostic)
     case notFound
 
     var errorDescription: String? {
@@ -384,13 +489,93 @@ nonisolated enum APIError: Error, Sendable, LocalizedError {
         case .invalidURL:
             return "無効なURLです"
         case .invalidResponse:
-            return "サーバーから不正なレスポンスが返されました"
-        case .httpError(let code):
+            return "サーバーから解析できないレスポンスが返されました"
+        case .httpError(let code, let diagnostic):
+            if let diagnostic {
+                return diagnostic.userDescription
+            }
             return "HTTPエラー: \(code)"
-        case .decodingError(let msg):
-            return "データの解析に失敗しました: \(msg)"
+        case .decodingError(let diagnostic):
+            return diagnostic.userDescription
         case .notFound:
             return "リソースが見つかりません"
+        }
+    }
+
+    var briefDescription: String {
+        switch self {
+        case .invalidURL:
+            return "無効なURLです"
+        case .invalidResponse:
+            return "サーバーから解析できないレスポンスが返されました"
+        case .httpError(let code, let diagnostic):
+            if let diagnostic, !diagnostic.reason.isEmpty {
+                return "HTTPエラー: \(code) \(diagnostic.reason)"
+            }
+            return "HTTPエラー: \(code)"
+        case .decodingError(let diagnostic):
+            if let errorIndex = diagnostic.errorIndex {
+                return "データの解析に失敗しました(byte \(errorIndex))"
+            }
+            return "データの解析に失敗しました"
+        case .notFound:
+            return "リソースが見つかりません"
+        }
+    }
+
+    var feedbackContent: ServerOperationFeedbackContent {
+        switch self {
+        case .invalidURL:
+            return ServerOperationFeedbackContent(title: "無効なURLです")
+        case .invalidResponse:
+            return ServerOperationFeedbackContent(title: "サーバーから解析できないレスポンスが返されました")
+        case .httpError(let code, let diagnostic):
+            guard let diagnostic else {
+                return ServerOperationFeedbackContent(
+                    title: "HTTPエラー",
+                    fields: [.init(label: "ステータス", value: "\(code)")]
+                )
+            }
+
+            var fields = [
+                ServerOperationFeedbackContent.Field(
+                    label: "ステータス",
+                    value: "\(diagnostic.statusCode) \(diagnostic.reason)"
+                ),
+                ServerOperationFeedbackContent.Field(label: "URL", value: diagnostic.url),
+                ServerOperationFeedbackContent.Field(
+                    label: "レスポンスサイズ",
+                    value: "\(diagnostic.responseByteCount)バイト"
+                ),
+            ]
+            if let contentType = diagnostic.contentType, !contentType.isEmpty {
+                fields.append(.init(label: "Content-Type", value: contentType))
+            }
+
+            return ServerOperationFeedbackContent(
+                title: "HTTPエラー",
+                fields: fields,
+                response: diagnostic.responseBody ?? "空です"
+            )
+        case .decodingError(let diagnostic):
+            var fields = [
+                ServerOperationFeedbackContent.Field(label: "対象", value: diagnostic.summary),
+                ServerOperationFeedbackContent.Field(label: "理由", value: diagnostic.reason),
+            ]
+            if let contentType = diagnostic.contentType, !contentType.isEmpty {
+                fields.append(.init(label: "Content-Type", value: contentType))
+            }
+            if let errorIndex = diagnostic.errorIndex {
+                fields.append(.init(label: "バイト位置", value: "\(errorIndex)"))
+            }
+
+            return ServerOperationFeedbackContent(
+                title: "データの解析に失敗しました",
+                fields: fields,
+                response: diagnostic.snippet
+            )
+        case .notFound:
+            return ServerOperationFeedbackContent(title: "リソースが見つかりません")
         }
     }
 }

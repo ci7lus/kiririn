@@ -1,6 +1,10 @@
 import SwiftUI
 
 struct ServerEditView: View {
+    private enum ScrollTarget {
+        static let lastConnectionError = "lastConnectionError"
+    }
+
     let configStore: ServerConfigStore
     let manager: ServerManager
     var existingConfig: ServerConfiguration?
@@ -13,12 +17,14 @@ struct ServerEditView: View {
     @State private var liveEnabled: Bool = true
     @State private var recordingEnabled: Bool = true
     @State private var isTesting = false
-    @State private var testResult: String?
-    @State private var testSuccess = false
     @State private var isRefreshingPrograms = false
-    @State private var programRefreshResult: ManualProgramCatalogRefreshResult?
+    @State private var transientErrorDetail: ServerOperationFeedbackContent?
 
     private var isEditing: Bool { existingConfig != nil }
+    private var displayedErrorDetail: ServerOperationFeedbackContent? {
+        guard let existingConfig else { return transientErrorDetail }
+        return manager.connectionStates[existingConfig.id]?.lastErrorDetail ?? transientErrorDetail
+    }
     private var manualProgramRefreshServerID: String? {
         guard let existingConfig, type.supportsLive, liveEnabled else { return nil }
         return existingConfig.id
@@ -35,102 +41,89 @@ struct ServerEditView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("基本設定") {
-                    TextField("名前", text: $name)
-                        .textContentType(.name)
-                    Picker("タイプ", selection: $type) {
-                        ForEach(ServerType.allCases, id: \.self) { type in
-                            Text(type.displayName).tag(type)
-                        }
-                    }
-                    if type.requiresBaseURL {
-                        TextField("ベースURL", text: $baseURL)
-                            .textContentType(.URL)
-                            .autocorrectionDisabled()
-                            .kiririnURLInputModifiers()
-                    }
-                }
-
-                authSection
-
-                Section("機能") {
-                    Toggle("放送", isOn: $liveEnabled)
-                        .disabled(!type.supportsLive)
-                    Toggle("録画", isOn: $recordingEnabled)
-                        .disabled(!type.supportsRecording)
-                }
-
-                Section {
-                    Button {
-                        Task { await testConnection() }
-                    } label: {
-                        HStack {
-                            if isTesting {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                            Text("接続テスト")
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled((type.requiresBaseURL && baseURL.isEmpty) || isTesting)
-
-                    if let testResult {
-                        HStack(spacing: 6) {
-                            Image(
-                                systemName: testSuccess
-                                    ? "checkmark.circle.fill" : "xmark.circle.fill"
+            ScrollViewReader { proxy in
+                Form {
+                    if let displayedErrorDetail {
+                        Section("前回の接続エラー") {
+                            ServerOperationFeedbackView(
+                                iconName: "xmark.circle.fill",
+                                color: .red,
+                                usesPrimaryText: false,
+                                content: displayedErrorDetail
                             )
-                            .foregroundStyle(testSuccess ? .green : .red)
-                            Text(testResult)
-                                .font(.caption)
-                                .foregroundStyle(testSuccess ? Color.primary : Color.red)
                         }
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.top, 4)
+                        .id(ScrollTarget.lastConnectionError)
                     }
 
-                    if manualProgramRefreshServerID != nil {
+                    Section("基本設定") {
+                        TextField("名前", text: $name)
+                            .textContentType(.name)
+                        Picker("タイプ", selection: $type) {
+                            ForEach(ServerType.allCases, id: \.self) { type in
+                                Text(type.displayName).tag(type)
+                            }
+                        }
+                        if type.requiresBaseURL {
+                            TextField("ベースURL", text: $baseURL)
+                                .textContentType(.URL)
+                                .autocorrectionDisabled()
+                                .kiririnURLInputModifiers()
+                        }
+                    }
+
+                    authSection
+
+                    Section("機能") {
+                        Toggle("放送", isOn: $liveEnabled)
+                            .disabled(!type.supportsLive)
+                        Toggle("録画", isOn: $recordingEnabled)
+                            .disabled(!type.supportsRecording)
+                    }
+
+                    Section {
                         Button {
-                            Task { await refreshPrograms() }
+                            Task { await testConnection(scrollProxy: proxy) }
                         } label: {
                             HStack {
-                                if isRefreshingPrograms {
+                                if isTesting {
                                     ProgressView()
                                         .controlSize(.small)
                                 }
-                                Text("番組情報再取得")
+                                Text("接続テスト")
                             }
                             .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
-                        .disabled(isManualProgramRefreshDisabled)
+                        .disabled((type.requiresBaseURL && baseURL.isEmpty) || isTesting)
 
-                        if hasUnsavedChanges {
-                            Text("番組情報の再取得は、変更を保存してから実行してください")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.top, 4)
-                        } else if let programRefreshResult {
-                            let feedback = programRefreshFeedback(for: programRefreshResult)
-                            HStack(spacing: 6) {
-                                Image(systemName: feedback.iconName)
-                                    .foregroundStyle(feedback.color)
-                                Text(feedback.message)
-                                    .font(.caption)
-                                    .foregroundStyle(
-                                        feedback.color == .green ? Color.primary : feedback.color)
+                        if manualProgramRefreshServerID != nil {
+                            Button {
+                                Task { await refreshPrograms(scrollProxy: proxy) }
+                            } label: {
+                                HStack {
+                                    if isRefreshingPrograms {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    }
+                                    Text("番組情報再取得")
+                                }
+                                .frame(maxWidth: .infinity)
                             }
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.top, 4)
+                            .buttonStyle(.bordered)
+                            .disabled(isManualProgramRefreshDisabled)
+
+                            if hasUnsavedChanges {
+                                Text("番組情報の再取得は、変更を保存してから実行してください")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                    .padding(.top, 4)
+                            }
                         }
                     }
                 }
+                .formStyle(.grouped)
             }
-            .formStyle(.grouped)
             .navigationTitle(isEditing ? "サーバー編集" : "サーバー追加")
             #if !os(macOS)
                 .navigationBarTitleDisplayMode(.inline)
@@ -218,9 +211,8 @@ struct ServerEditView: View {
         recordingEnabled = type.supportsRecording
     }
 
-    private func testConnection() async {
+    private func testConnection(scrollProxy: ScrollViewProxy) async {
         isTesting = true
-        testResult = nil
         let config = buildConfig()
         let provider: any ServerProvider = {
             switch config.type {
@@ -232,41 +224,63 @@ struct ServerEditView: View {
         }()
 
         do {
-            let version = try await provider.checkConnection()
-            testSuccess = true
-            if let version, !version.isEmpty {
-                testResult = version
-            } else {
-                testResult = "接続成功"
-            }
+            _ = try await provider.checkConnection()
+            clearConnectionError(for: config)
         } catch {
-            testSuccess = false
-            testResult = error.localizedDescription
+            recordConnectionError(error, for: config)
         }
         isTesting = false
+        await scrollToLastConnectionErrorIfNeeded(using: scrollProxy)
     }
 
-    private func refreshPrograms() async {
+    private func refreshPrograms(scrollProxy: ScrollViewProxy) async {
         guard let serverId = manualProgramRefreshServerID else { return }
 
         isRefreshingPrograms = true
-        programRefreshResult = nil
-        programRefreshResult = await manager.refreshProgramsManually(serverId: serverId)
+        _ = await manager.refreshProgramsManually(serverId: serverId)
         isRefreshingPrograms = false
+        await scrollToLastConnectionErrorIfNeeded(using: scrollProxy)
     }
 
-    private func programRefreshFeedback(
-        for result: ManualProgramCatalogRefreshResult
-    ) -> (iconName: String, color: Color, message: String) {
-        switch result {
-        case .refreshed:
-            return ("checkmark.circle.fill", .green, "番組情報を再取得しました")
-        case .queuedUntilWiFi:
-            return ("wifi.slash", .orange, "WiFi接続時に番組情報を再取得します")
-        case .unavailable:
-            return ("xmark.circle.fill", .red, "このサーバーでは番組情報を再取得できません")
-        case .failed(let message):
-            return ("xmark.circle.fill", .red, message)
+    private func clearConnectionError(for config: ServerConfiguration) {
+        transientErrorDetail = nil
+        if let state = manager.connectionStates[config.id] {
+            state.lastError = nil
+            state.lastErrorDetail = nil
+            if state.status == .error {
+                state.status = .disconnected
+            }
+        }
+    }
+
+    private func recordConnectionError(_ error: Error, for config: ServerConfiguration) {
+        let feedback = errorFeedback(for: error)
+        transientErrorDetail = feedback.detail
+        if let state = manager.connectionStates[config.id] {
+            state.status = .error
+            state.lastError = feedback.brief
+            state.lastErrorDetail = feedback.detail
+            state.version = nil
+        }
+    }
+
+    private func errorFeedback(for error: Error) -> (
+        brief: String, detail: ServerOperationFeedbackContent
+    ) {
+        if let apiError = error as? APIError {
+            return (apiError.briefDescription, apiError.feedbackContent)
+        }
+        return (
+            error.localizedDescription,
+            ServerOperationFeedbackContent(title: error.localizedDescription)
+        )
+    }
+
+    private func scrollToLastConnectionErrorIfNeeded(using proxy: ScrollViewProxy) async {
+        guard displayedErrorDetail != nil else { return }
+        await Task.yield()
+        withAnimation {
+            proxy.scrollTo(ScrollTarget.lastConnectionError, anchor: .top)
         }
     }
 
@@ -285,9 +299,128 @@ struct ServerEditView: View {
         } else {
             manager.connectionStates[config.id]?.status = .disconnected
             manager.connectionStates[config.id]?.lastError = nil
+            manager.connectionStates[config.id]?.lastErrorDetail = nil
         }
         manager.serverAvailabilityDidChange()
         dismiss()
+    }
+}
+
+private struct ServerOperationFeedbackView: View {
+    let iconName: String
+    let color: Color
+    let usesPrimaryText: Bool
+    let content: ServerOperationFeedbackContent
+
+    private var detailLeadingPadding: CGFloat { 28 }
+    private var responseDisplayLimit: Int { 2_000 }
+    private var responseScrollThreshold: Int { 600 }
+    private var responseMaxHeight: CGFloat { 160 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 6) {
+                Image(systemName: iconName)
+                    .foregroundStyle(color)
+                    .frame(width: 22, alignment: .center)
+                Text(content.title)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(usesPrimaryText ? Color.primary : color)
+                    .multilineTextAlignment(.leading)
+                    .textSelection(.enabled)
+            }
+
+            if let message = content.message, !message.isEmpty {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(usesPrimaryText ? Color.primary : color)
+                    .multilineTextAlignment(.leading)
+                    .textSelection(.enabled)
+                    .padding(.leading, detailLeadingPadding)
+            }
+
+            if !content.fields.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(content.fields.enumerated()), id: \.offset) { _, field in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(field.label)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            fieldValueText(field)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, detailLeadingPadding)
+            }
+
+            if let response = content.response, !response.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("レスポンス")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    responseCodeBlock(response)
+                }
+                .padding(.leading, detailLeadingPadding)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 4)
+    }
+
+    @ViewBuilder
+    private func fieldValueText(_ field: ServerOperationFeedbackContent.Field) -> some View {
+        Text(field.value)
+            .font(field.label == "URL" ? .caption.monospaced() : .caption)
+            .foregroundStyle(Color.primary)
+            .multilineTextAlignment(.leading)
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+    }
+
+    @ViewBuilder
+    private func responseCodeBlock(_ response: String) -> some View {
+        let displayedResponse = displayedResponse(response)
+        let needsScroll = response.count > responseScrollThreshold
+
+        Group {
+            if needsScroll {
+                ScrollView(.vertical) {
+                    responseCodeText(displayedResponse)
+                }
+                .frame(maxHeight: responseMaxHeight)
+            } else {
+                responseCodeText(displayedResponse)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay {
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+        }
+    }
+
+    private func responseCodeText(_ response: String) -> some View {
+        Text(response)
+            .font(.caption2.monospaced())
+            .foregroundStyle(Color.primary)
+            .multilineTextAlignment(.leading)
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+    }
+
+    private func displayedResponse(_ response: String) -> String {
+        guard response.count > responseDisplayLimit else { return response }
+        return String(response.prefix(responseDisplayLimit)) + "\n…（表示上限に達したため省略しました）"
     }
 }
 

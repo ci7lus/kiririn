@@ -9,7 +9,7 @@ struct APIClientDiagnosticsTests {
         let programs: [String]
     }
 
-    @Test func decodingDiagnosticReportsJSONErrorIndexAndControlCharacterSnippet() {
+    @Test func decodingDiagnosticReportsJSONErrorIndexAndControlCharacterSnippet() throws {
         let data =
             Data(#"{"programs":["正常"#.utf8)
             + Data([0x1D])
@@ -35,11 +35,58 @@ struct APIClientDiagnosticsTests {
             #expect(diagnostic.summary.contains("Mirakurun"))
             #expect(diagnostic.summary.contains("/api/programs"))
             #expect(diagnostic.summary.contains("byte \(expectedIndex)"))
+            #expect(diagnostic.reason.contains("dataCorrupted"))
             #expect(diagnostic.detail.contains("contentType=application/json"))
             #expect(diagnostic.detail.contains("errorIndex=\(expectedIndex)"))
             #expect(diagnostic.snippet?.contains("\\u{001D}") == true)
             #expect(diagnostic.snippet?.contains("[1D]") == true)
+
+            let apiError = APIError.decodingError(diagnostic)
+            let feedback = apiError.feedbackContent
+            #expect(apiError.briefDescription == "データの解析に失敗しました(byte \(expectedIndex))")
+            #expect(feedback.title == "データの解析に失敗しました")
+            #expect(
+                feedback.fields.contains(.init(label: "Content-Type", value: "application/json")))
+            #expect(feedback.fields.contains(.init(label: "バイト位置", value: "\(expectedIndex)")))
+            #expect(feedback.response?.contains("\\u{001D}") == true)
+            #expect(apiError.localizedDescription.contains("理由:dataCorrupted"))
+            #expect(apiError.localizedDescription.contains("レスポンス:"))
         }
+    }
+
+    @Test func httpErrorDiagnosticReportsStatusAndResponseBody() throws {
+        let data = Data(#"{"error":"bad request","message":"invalid token"}"#.utf8)
+        let url = URL(string: "http://example.com/api/status")!
+        let response = try #require(
+            HTTPURLResponse(
+                url: url,
+                statusCode: 400,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )
+        )
+
+        let diagnostic = APIClient.makeHTTPErrorDiagnostic(
+            data: data,
+            response: response,
+            url: url
+        )
+        let apiError = APIError.httpError(statusCode: 400, diagnostic: diagnostic)
+        let feedback = apiError.feedbackContent
+
+        #expect(diagnostic.statusCode == 400)
+        #expect(diagnostic.contentType == "application/json")
+        #expect(diagnostic.responseBody?.contains("invalid token") == true)
+        #expect(apiError.briefDescription == "HTTPエラー: 400 bad request")
+        #expect(feedback.title == "HTTPエラー")
+        #expect(feedback.fields.contains(.init(label: "ステータス", value: "400 bad request")))
+        #expect(feedback.fields.contains(.init(label: "URL", value: url.absoluteString)))
+        #expect(feedback.fields.contains(.init(label: "Content-Type", value: "application/json")))
+        #expect(feedback.response?.contains("invalid token") == true)
+        #expect(apiError.localizedDescription.contains("HTTPエラー: 400"))
+        #expect(apiError.localizedDescription.contains("Content-Type: application/json"))
+        #expect(apiError.localizedDescription.contains("レスポンス:"))
+        #expect(apiError.localizedDescription.contains("invalid token"))
     }
 
     @Test func sanitizedJSONRemovesInvalidControlCharactersInsideStrings() throws {

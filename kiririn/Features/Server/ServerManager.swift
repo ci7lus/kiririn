@@ -166,6 +166,7 @@ class ServerManager {
                     providerConfigurations[config.id] = config
                     connectionStates[config.id]?.status = .disconnected
                     connectionStates[config.id]?.lastError = nil
+                    connectionStates[config.id]?.lastErrorDetail = nil
                     connectionStates[config.id]?.version = nil
                 }
             } else {
@@ -198,6 +199,30 @@ class ServerManager {
 
     private func noteCommunicationFailure() {
         communicationFailureCount += 1
+    }
+
+    private func errorFeedback(for error: Error) -> (
+        brief: String, detail: ServerOperationFeedbackContent
+    ) {
+        if let apiError = error as? APIError {
+            return (apiError.briefDescription, apiError.feedbackContent)
+        }
+        return (
+            error.localizedDescription,
+            ServerOperationFeedbackContent(title: error.localizedDescription)
+        )
+    }
+
+    private func clearLastError(for state: ServerConnectionState) {
+        state.lastError = nil
+        state.lastErrorDetail = nil
+    }
+
+    private func recordLastError(_ error: Error, for state: ServerConnectionState) -> String {
+        let feedback = errorFeedback(for: error)
+        state.lastError = feedback.brief
+        state.lastErrorDetail = feedback.detail
+        return feedback.brief
     }
 
     private func createProvider(for config: ServerConfiguration) -> any ServerProvider {
@@ -249,14 +274,14 @@ class ServerManager {
         else { return .skipped }
         guard state.isEnabled else {
             state.status = .disconnected
-            state.lastError = nil
+            clearLastError(for: state)
             state.version = nil
             rebuildAggregatedData()
             return .skipped
         }
 
         state.status = .connecting
-        state.lastError = nil
+        clearLastError(for: state)
         state.version = nil
         loadingTaskCount += 1
         defer { loadingTaskCount = max(0, loadingTaskCount - 1) }
@@ -270,11 +295,11 @@ class ServerManager {
                 serverId: serverId, programRefreshPolicy: programRefreshPolicy)
         } catch {
             state.status = .error
-            state.lastError = error.localizedDescription
+            let message = recordLastError(error, for: state)
             state.version = nil
             noteCommunicationFailure()
             rebuildAggregatedData()
-            return .failed(error.localizedDescription)
+            return .failed(message)
         }
     }
 
@@ -313,28 +338,30 @@ class ServerManager {
                 do {
                     let fetchedPrograms = try await provider.fetchPrograms()
                     await cacheStore.cachePrograms(fetchedPrograms, serverId: serverId)
-                    state.lastError = nil
+                    clearLastError(for: state)
                     lastProgramFullFetchDatesByServer[serverId] = Date()
                     pendingProgramFullFetchServerIDs.remove(serverId)
                     rebuildAggregatedData()
                     return .refreshed
                 } catch {
-                    state.lastError = error.localizedDescription
+                    state.status = .error
+                    let message = recordLastError(error, for: state)
+                    state.version = nil
                     noteCommunicationFailure()
                     logger.error(
                         "Failed to refresh program catalog for \(serverLogDescription(for: serverId)): \(error)"
                     )
                     rebuildAggregatedData()
-                    return .failed(error.localizedDescription)
+                    return .failed(message)
                 }
             }
         } catch {
             state.status = .error
-            state.lastError = error.localizedDescription
+            let message = recordLastError(error, for: state)
             state.version = nil
             noteCommunicationFailure()
             rebuildAggregatedData()
-            return .failed(error.localizedDescription)
+            return .failed(message)
         }
     }
 

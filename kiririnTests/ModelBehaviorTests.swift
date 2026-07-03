@@ -178,6 +178,7 @@ struct ModelBehaviorTests {
         #expect(!state.isEnabled)
         #expect(state.status == .disconnected)
         #expect(state.lastError == nil)
+        #expect(state.lastErrorDetail == nil)
         #expect(state.lastConnectedAt == nil)
     }
 

@@ -226,7 +226,7 @@ final class RecordDownloadManager {
                     throw APIError.invalidResponse
                 }
                 guard (200...299).contains(httpResponse.statusCode) else {
-                    throw APIError.httpError(statusCode: httpResponse.statusCode)
+                    throw APIError.httpError(statusCode: httpResponse.statusCode, diagnostic: nil)
                 }
 
                 let videoFileName = localVideoFileName(

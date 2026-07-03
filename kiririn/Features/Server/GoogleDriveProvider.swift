@@ -252,7 +252,8 @@ final class GoogleDriveProvider: RecordingServerProvider {
         path: String,
         queryItems: [URLQueryItem]? = nil
     ) async throws -> T {
-        let data = try await requestData(path: path, queryItems: queryItems)
+        let url = googleAPIURL(path: path, queryItems: queryItems)
+        let data = try await requestData(url: url)
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
@@ -274,26 +275,38 @@ final class GoogleDriveProvider: RecordingServerProvider {
         do {
             let decodedData = try decoder.decode(T.self, from: data)
             return decodedData
-        } catch let DecodingError.dataCorrupted(context) {
-            logger.error("データが破損しています: \(context)")
-        } catch let DecodingError.keyNotFound(key, context) {
-            logger.error("キーが見つかりません: '\(key.stringValue)' - \(context.debugDescription)")
-        } catch let DecodingError.typeMismatch(type, context) {
-            logger.error("型の不一致: \(type) を期待していましたが、違います - \(context.debugDescription)")
-        } catch let DecodingError.valueNotFound(value, context) {
-            logger.error("値が見つかりません: \(value) - \(context.debugDescription)")
         } catch {
-            logger.error("\(String(describing: String(data: data, encoding: .utf8)))")
+            let diagnostic = APIClient.makeDecodingDiagnostic(
+                data: data,
+                error: error,
+                url: url,
+                serverName: configuration.name,
+                serverType: configuration.type,
+                contentType: nil
+            )
+            logger.error("\(diagnostic.detail)")
+            throw APIError.decodingError(diagnostic)
         }
-        throw APIError.invalidResponse
+    }
+
+    private func googleAPIURL(path: String, queryItems: [URLQueryItem]? = nil) -> URL {
+        let url = URL(string: "https://www.googleapis.com/")!.appendingPathComponent(path)
+        return requestURL(url: url, queryItems: queryItems)
+    }
+
+    private func requestURL(url: URL, queryItems: [URLQueryItem]?) -> URL {
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: true)!
+        if let queryItems {
+            components.queryItems = (components.queryItems ?? []) + queryItems
+        }
+        return components.url!
     }
 
     private func requestData(
         path: String,
         queryItems: [URLQueryItem]? = nil
     ) async throws -> Data {
-        let url = URL(string: "https://www.googleapis.com/")!.appendingPathComponent(path)
-        return try await requestData(url: url, queryItems: queryItems)
+        try await requestData(url: googleAPIURL(path: path, queryItems: queryItems))
     }
 
     private func requestData(
@@ -306,12 +319,8 @@ final class GoogleDriveProvider: RecordingServerProvider {
             headers["Authorization"] = "Bearer \(token)"
         }
 
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: true)!
-        if let queryItems = queryItems {
-            components.queryItems = (components.queryItems ?? []) + queryItems
-        }
-
-        var request = URLRequest(url: components.url!)
+        let resolvedURL = requestURL(url: url, queryItems: queryItems)
+        var request = URLRequest(url: resolvedURL)
         for (key, value) in headers {
             request.setValue(value, forHTTPHeaderField: key)
         }
@@ -322,7 +331,13 @@ final class GoogleDriveProvider: RecordingServerProvider {
             throw APIError.invalidResponse
         }
         guard (200...299).contains(httpResponse.statusCode) else {
-            throw APIError.httpError(statusCode: httpResponse.statusCode)
+            let diagnostic = APIClient.makeHTTPErrorDiagnostic(
+                data: data,
+                response: httpResponse,
+                url: resolvedURL
+            )
+            logger.error("\(diagnostic.detail)")
+            throw APIError.httpError(statusCode: httpResponse.statusCode, diagnostic: diagnostic)
         }
 
         return data
