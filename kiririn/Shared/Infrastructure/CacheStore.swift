@@ -748,14 +748,14 @@ extension CacheStore {
                 t.column("hasLogoData", .boolean).notNull()
                 t.column("remoteControlKeyId", .integer)
                 t.column("channel", .jsonText)
-                t.column("backendId", .text).notNull()
+                t.column("serverId", .text).notNull()
                 t.column("providerIdentifier", .text)
             }
 
             try db.create(table: "program") { t in
                 t.column("id", .text).notNull()
-                t.column("backendId", .text).notNull()
-                t.primaryKey(["id", "backendId"])
+                t.column("serverId", .text).notNull()
+                t.primaryKey(["id", "serverId"])
 
                 t.column("eventId", .integer)
                 t.column("startAt", .datetime).notNull()
@@ -798,7 +798,7 @@ extension CacheStore {
 
             try db.create(table: "local_record") { t in
                 t.column("id", .text).primaryKey()
-                t.column("backendId", .text).notNull()
+                t.column("serverId", .text).notNull()
                 t.column("name", .text).notNull()
                 t.column("serviceName", .text)
                 t.column("startAt", .datetime)
@@ -820,54 +820,15 @@ extension CacheStore {
             }
 
             try db.create(table: "program_fetch_status") { t in
-                t.column("backendId", .text).primaryKey()
+                t.column("serverId", .text).primaryKey()
                 t.column("lastSuccessfulProgramFullFetchAt", .datetime).notNull()
             }
 
             try db.create(
-                index: "index_program_on_backendId", on: "program", columns: ["backendId"])
+                index: "index_program_on_serverId", on: "program", columns: ["serverId"])
             try db.create(
                 index: "index_program_on_serviceId_networkId_startAt", on: "program",
                 columns: ["serviceId", "networkId", "startAt"])
-        }
-
-        migrator.registerMigration("rename-server-id-columns-20260702") { db in
-            try db.execute(sql: "DROP INDEX IF EXISTS index_program_on_backendId")
-
-            let serviceColumns = Set(
-                try Row.fetchAll(db, sql: "PRAGMA table_info(service)")
-                    .map { row -> String in row["name"] })
-            if serviceColumns.contains("backendId"), !serviceColumns.contains("serverId") {
-                try db.execute(sql: "ALTER TABLE service RENAME COLUMN backendId TO serverId")
-            }
-
-            let programColumns = Set(
-                try Row.fetchAll(db, sql: "PRAGMA table_info(program)")
-                    .map { row -> String in row["name"] })
-            if programColumns.contains("backendId"), !programColumns.contains("serverId") {
-                try db.execute(sql: "ALTER TABLE program RENAME COLUMN backendId TO serverId")
-            }
-
-            let localRecordColumns = Set(
-                try Row.fetchAll(db, sql: "PRAGMA table_info(local_record)")
-                    .map { row -> String in row["name"] })
-            if localRecordColumns.contains("backendId"), !localRecordColumns.contains("serverId") {
-                try db.execute(sql: "ALTER TABLE local_record RENAME COLUMN backendId TO serverId")
-            }
-
-            let programFetchStatusColumns = Set(
-                try Row.fetchAll(db, sql: "PRAGMA table_info(program_fetch_status)")
-                    .map { row -> String in row["name"] })
-            if programFetchStatusColumns.contains("backendId"),
-                !programFetchStatusColumns.contains("serverId")
-            {
-                try db.execute(
-                    sql: "ALTER TABLE program_fetch_status RENAME COLUMN backendId TO serverId")
-            }
-
-            try db.execute(
-                sql: "CREATE INDEX IF NOT EXISTS index_program_on_serverId ON program(serverId)"
-            )
         }
 
         return migrator
