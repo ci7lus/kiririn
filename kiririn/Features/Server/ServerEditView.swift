@@ -38,6 +38,14 @@ struct ServerEditView: View {
         return isTesting || isRefreshingPrograms || hasUnsavedChanges
             || !configStore.isEnabled(serverId)
     }
+    private var typeSelection: Binding<ServerType> {
+        Binding {
+            type
+        } set: { newType in
+            type = newType
+            syncFeatureTogglesForType()
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -58,7 +66,7 @@ struct ServerEditView: View {
                     Section("基本設定") {
                         TextField("名前", text: $name)
                             .textContentType(.name)
-                        Picker("タイプ", selection: $type) {
+                        Picker("タイプ", selection: typeSelection) {
                             ForEach(ServerType.allCases, id: \.self) { type in
                                 Text(type.displayName).tag(type)
                             }
@@ -163,11 +171,9 @@ struct ServerEditView: View {
                     auth = config.auth
                     liveEnabled = config.liveEnabled
                     recordingEnabled = config.recordingEnabled
+                } else {
+                    syncFeatureTogglesForType()
                 }
-                syncFeatureTogglesForType()
-            }
-            .onChange(of: type) { _, _ in
-                enableSupportedFeaturesForCurrentType()
             }
         }
         #if os(macOS)
@@ -198,15 +204,6 @@ struct ServerEditView: View {
     }
 
     private func syncFeatureTogglesForType() {
-        if !type.supportsLive {
-            liveEnabled = false
-        }
-        if !type.supportsRecording {
-            recordingEnabled = false
-        }
-    }
-
-    private func enableSupportedFeaturesForCurrentType() {
         liveEnabled = type.supportsLive
         recordingEnabled = type.supportsRecording
     }
