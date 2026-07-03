@@ -75,8 +75,8 @@ final class EPGStationProvider: LiveServerProvider, RecordingServerProvider {
             URLQueryItem(name: "endAt", value: "\(endAt)"),
             URLQueryItem(name: "isHalfWidth", value: "true"),
         ]
-        for (key, enabled) in currentBroadcast where enabled {
-            queryItems.append(URLQueryItem(name: key, value: "true"))
+        for (key, enabled) in currentBroadcast {
+            queryItems.append(URLQueryItem(name: key, value: enabled ? "true" : "false"))
         }
 
         let response: [EPGStationScheduleChannel] = try await client.request(
