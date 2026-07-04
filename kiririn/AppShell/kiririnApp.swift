@@ -243,11 +243,15 @@ struct KiririnApp: App {
             "https://f85557a0b48501e363aa402ebf5e2c74@o481625.ingest.us.sentry.io/4511399987183616"
 
         static func initializeIfAvailable() {
+            let buildInfo = AppBuildInfo.current
             SentrySDK.start { options in
                 options.dsn = dsn
                 options.enableNetworkBreadcrumbs = false
                 options.enableCaptureFailedRequests = false
                 options.enableNetworkTracking = false
+            }
+            SentrySDK.configureScope { scope in
+                scope.setTag(value: buildInfo.gitCommitHash, key: "revision")
             }
         }
     }
