@@ -92,9 +92,7 @@ final class AppModel {
         logger.debug("setupIfNeeded start: providers=\(manager.providers.count)")
         Task {
             let cacheStore = CacheStore()
-            self.cacheStore = cacheStore
-            playerState.cacheStore = cacheStore
-            await manager.setCacheStore(cacheStore)
+            await installCacheStore(cacheStore)
             await manager.connectAll()
             let states = manager.connectionStates
                 .map { "\($0.key):\($0.value.status.rawValue)" }
@@ -102,6 +100,31 @@ final class AppModel {
                 .joined(separator: ",")
             logger.debug("setupIfNeeded finished: connectionStates=\(states)")
         }
+    }
+
+    @discardableResult
+    func deleteCacheDatabase() async throws -> Bool {
+        if let cacheStore {
+            try cacheStore.close()
+        }
+
+        do {
+            let didDeleteFile = try CacheStore.deletePersistentDatabaseFiles()
+            await installCacheStore(CacheStore())
+            return didDeleteFile
+        } catch {
+            await installCacheStore(CacheStore())
+            throw error
+        }
+    }
+
+    private func installCacheStore(_ cacheStore: CacheStore) async {
+        self.cacheStore = cacheStore
+        playerState.cacheStore = cacheStore
+        for state in activePlayerStates {
+            state.cacheStore = cacheStore
+        }
+        await manager.setCacheStore(cacheStore)
     }
 
     #if os(macOS)

@@ -28,6 +28,8 @@ struct ProgramGuideView: View {
     @State private var viewportHeight: CGFloat = 600
     @State private var viewportWidth: CGFloat = 0
     @State private var offsetTracker = HorizontalOffsetTracker()
+    @State private var horizontalScrollResetToken = 0
+    @State private var horizontalScrollController = ProgramGuideHorizontalScrollController()
     @State private var selectedProgram: ProgramSelection? = nil
     @State private var serviceSelectionForPlayback: TVService? = nil
     @State private var lastAnchorTime: Date? = nil
@@ -41,6 +43,7 @@ struct ProgramGuideView: View {
     private let minimumPastDays = -1
     private let maximumFutureDays = 7
     private let favoriteBroadcastType = "favorites"
+    private let horizontalScrollLeadingAnchorID = "programGuideHorizontalLeadingAnchor"
 
     #if os(macOS)
         private var openPlayerWindow: ((Playable) -> Void) {
@@ -163,7 +166,10 @@ struct ProgramGuideView: View {
                         updateDisplayChannels()
                     }
                 }
-                .onChange(of: selectedBroadcastType) { _, _ in updateDisplayChannels() }
+                .onChange(of: selectedBroadcastType) { _, _ in
+                    updateDisplayChannels()
+                    horizontalScrollResetToken &+= 1
+                }
                 .task {
                     await runCurrentTimeUpdates()
                 }
@@ -235,29 +241,35 @@ struct ProgramGuideView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ScrollView([.horizontal, .vertical]) {
-                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
-                    Section {
-                        gridSectionContent
-                    } header: {
-                        headerSectionContent
+            ScrollViewReader { proxy in
+                ScrollView([.horizontal, .vertical]) {
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
+                        Section {
+                            gridSectionContent
+                        } header: {
+                            headerSectionContent
+                        }
                     }
+                    .programGuideHorizontalScrollController(horizontalScrollController)
                 }
+                .coordinateSpace(name: "guideScroll")
+                .scrollPosition($scrollPosition)
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                .onScrollGeometryChange(for: CGFloat.self) { geo in
+                    geo.containerSize.height
+                } action: { _, new in
+                    viewportHeight = new
+                }
+                .onScrollGeometryChange(for: CGFloat.self) { geo in
+                    geo.contentOffset.x
+                } action: { _, new in
+                    offsetTracker.horizontalOffset = new
+                }
+                .onChange(of: horizontalScrollResetToken) { _, _ in
+                    resetHorizontalScrollPosition(proxy: proxy)
+                }
+                .background(Color.kiririnSystemBackground)
             }
-            .coordinateSpace(name: "guideScroll")
-            .scrollPosition($scrollPosition)
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-            .onScrollGeometryChange(for: CGFloat.self) { geo in
-                geo.containerSize.height
-            } action: { _, new in
-                viewportHeight = new
-            }
-            .onScrollGeometryChange(for: CGFloat.self) { geo in
-                geo.contentOffset.x
-            } action: { _, new in
-                offsetTracker.horizontalOffset = new
-            }
-            .background(Color.kiririnSystemBackground)
         }
     }
 
@@ -299,6 +311,7 @@ struct ProgramGuideView: View {
         HStack(alignment: .top, spacing: 0) {
             // 時刻ルーラー（水平方向のみ固定、垂直方向はスクロール）
             timeRuler
+                .id(horizontalScrollLeadingAnchorID)
                 .visualEffect { content, geometryProxy in
                     let scrollX = min(0, geometryProxy.frame(in: .named("guideScroll")).minX)
                     return content.offset(x: -scrollX)
@@ -487,6 +500,17 @@ struct ProgramGuideView: View {
                 updateScrollPosition(toY: 0)
             }
         }
+    }
+
+    private func resetHorizontalScrollPosition(proxy: ScrollViewProxy) {
+        offsetTracker.horizontalOffset = 0
+        #if os(iOS)
+            horizontalScrollController.scrollToLeading(animated: true)
+        #else
+            withAnimation {
+                proxy.scrollTo(horizontalScrollLeadingAnchorID)
+            }
+        #endif
     }
 
     private func updateDisplayChannels() {

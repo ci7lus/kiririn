@@ -50,7 +50,7 @@ struct ProgramChannelColumnView: View, Equatable {
             }
             .allowsHitTesting(false)
 
-            ForEach(programs) { program in
+            ForEach(Array(programs.enumerated()), id: \.offset) { _, program in
                 ProgramCellWrapper(
                     program: program,
                     timelineStart: timelineStart,
@@ -87,7 +87,7 @@ struct ProgramCellWrapper: View, Equatable {
     let minuteHeight: CGFloat
 
     static func == (lhs: ProgramCellWrapper, rhs: ProgramCellWrapper) -> Bool {
-        lhs.program.id == rhs.program.id && lhs.timelineStart == rhs.timelineStart
+        lhs.program == rhs.program && lhs.timelineStart == rhs.timelineStart
             && lhs.timelineEnd == rhs.timelineEnd && lhs.width == rhs.width
             && lhs.minuteHeight == rhs.minuteHeight
     }
@@ -119,7 +119,7 @@ struct ProgramCellView: View, Equatable {
     let program: Program
 
     static func == (lhs: ProgramCellView, rhs: ProgramCellView) -> Bool {
-        lhs.program.id == rhs.program.id && lhs.program.name == rhs.program.name
+        lhs.program == rhs.program
     }
 
     var body: some View {

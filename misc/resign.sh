@@ -2,13 +2,57 @@
 set -euo pipefail
 
 # --- パラメータの設定 ---
-APP_BUNDLE="$1"
+ARCHIVE_INPUT="${1:-}"
 ENTITLEMENTS="kiririn/kiririn.entitlements"
 
-if [ -z "${APP_BUNDLE:-}" ] || [ ! -d "$APP_BUNDLE" ]; then
-    echo "Usage: SIGNING_IDENTITY='<Developer ID Application: ...>' ./resign.sh /path/to/App.app"
+usage() {
+    echo "Usage: SIGNING_IDENTITY='<Developer ID Application: ...>' ./resign.sh /path/to/App.xcarchive"
+}
+
+if [ "$#" -ne 1 ]; then
+    usage
     exit 1
 fi
+
+ARCHIVE_INPUT="${ARCHIVE_INPUT%/}"
+
+if [ "${ARCHIVE_INPUT##*.}" != "xcarchive" ]; then
+    echo "ERROR: input path must be an .xcarchive"
+    usage
+    exit 1
+fi
+
+if [ ! -d "$ARCHIVE_INPUT" ]; then
+    echo "ERROR: xcarchive not found: $ARCHIVE_INPUT"
+    exit 1
+fi
+
+ARCHIVE_DIR="$(cd "$(dirname "$ARCHIVE_INPUT")" && pwd -P)"
+ARCHIVE_PATH="$ARCHIVE_DIR/$(basename "$ARCHIVE_INPUT")"
+APPLICATIONS_DIR="$ARCHIVE_PATH/Products/Applications"
+
+if [ ! -d "$APPLICATIONS_DIR" ]; then
+    echo "ERROR: Applications directory not found in xcarchive: $APPLICATIONS_DIR"
+    exit 1
+fi
+
+APP_BUNDLES=()
+while IFS= read -r -d '' app_bundle; do
+    APP_BUNDLES+=("$app_bundle")
+done < <(find "$APPLICATIONS_DIR" -maxdepth 1 -type d -name "*.app" -print0)
+
+if [ "${#APP_BUNDLES[@]}" -eq 0 ]; then
+    echo "ERROR: app bundle not found in xcarchive: $APPLICATIONS_DIR"
+    exit 1
+fi
+
+if [ "${#APP_BUNDLES[@]}" -ne 1 ]; then
+    echo "ERROR: multiple app bundles found in xcarchive:"
+    printf '  %s\n' "${APP_BUNDLES[@]}"
+    exit 1
+fi
+
+APP_BUNDLE="${APP_BUNDLES[0]}"
 
 if [ -z "${SIGNING_IDENTITY:-}" ]; then
     echo "ERROR: SIGNING_IDENTITY environment variable is not set"
