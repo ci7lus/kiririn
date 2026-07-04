@@ -23,6 +23,9 @@ struct ContentView: View {
     @State private var loadingIndicatorHideTask: Task<Void, Never>?
     @State private var communicationFailureToastVisible = false
     @State private var communicationFailureToastHideTask: Task<Void, Never>?
+    @State private var cacheDatabaseFailureToastVisible = false
+    @State private var cacheDatabaseFailureToastHideTask: Task<Void, Never>?
+    @State private var didShowCacheDatabaseFailureToast = false
     @State private var droppedPluginAlertMessage: String?
     @State private var externalInstallConfirmation: PluginInstallConfirmationRequest?
     @State private var externalInstallErrorMessage: String?
@@ -134,6 +137,8 @@ struct ContentView: View {
                 loadingIndicatorHideTask = nil
                 communicationFailureToastHideTask?.cancel()
                 communicationFailureToastHideTask = nil
+                cacheDatabaseFailureToastHideTask?.cancel()
+                cacheDatabaseFailureToastHideTask = nil
             }
             .task {
                 appModel.setupIfNeeded()
@@ -156,6 +161,10 @@ struct ContentView: View {
             .onChange(of: manager.communicationFailureCount) { _, newValue in
                 guard newValue > 0 else { return }
                 showCommunicationFailureToast()
+            }
+            .onChange(of: appModel.cacheStore?.databaseFailureFeedback?.id) { _, newValue in
+                guard newValue != nil else { return }
+                showCacheDatabaseFailureToast()
             }
             .onChange(of: scenePhase) { _, newPhase in
                 guard newPhase == .active else { return }
@@ -314,6 +323,18 @@ struct ContentView: View {
                 }
                 .zIndex(3)
             }
+
+            if cacheDatabaseFailureToastVisible && !playerState.isActive {
+                appFeedbackOverlay(topPadding: feedbackTopPadding) {
+                    AppFeedbackLabel(
+                        text: appModel.cacheStore?.databaseFailureFeedback?.message
+                            ?? "キャッシュが破損している可能性があります",
+                        systemImage: "exclamationmark.triangle.fill",
+                        iconTint: .yellow
+                    )
+                }
+                .zIndex(4)
+            }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.86), value: playerState.isActive)
         .alert(
@@ -387,6 +408,23 @@ struct ContentView: View {
                 communicationFailureToastVisible = false
             }
             communicationFailureToastHideTask = nil
+        }
+    }
+
+    private func showCacheDatabaseFailureToast() {
+        guard !didShowCacheDatabaseFailureToast else { return }
+        didShowCacheDatabaseFailureToast = true
+        cacheDatabaseFailureToastHideTask?.cancel()
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
+            cacheDatabaseFailureToastVisible = true
+        }
+        cacheDatabaseFailureToastHideTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeIn(duration: 0.22)) {
+                cacheDatabaseFailureToastVisible = false
+            }
+            cacheDatabaseFailureToastHideTask = nil
         }
     }
 

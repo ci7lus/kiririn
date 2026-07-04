@@ -5,22 +5,41 @@ import ImageIO
 import Logging
 import Observation
 
+struct CacheDatabaseFailureFeedback: Identifiable, Equatable {
+    let id = UUID()
+    let message: String
+}
+
+private enum CacheStoreError: Error {
+    case persistentDatabaseInitializationFailed
+}
+
 @Observable
 class CacheStore {
     private let logger = Logging.Logger(label: "CacheStore")
     private let dbQueue: DatabaseQueue
+    private let databaseURL: URL?
 
     /// Monotonically increasing counter. Incremented on every playback-position save or delete.
     private(set) var playbackPositionSaveToken: Int = 0
     private(set) var lastSavedPlaybackPosition: (playableID: String, position: Float?)?
+    private(set) var databaseFailureFeedback: CacheDatabaseFailureFeedback?
+
+    @ObservationIgnored
+    private var didReportDatabaseFailure = false
 
     init() {
+        let persistentDatabaseURL = Self.persistentDatabaseURL()
+        var persistentDatabaseError: Error?
+
         do {
-            let persistentQueue = try Self.makeDatabaseQueue()
+            let persistentQueue = try Self.makeDatabaseQueue(at: persistentDatabaseURL)
             try Self.migrator.migrate(persistentQueue)
             self.dbQueue = persistentQueue
+            self.databaseURL = persistentDatabaseURL
             return
         } catch {
+            persistentDatabaseError = error
             logger.error(
                 "CacheStore database initialization failed, falling back to in-memory DB: \(error)")
         }
@@ -28,11 +47,59 @@ class CacheStore {
         let inMemoryQueue = try! DatabaseQueue()
         try? Self.migrator.migrate(inMemoryQueue)
         self.dbQueue = inMemoryQueue
+        self.databaseURL = nil
+        reportDatabaseFailureIfNeeded(
+            operation: "initialize persistent cache database",
+            error: persistentDatabaseError ?? CacheStoreError.persistentDatabaseInitializationFailed
+        )
     }
 
     init(databaseQueue: DatabaseQueue) {
         self.dbQueue = databaseQueue
+        self.databaseURL = nil
         try? Self.migrator.migrate(databaseQueue)
+    }
+
+    func close() throws {
+        try dbQueue.close()
+    }
+
+    @discardableResult
+    static func deletePersistentDatabaseFiles() throws -> Bool {
+        let fileManager = FileManager.default
+        var didDeleteFile = false
+
+        for url in persistentDatabaseFileURLs() {
+            guard fileManager.fileExists(atPath: url.path) else { continue }
+            try fileManager.removeItem(at: url)
+            didDeleteFile = true
+        }
+
+        return didDeleteFile
+    }
+
+    #if DEBUG
+        func triggerDatabaseFailureFeedbackForDebug() async {
+            do {
+                _ = try dbQueue.read { db in
+                    return try Row.fetchOne(db, sql: "SELECT * FROM cache_store_failure_probe")
+                }
+            } catch {
+                reportDatabaseFailureIfNeeded(operation: "debug cache failure probe", error: error)
+            }
+        }
+    #endif
+
+    private func reportDatabaseFailureIfNeeded(operation: String, error: Error) {
+        guard !(error is CancellationError) else { return }
+        logger.error("CacheStore database query failed during \(operation): \(error)")
+        if let databaseURL {
+            logger.error("CacheStore persistent database path: \(databaseURL.path)")
+        }
+        guard !didReportDatabaseFailure else { return }
+        didReportDatabaseFailure = true
+        databaseFailureFeedback = CacheDatabaseFailureFeedback(
+            message: "キャッシュが破損している可能性があります")
     }
 
     func cacheServices(_ services: [TVService], serverId: String) async {
@@ -47,23 +114,26 @@ class CacheStore {
             }
         } catch {
             self.logger.error("Failed to cache services: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "cache services", error: error)
         }
     }
 
     func loadCachedServices(serverId: String) async -> [TVService] {
-        guard
-            let cached = try? await dbQueue.read({ db in
+        do {
+            return try await dbQueue.read { db in
                 try TVService
                     .filter(TVService.Columns.serverId == serverId)
                     .fetchAll(db)
-            })
-        else { return [] }
-        return cached
+            }
+        } catch {
+            reportDatabaseFailureIfNeeded(operation: "load cached services", error: error)
+            return []
+        }
     }
 
     func loadFavoriteServices() async -> [FavoriteServiceRecord] {
-        guard
-            let favorites = try? await dbQueue.read({ db in
+        do {
+            return try await dbQueue.read { db in
                 let rows = try Row.fetchAll(
                     db,
                     sql: "SELECT networkId, serviceId, displayOrder FROM favorite_service"
@@ -75,9 +145,11 @@ class CacheStore {
                         displayOrder: row["displayOrder"]
                     )
                 }
-            })
-        else { return [] }
-        return favorites
+            }
+        } catch {
+            reportDatabaseFailureIfNeeded(operation: "load favorite services", error: error)
+            return []
+        }
     }
 
     func saveFavoriteService(_ service: TVService, displayOrder: Int? = nil) async {
@@ -96,6 +168,7 @@ class CacheStore {
             }
         } catch {
             logger.error("Failed to save favorite service: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "save favorite service", error: error)
         }
     }
 
@@ -121,6 +194,7 @@ class CacheStore {
             }
         } catch {
             logger.error("Failed to save favorite service orders: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "save favorite service orders", error: error)
         }
     }
 
@@ -134,6 +208,7 @@ class CacheStore {
             }
         } catch {
             logger.error("Failed to delete favorite service: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "delete favorite service", error: error)
         }
     }
 
@@ -157,12 +232,13 @@ class CacheStore {
             }
         } catch {
             self.logger.error("Failed to cache programs for server \(serverId): \(error)")
+            reportDatabaseFailureIfNeeded(operation: "cache programs", error: error)
         }
     }
 
     func loadLastProgramFullFetchDates() async -> [String: Date] {
-        guard
-            let dates = try? await dbQueue.read({ db in
+        do {
+            return try await dbQueue.read { db in
                 let rows = try Row.fetchAll(
                     db,
                     sql:
@@ -174,12 +250,12 @@ class CacheStore {
                         let fetchedAt: Date = row["lastSuccessfulProgramFullFetchAt"]
                         return (serverId, fetchedAt)
                     })
-            })
-        else {
+            }
+        } catch {
+            reportDatabaseFailureIfNeeded(
+                operation: "load last program full fetch dates", error: error)
             return [:]
         }
-
-        return dates
     }
 
     func saveLastProgramFullFetchDate(_ date: Date, serverId: String) async {
@@ -190,12 +266,14 @@ class CacheStore {
         } catch {
             logger.error(
                 "Failed to save last program full fetch date for server \(serverId): \(error)")
+            reportDatabaseFailureIfNeeded(
+                operation: "save last program full fetch date", error: error)
         }
     }
 
     func loadCachedPrograms(from: Date? = nil, until date: Date) async -> [Program] {
-        guard
-            let cached = try? await dbQueue.read({ db in
+        do {
+            return try await dbQueue.read { db in
                 var sql = """
                     SELECT * FROM (
                         SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC) as rn
@@ -225,9 +303,11 @@ class CacheStore {
 
                 return try Program.fetchAll(
                     db, sql: sql, arguments: StatementArguments(["from": from, "until": date]))
-            })
-        else { return [] }
-        return cached
+            }
+        } catch {
+            reportDatabaseFailureIfNeeded(operation: "load cached programs", error: error)
+            return []
+        }
     }
 
     func searchPrograms(query: String, limit: Int = 200) async -> [Program] {
@@ -241,8 +321,8 @@ class CacheStore {
             .replacingOccurrences(of: "_", with: "\\_")
         let pattern = "%\(escaped)%"
 
-        return
-            (try? await dbQueue.read { db in
+        do {
+            return try await dbQueue.read { db in
                 let sql = """
                     SELECT p.*
                     FROM (
@@ -276,7 +356,11 @@ class CacheStore {
                         "limit": limit,
                     ])
                 )
-            }) ?? []
+            }
+        } catch {
+            reportDatabaseFailureIfNeeded(operation: "search programs", error: error)
+            return []
+        }
     }
 
     func cacheLogos(_ serviceLogos: [TVServiceLogo]) async {
@@ -288,6 +372,7 @@ class CacheStore {
             }
         } catch {
             self.logger.error("Failed to cache logos: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "cache logos", error: error)
         }
     }
 
@@ -312,17 +397,20 @@ class CacheStore {
         } catch {
             logger.error(
                 "Failed to cache logo for service \(networkId)-\(serviceId): \(error)")
+            reportDatabaseFailureIfNeeded(operation: "cache logo", error: error)
             return nil
         }
     }
 
     func loadServiceLogos() async -> [TVServiceLogo] {
-        guard
-            let cached = try? await dbQueue.read({ db in
+        do {
+            return try await dbQueue.read { db in
                 try TVServiceLogo.fetchAll(db)
-            })
-        else { return [] }
-        return cached
+            }
+        } catch {
+            reportDatabaseFailureIfNeeded(operation: "load service logos", error: error)
+            return []
+        }
     }
 
     func cleanupOldPrograms() async {
@@ -338,53 +426,64 @@ class CacheStore {
             }
         } catch {
             self.logger.error("Failed to cleanup old programs: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "cleanup old programs", error: error)
         }
     }
 
     func fetchCurrentProgram(for service: TVService) async -> Program? {
         let now = Date()
-        return try? await dbQueue.read { db in
-            let sql = """
-                SELECT * FROM (
-                    SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC) as rn
-                    FROM program
-                    WHERE serviceId = :serviceId AND networkId = :networkId
-                      AND startAt < :now
-                      AND (endAt > :now OR duration = 0)
-                ) WHERE rn = 1
-                ORDER BY startAt ASC
-                LIMIT 1
-                """
-            return try Program.fetchOne(
-                db, sql: sql,
-                arguments: StatementArguments([
-                    "serviceId": service.serviceId,
-                    "networkId": service.networkId,
-                    "now": now,
-                ]))
+        do {
+            return try await dbQueue.read { db in
+                let sql = """
+                    SELECT * FROM (
+                        SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC) as rn
+                        FROM program
+                        WHERE serviceId = :serviceId AND networkId = :networkId
+                          AND startAt < :now
+                          AND (endAt > :now OR duration = 0)
+                    ) WHERE rn = 1
+                    ORDER BY startAt ASC
+                    LIMIT 1
+                    """
+                return try Program.fetchOne(
+                    db, sql: sql,
+                    arguments: StatementArguments([
+                        "serviceId": service.serviceId,
+                        "networkId": service.networkId,
+                        "now": now,
+                    ]))
+            }
+        } catch {
+            reportDatabaseFailureIfNeeded(operation: "fetch current program", error: error)
+            return nil
         }
     }
 
     func fetchNextProgram(for service: TVService) async -> Program? {
         let now = Date()
-        return try? await dbQueue.read { db in
-            let sql = """
-                SELECT * FROM (
-                    SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC) as rn
-                    FROM program
-                    WHERE serviceId = :serviceId AND networkId = :networkId
-                      AND startAt >= :now
-                ) WHERE rn = 1
-                ORDER BY startAt ASC
-                LIMIT 1
-                """
-            return try Program.fetchOne(
-                db, sql: sql,
-                arguments: StatementArguments([
-                    "serviceId": service.serviceId,
-                    "networkId": service.networkId,
-                    "now": now,
-                ]))
+        do {
+            return try await dbQueue.read { db in
+                let sql = """
+                    SELECT * FROM (
+                        SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC) as rn
+                        FROM program
+                        WHERE serviceId = :serviceId AND networkId = :networkId
+                          AND startAt >= :now
+                    ) WHERE rn = 1
+                    ORDER BY startAt ASC
+                    LIMIT 1
+                    """
+                return try Program.fetchOne(
+                    db, sql: sql,
+                    arguments: StatementArguments([
+                        "serviceId": service.serviceId,
+                        "networkId": service.networkId,
+                        "now": now,
+                    ]))
+            }
+        } catch {
+            reportDatabaseFailureIfNeeded(operation: "fetch next program", error: error)
+            return nil
         }
     }
 
@@ -393,50 +492,56 @@ class CacheStore {
             return await fetchNextProgram(for: service)
         }
 
-        return try? await dbQueue.read { db in
-            var sql = """
-                SELECT * FROM (
-                    SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC) as rn
-                    FROM program
-                    WHERE serviceId = :serviceId AND networkId = :networkId
-                """
+        do {
+            return try await dbQueue.read { db in
+                var sql = """
+                    SELECT * FROM (
+                        SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC) as rn
+                        FROM program
+                        WHERE serviceId = :serviceId AND networkId = :networkId
+                    """
 
-            var args: [String: (any DatabaseValueConvertible)?] = [
-                "serviceId": service.serviceId,
-                "networkId": service.networkId,
-            ]
+                var args: [String: (any DatabaseValueConvertible)?] = [
+                    "serviceId": service.serviceId,
+                    "networkId": service.networkId,
+                ]
 
-            if currentProgram.endAt > currentProgram.startAt,
-                currentProgram.duration > 0,
-                currentProgram.duration != 604_065
-            {
-                sql += " AND startAt >= :endAt"
-                args["endAt"] = currentProgram.endAt
-            } else {
-                sql += " AND startAt > :startAt"
-                args["startAt"] = currentProgram.startAt
+                if currentProgram.endAt > currentProgram.startAt,
+                    currentProgram.duration > 0,
+                    currentProgram.duration != 604_065
+                {
+                    sql += " AND startAt >= :endAt"
+                    args["endAt"] = currentProgram.endAt
+                } else {
+                    sql += " AND startAt > :startAt"
+                    args["startAt"] = currentProgram.startAt
+                }
+
+                if let currentEventId = currentProgram.eventId {
+                    sql += " AND eventId != :eventId"
+                    args["eventId"] = currentEventId
+                }
+
+                sql += """
+                    ) WHERE rn = 1
+                    ORDER BY startAt ASC
+                    LIMIT 1
+                    """
+
+                let statementArgs = StatementArguments(args)
+                return try Program.fetchOne(db, sql: sql, arguments: statementArgs)
             }
-
-            if let currentEventId = currentProgram.eventId {
-                sql += " AND eventId != :eventId"
-                args["eventId"] = currentEventId
-            }
-
-            sql += """
-                ) WHERE rn = 1
-                ORDER BY startAt ASC
-                LIMIT 1
-                """
-
-            let statementArgs = StatementArguments(args)
-            return try Program.fetchOne(db, sql: sql, arguments: statementArgs)
+        } catch {
+            reportDatabaseFailureIfNeeded(
+                operation: "fetch next program from current", error: error)
+            return nil
         }
     }
 
     func fetchAllCurrentPrograms() async -> [Program] {
         let now = Date()
-        return
-            (try? await dbQueue.read { db in
+        do {
+            return try await dbQueue.read { db in
                 let sql = """
                     SELECT * FROM (
                         SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC) as rn
@@ -447,13 +552,17 @@ class CacheStore {
                     """
                 return try Program.fetchAll(
                     db, sql: sql, arguments: StatementArguments(["now": now]))
-            }) ?? []
+            }
+        } catch {
+            reportDatabaseFailureIfNeeded(operation: "fetch all current programs", error: error)
+            return []
+        }
     }
 
     func fetchAllNextPrograms() async -> [Program] {
         let now = Date()
-        return
-            (try? await dbQueue.read { db in
+        do {
+            return try await dbQueue.read { db in
                 let sql = """
                     SELECT p.*
                     FROM (
@@ -476,7 +585,11 @@ class CacheStore {
                     """
                 return try Program.fetchAll(
                     db, sql: sql, arguments: StatementArguments(["now": now]))
-            }) ?? []
+            }
+        } catch {
+            reportDatabaseFailureIfNeeded(operation: "fetch all next programs", error: error)
+            return []
+        }
     }
 
     func cacheCaptureHistoryItem(_ item: CaptureHistoryItem) async {
@@ -486,6 +599,7 @@ class CacheStore {
             }
         } catch {
             self.logger.error("Failed to cache capture history item: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "cache capture history item", error: error)
         }
     }
 
@@ -509,6 +623,8 @@ class CacheStore {
             }
         } catch {
             self.logger.error("Failed to update variant paths: \(error)")
+            reportDatabaseFailureIfNeeded(
+                operation: "update capture history variant paths", error: error)
         }
     }
 
@@ -521,6 +637,7 @@ class CacheStore {
             }
         } catch {
             self.logger.error("Failed to fetch capture history item: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "fetch capture history item", error: error)
             return nil
         }
     }
@@ -532,6 +649,7 @@ class CacheStore {
             }
         } catch {
             self.logger.error("Failed to delete capture history item: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "delete capture history item", error: error)
         }
     }
 
@@ -542,14 +660,15 @@ class CacheStore {
             }
         } catch {
             self.logger.error("Failed to clear capture history: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "clear capture history", error: error)
         }
     }
 
     func fetchCaptureHistory(searchText: String, limit: Int, offset: Int) async
         -> [CaptureHistoryItem]
     {
-        guard
-            let cached = try? await dbQueue.read({ db in
+        do {
+            return try await dbQueue.read { db in
                 var request = CaptureHistoryItem.all()
                 if !searchText.isEmpty {
                     request = request.filter(
@@ -563,9 +682,11 @@ class CacheStore {
                     .order(CaptureHistoryItem.Columns.date.desc)
                     .limit(limit, offset: offset)
                     .fetchAll(db)
-            })
-        else { return [] }
-        return cached
+            }
+        } catch {
+            reportDatabaseFailureIfNeeded(operation: "fetch capture history", error: error)
+            return []
+        }
     }
 
     func savePlaybackPosition(playableID: String, position: Float) async {
@@ -587,6 +708,7 @@ class CacheStore {
             playbackPositionSaveToken &+= 1
         } catch {
             logger.error("Failed to save playback position: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "save playback position", error: error)
         }
     }
 
@@ -604,6 +726,7 @@ class CacheStore {
             return nil
         } catch {
             logger.error("Failed to load playback position: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "load playback position", error: error)
             return nil
         }
     }
@@ -621,6 +744,7 @@ class CacheStore {
             playbackPositionSaveToken &+= 1
         } catch {
             logger.error("Failed to delete playback position: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "delete playback position", error: error)
         }
     }
 
@@ -631,16 +755,19 @@ class CacheStore {
             }
         } catch {
             self.logger.error("Failed to save local record: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "save local record", error: error)
         }
     }
 
     func loadLocalRecords() async -> [LocalRecordItem] {
-        guard
-            let cached = try? await dbQueue.read({ db in
+        do {
+            return try await dbQueue.read { db in
                 try LocalRecordItem.order(LocalRecordItem.Columns.createdAt.desc).fetchAll(db)
-            })
-        else { return [] }
-        return cached
+            }
+        } catch {
+            reportDatabaseFailureIfNeeded(operation: "load local records", error: error)
+            return []
+        }
     }
 
     func deleteLocalRecord(id: String) async {
@@ -650,6 +777,7 @@ class CacheStore {
             }
         } catch {
             self.logger.error("Failed to delete local record: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "delete local record", error: error)
         }
     }
 }
@@ -723,13 +851,26 @@ extension CacheStore {
         )
     }
 
-    fileprivate static func makeDatabaseQueue() throws -> DatabaseQueue {
+    fileprivate static func persistentDatabaseURL() -> URL {
         let appSupportURL = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
         let directoryURL = appSupportURL.appendingPathComponent("kiririn", isDirectory: true)
+        return directoryURL.appendingPathComponent("cache.sqlite")
+    }
+
+    fileprivate static func persistentDatabaseFileURLs() -> [URL] {
+        let databaseURL = persistentDatabaseURL()
+        return [
+            databaseURL,
+            URL(fileURLWithPath: databaseURL.path + "-wal"),
+            URL(fileURLWithPath: databaseURL.path + "-shm"),
+        ]
+    }
+
+    fileprivate static func makeDatabaseQueue(at databaseURL: URL) throws -> DatabaseQueue {
+        let directoryURL = databaseURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        let databaseURL = directoryURL.appendingPathComponent("cache.sqlite")
         Logging.Logger(label: "CacheStore").info("cache store path: \(databaseURL.path)")
         return try DatabaseQueue(path: databaseURL.path)
     }
