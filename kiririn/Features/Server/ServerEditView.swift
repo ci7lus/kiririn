@@ -17,6 +17,7 @@ struct ServerEditView: View {
     @State private var liveEnabled: Bool = true
     @State private var recordingEnabled: Bool = true
     @State private var isTesting = false
+    @State private var connectionTestSuccessMessage: String?
     @State private var isRefreshingPrograms = false
     @State private var transientErrorDetail: ServerOperationFeedbackContent?
 
@@ -103,6 +104,17 @@ struct ServerEditView: View {
                         }
                         .buttonStyle(.bordered)
                         .disabled((type.requiresBaseURL && baseURL.isEmpty) || isTesting)
+
+                        if let connectionTestSuccessMessage {
+                            HStack(spacing: 6) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                Text(connectionTestSuccessMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(Color.primary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .center)
+                        }
 
                         if manualProgramRefreshServerID != nil {
                             Button {
@@ -210,6 +222,7 @@ struct ServerEditView: View {
 
     private func testConnection(scrollProxy: ScrollViewProxy) async {
         isTesting = true
+        connectionTestSuccessMessage = nil
         let config = buildConfig()
         let provider: any ServerProvider = {
             switch config.type {
@@ -221,9 +234,11 @@ struct ServerEditView: View {
         }()
 
         do {
-            _ = try await provider.checkConnection()
+            let version = try await provider.checkConnection()
+            connectionTestSuccessMessage = connectionSuccessMessage(version: version)
             clearConnectionError(for: config)
         } catch {
+            connectionTestSuccessMessage = nil
             recordConnectionError(error, for: config)
         }
         isTesting = false
@@ -248,6 +263,11 @@ struct ServerEditView: View {
                 state.status = .disconnected
             }
         }
+    }
+
+    private func connectionSuccessMessage(version: String?) -> String {
+        guard let version, !version.isEmpty else { return "接続成功" }
+        return version
     }
 
     private func recordConnectionError(_ error: Error, for config: ServerConfiguration) {
