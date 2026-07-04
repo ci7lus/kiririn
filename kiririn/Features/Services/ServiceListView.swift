@@ -173,34 +173,72 @@ struct ServiceListView: View {
 
     @ViewBuilder
     private var listView: some View {
+        #if os(iOS)
+            if #available(iOS 26, *) {
+                serviceListContent
+            } else {
+                serviceListWithJumpMenu
+            }
+        #else
+            serviceListWithJumpMenu
+        #endif
+    }
+
+    private var sectionChannelTypes: [String] {
+        groupedServices.map(\.0)
+    }
+
+    @ViewBuilder
+    private var serviceListContent: some View {
         List {
             ForEach(groupedServices, id: \.0) { channelType, serviceItems in
                 Section {
                     OutlineGroup(serviceItems, children: \.children) { item in
-                        ServiceRowView(
-                            service: item.service,
-                            currentProgram: item.currentProgram,
-                            nextProgram: item.nextProgram,
-                            hasDifferentChildProgram: item.hasDifferentChildProgram,
-                            isFavorite: manager.isFavorite(item.service),
-                            logoImage: manager.logoImage(for: item.service)
-                        ) {
-                            Task { await playService(item.service) }
-                        } onToggleFavorite: {
-                            Task { await manager.toggleFavorite(item.service) }
-                        }
-                        .playbackServerSelectionDialog(
-                            service: item.service,
-                            selectedService: $serviceSelectionForPlayback,
-                            manager: manager
-                        ) { candidate in
-                            Task { await playCandidate(candidate) }
-                        }
+                        serviceRow(for: item)
                     }
                 } header: {
                     sectionHeader(for: channelType)
                 }
+                .id(channelType)
+                .modifier(ServiceSectionIndexLabelModifier(channelType: channelType))
             }
+        }
+        .modifier(ServiceListSectionIndexVisibilityModifier())
+    }
+
+    @ViewBuilder
+    private var serviceListWithJumpMenu: some View {
+        ScrollViewReader { proxy in
+            serviceListContent
+                .modifier(
+                    ServiceSectionJumpToolbarModifier(channelTypes: sectionChannelTypes) {
+                        channelType in
+                        proxy.scrollTo(channelType, anchor: .top)
+                    }
+                )
+        }
+    }
+
+    @ViewBuilder
+    private func serviceRow(for item: ServiceListItem) -> some View {
+        ServiceRowView(
+            service: item.service,
+            currentProgram: item.currentProgram,
+            nextProgram: item.nextProgram,
+            hasDifferentChildProgram: item.hasDifferentChildProgram,
+            isFavorite: manager.isFavorite(item.service),
+            logoImage: manager.logoImage(for: item.service)
+        ) {
+            Task { await playService(item.service) }
+        } onToggleFavorite: {
+            Task { await manager.toggleFavorite(item.service) }
+        }
+        .playbackServerSelectionDialog(
+            service: item.service,
+            selectedService: $serviceSelectionForPlayback,
+            manager: manager
+        ) { candidate in
+            Task { await playCandidate(candidate) }
         }
     }
 
@@ -782,6 +820,86 @@ private struct ServiceListSearchableModifier: ViewModifier {
             }
             content
         }
+    }
+}
+
+private struct ServiceSectionIndexLabelModifier: ViewModifier {
+    let channelType: String
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26, macOS 26, *) {
+            content.sectionIndexLabel(label)
+        } else {
+            content
+        }
+    }
+
+    private var label: Text {
+        if channelType == "お気に入り" {
+            Text("★")
+        } else if channelType == "その他" {
+            Text("…")
+        } else {
+            Text(shortenedLabel(for: channelType))
+        }
+    }
+
+    private func shortenedLabel(for channelType: String) -> String {
+        guard channelType.count > 2,
+            let first = channelType.first,
+            let last = channelType.last
+        else {
+            return channelType
+        }
+        return "\(first)\(last)"
+    }
+}
+
+private struct ServiceListSectionIndexVisibilityModifier: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(iOS)
+            if #available(iOS 26, *) {
+                content.listSectionIndexVisibility(.visible)
+            } else {
+                content
+            }
+        #else
+            content
+        #endif
+    }
+}
+
+private struct ServiceSectionJumpToolbarModifier: ViewModifier {
+    let channelTypes: [String]
+    let onSelect: (String) -> Void
+    @Environment(\.isTabActive) private var isTabActive
+
+    func body(content: Content) -> some View {
+        content.toolbar {
+            if isTabActive && !channelTypes.isEmpty {
+                ToolbarItem(placement: toolbarPlacement) {
+                    Menu {
+                        ForEach(channelTypes, id: \.self) { channelType in
+                            Button(channelType) {
+                                onSelect(channelType)
+                            }
+                        }
+                    } label: {
+                        Label("移動", systemImage: "arrow.up.arrow.down")
+                    }
+                    .help("セクションへ移動")
+                }
+            }
+        }
+    }
+
+    private var toolbarPlacement: ToolbarItemPlacement {
+        #if os(iOS)
+            .topBarTrailing
+        #else
+            .automatic
+        #endif
     }
 }
 
