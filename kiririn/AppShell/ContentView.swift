@@ -163,7 +163,10 @@ struct ContentView: View {
                 showCommunicationFailureToast()
             }
             .onChange(of: appModel.cacheStore?.databaseFailureFeedback?.id) { _, newValue in
-                guard newValue != nil else { return }
+                guard newValue != nil else {
+                    didShowCacheDatabaseFailureToast = false
+                    return
+                }
                 showCacheDatabaseFailureToast()
             }
             .onChange(of: scenePhase) { _, newPhase in
