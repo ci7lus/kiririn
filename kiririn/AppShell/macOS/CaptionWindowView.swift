@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct CaptionWindowView_macOS: View {
-    let appModel: AppModel
+    @Environment(AppModel.self) private var appModel
 
     var body: some View {
         Group {

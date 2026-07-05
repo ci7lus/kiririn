@@ -6,20 +6,14 @@ import SwiftUI
 struct PlayerWindowView_macOS: View {
     private let logger = Logger(label: "PlayerWindowView_macOS")
     private static let defaultWindowTitle = "プレイヤー"
-    let appModel: AppModel
     let initialPlayable: Playable?
+    @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
-    @State private var playerState: PlayerState
+    @State private var playerState = PlayerState()
     @State private var playerWindow: NSWindow?
     @State private var isAlwaysOnTop = false
     @State private var isOverlayVisible = true
     @State private var restorationWaitTask: Task<Void, Never>?
-
-    init(appModel: AppModel, initialPlayable: Playable?) {
-        self.appModel = appModel
-        self.initialPlayable = initialPlayable
-        _playerState = State(initialValue: appModel.makeDetachedPlayerState())
-    }
 
     var body: some View {
         ZStack {

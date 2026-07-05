@@ -20,12 +20,10 @@ struct KiririnMediaDocument: FileDocument {
     struct DocumentPlaybackView: View {
         private let logger = Logger(label: "DocumentPlaybackView")
         let fileURL: URL?
-        let appModel: AppModel
 
         var body: some View {
             if let fileURL {
                 PlayerWindowView_macOS(
-                    appModel: appModel,
                     initialPlayable: Playable(
                         streamURL: fileURL, source: .fileURL(fileURL, bookmarkData: nil))
                 )
