@@ -200,6 +200,7 @@ class PluginStore {
     private let pluginsKey = "kiririn.plugin.definitions"
     private let developerModeKey = "kiririn.plugin.developer_mode_enabled"
     private let pluginDirectoryName = "Plugins"
+    private static let webKitExtractedArchivePrefix = "WebKitExtractedArchive-"
     private static let currentAppVersion =
         PluginManifestParser.trimmedNonEmpty(
             Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
@@ -780,7 +781,8 @@ class PluginStore {
             return
         }
 
-        for fileURL in files where fileURL.lastPathComponent.hasPrefix("WebKitExtractedArchive-") {
+        for fileURL in files
+        where fileURL.lastPathComponent.hasPrefix(Self.webKitExtractedArchivePrefix) {
             try? fileManager.removeItem(at: fileURL)
         }
     }
@@ -1162,8 +1164,60 @@ class PluginStore {
             return URL(fileURLWithPath: plugin.resourceBasePath, isDirectory: true)
         }
 
-        return pluginDirectoryURL.appending(
-            path: plugin.resourceBasePath)
+        return try extractedResourceBaseURL(forArchiveURL: archiveURL(for: plugin))
+    }
+
+    private func extractedResourceBaseURL(forArchiveURL archiveURL: URL) throws -> URL {
+        let resourceHash = try PluginManifestParser.resourceHash(forArchiveURL: archiveURL)
+        let extractedURL = extractedArchiveURL(resourceHash: resourceHash)
+        var isDirectory: ObjCBool = false
+        if fileManager.fileExists(
+            atPath: extractedURL.path(percentEncoded: false),
+            isDirectory: &isDirectory
+        ) {
+            if isDirectory.boolValue {
+                return extractedURL
+            }
+            try fileManager.removeItem(at: extractedURL)
+        }
+
+        let package = try PluginDecoder.decode(url: archiveURL)
+        let stagingURL = fileManager.temporaryDirectory.appending(
+            path: "\(Self.webKitExtractedArchivePrefix)staging-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        try? fileManager.removeItem(at: stagingURL)
+        defer {
+            try? fileManager.removeItem(at: stagingURL)
+        }
+
+        try package.extract(to: stagingURL, fileManager: fileManager)
+        if fileManager.fileExists(atPath: extractedURL.path(percentEncoded: false)) {
+            return extractedURL
+        }
+        do {
+            try fileManager.moveItem(at: stagingURL, to: extractedURL)
+        } catch {
+            var isDirectory: ObjCBool = false
+            if fileManager.fileExists(
+                atPath: extractedURL.path(percentEncoded: false),
+                isDirectory: &isDirectory
+            ),
+                isDirectory.boolValue
+            {
+                return extractedURL
+            }
+            throw error
+        }
+        return extractedURL
+    }
+
+    private func extractedArchiveURL(resourceHash: String) -> URL {
+        let hashPrefix = String(resourceHash.prefix(16))
+        return fileManager.temporaryDirectory.appending(
+            path: "\(Self.webKitExtractedArchivePrefix)\(hashPrefix)",
+            directoryHint: .isDirectory
+        )
     }
 
     private func refreshExtensionBundlePlugin(_ plugin: PluginDefinition) throws -> PluginDefinition
@@ -1200,7 +1254,8 @@ class PluginStore {
             return updated
         }
 
-        let currentHash = try PluginManifestParser.resourceHash(forArchiveURL: resourceURL)
+        let currentHash = try PluginManifestParser.resourceHash(
+            forArchiveURL: archiveURL(for: plugin))
         if let storedHash = plugin.resourceHash {
             if storedHash != currentHash {
                 updated = markPluginBlocked(updated)
@@ -1378,7 +1433,10 @@ class PluginStore {
     }
 
     private func archiveURL(for plugin: PluginDefinition) throws -> URL {
-        try resourceBaseURL(for: plugin)
+        if plugin.sourceType == .localFolder {
+            return try resourceBaseURL(for: plugin)
+        }
+        return pluginDirectoryURL.appending(path: plugin.resourceBasePath)
     }
 
     private func validateManifestRuntimeCompatibility(_ manifest: ExtensionPluginManifest) throws

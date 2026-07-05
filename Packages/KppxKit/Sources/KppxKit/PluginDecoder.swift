@@ -33,6 +33,28 @@ public struct PluginPackage {
         return output
     }
 
+    public func extract(to directoryURL: URL, fileManager: FileManager = .default) throws {
+        let destinationURL = directoryURL.standardizedFileURL
+        guard destinationURL.isFileURL else {
+            throw PluginDecoderError.invalidArchive
+        }
+
+        try fileManager.createDirectory(
+            at: destinationURL,
+            withIntermediateDirectories: true
+        )
+
+        for entry in archive {
+            let path = try Self.validatedFileName(entry.path)
+            let isDirectory = entry.type == .directory
+            let outputURL = destinationURL.appending(
+                path: path,
+                directoryHint: isDirectory ? .isDirectory : .notDirectory
+            )
+            _ = try archive.extract(entry, to: outputURL)
+        }
+    }
+
     private static func archive(from url: URL) throws -> Archive {
         do {
             return try Archive(url: url, accessMode: .read)

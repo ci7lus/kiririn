@@ -44,6 +44,29 @@ struct PluginDecoderTests {
         #expect(data == nil)
     }
 
+    @Test func extractsPackageToDirectory() throws {
+        let contents = Data("hello plugin".utf8)
+        let packageData = storedZIPData(files: [
+            ("manifest.json", Data("{}".utf8)),
+            ("pages/panel.html", contents),
+        ])
+        let tempURL = try tempFileForTest(data: packageData, suffix: "kppx")
+        let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "plugin_extract_\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer {
+            try? FileManager.default.removeItem(at: tempURL)
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+
+        let package = try PluginDecoder.decode(url: tempURL)
+        try package.extract(to: outputURL)
+
+        let extractedURL = outputURL.appending(path: "pages/panel.html")
+        #expect(try Data(contentsOf: extractedURL) == contents)
+    }
+
     @Test func rejectsAbsolutePath() throws {
         let packageData = storedZIPData(files: [
             ("/etc/passwd", Data("danger".utf8))
