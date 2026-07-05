@@ -200,6 +200,7 @@ class PluginStore {
     private let pluginsKey = "kiririn.plugin.definitions"
     private let developerModeKey = "kiririn.plugin.developer_mode_enabled"
     private let pluginDirectoryName = "Plugins"
+    nonisolated private static let webKitExtractedArchivePrefix = "WebKitExtractedArchive-"
     private static let currentAppVersion =
         PluginManifestParser.trimmedNonEmpty(
             Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
@@ -227,6 +228,7 @@ class PluginStore {
     @ObservationIgnored var onLocalFolderManifestChanged: ((UUID) -> Void)?
 
     private var resolvedManifestCache: [UUID: ExtensionPluginManifest] = [:]
+    @ObservationIgnored private var archiveHashCache: [String: String] = [:]
     @ObservationIgnored private var localManifestWatchers: [UUID: DispatchSourceFileSystemObject] =
         [:]
     @ObservationIgnored private var localManifestWatcherPaths: [UUID: String] = [:]
@@ -486,7 +488,7 @@ class PluginStore {
         let preview: PluginInstallPreview
         switch plugin.sourceType {
         case .localFolder:
-            let localFolderURL = try resourceBaseURL(for: plugin)
+            let localFolderURL = try resourceBaseURLSynchronously(for: plugin)
             preview = try previewPlugin(
                 localFolderURL: localFolderURL,
                 bookmarkData: plugin.resourceBookmark
@@ -533,7 +535,7 @@ class PluginStore {
                     "保存済みのローカルフォルダを読み込めませんでした"
                 ])
             }
-            updated.resourceHash = try PluginManifestParser.resourceHash(forArchiveURL: archiveURL)
+            updated.resourceHash = try cachedResourceHash(forArchiveURL: archiveURL)
         case .localFolder(let url, let bookmarkData):
             guard plugin.sourceType == .localFolder else {
                 throw PluginManifestValidationError(messages: [
@@ -585,7 +587,7 @@ class PluginStore {
 
     private func localManifestURL(for plugin: PluginDefinition) -> URL? {
         guard plugin.sourceType == .localFolder,
-            let resourceURL = try? resourceBaseURL(for: plugin)
+            let resourceURL = try? resourceBaseURLSynchronously(for: plugin)
         else {
             return nil
         }
@@ -722,7 +724,18 @@ class PluginStore {
             return manifest
         }
 
-        let resourceURL = try resourceBaseURL(for: plugin)
+        let resourceURL = try resourceBaseURLSynchronously(for: plugin)
+        return try resolvedManifest(for: plugin, resourceBaseURL: resourceURL)
+    }
+
+    func resolvedManifest(
+        for plugin: PluginDefinition,
+        resourceBaseURL resourceURL: URL
+    ) throws -> ExtensionPluginManifest {
+        if let manifest = resolvedManifestCache[plugin.id] {
+            return manifest
+        }
+
         let manifest = try manifestParser.parse(
             atResourceURL: resourceURL,
             fileManager: fileManager
@@ -780,7 +793,8 @@ class PluginStore {
             return
         }
 
-        for fileURL in files where fileURL.lastPathComponent.hasPrefix("WebKitExtractedArchive-") {
+        for fileURL in files
+        where fileURL.lastPathComponent.hasPrefix(Self.webKitExtractedArchivePrefix) {
             try? fileManager.removeItem(at: fileURL)
         }
     }
@@ -1136,7 +1150,29 @@ class PluginStore {
         resolvedManifestCache[plugin.id]?.pagePath(for: area)
     }
 
-    func resourceBaseURL(for plugin: PluginDefinition) throws -> URL {
+    func resourceBaseURL(for plugin: PluginDefinition) async throws -> URL {
+        if plugin.sourceType == .localFolder {
+            return try localFolderResourceBaseURL(for: plugin)
+        }
+
+        return try await extractedResourceBaseURL(
+            forArchiveURL: archiveURL(for: plugin),
+            storedResourceHash: plugin.resourceHash
+        )
+    }
+
+    private func resourceBaseURLSynchronously(for plugin: PluginDefinition) throws -> URL {
+        if plugin.sourceType == .localFolder {
+            return try localFolderResourceBaseURL(for: plugin)
+        }
+
+        return try extractedResourceBaseURLSynchronously(
+            forArchiveURL: archiveURL(for: plugin),
+            storedResourceHash: plugin.resourceHash
+        )
+    }
+
+    private func localFolderResourceBaseURL(for plugin: PluginDefinition) throws -> URL {
         if plugin.sourceType == .localFolder {
             if let bookmark = plugin.resourceBookmark {
                 var isStale = false
@@ -1162,13 +1198,179 @@ class PluginStore {
             return URL(fileURLWithPath: plugin.resourceBasePath, isDirectory: true)
         }
 
-        return pluginDirectoryURL.appending(
-            path: plugin.resourceBasePath)
+        return pluginDirectoryURL.appending(path: plugin.resourceBasePath)
+    }
+
+    private func extractedResourceBaseURL(
+        forArchiveURL archiveURL: URL,
+        storedResourceHash: String?
+    ) async throws -> URL {
+        let cacheKey = try? archiveHashCacheKey(forArchiveURL: archiveURL)
+        let cachedHash = cacheKey.flatMap { archiveHashCache[$0] }
+        let temporaryDirectory = fileManager.temporaryDirectory
+        let result = try await Task.detached(priority: .utility) {
+            try Self.extractArchiveResourceBaseURL(
+                forArchiveURL: archiveURL,
+                temporaryDirectory: temporaryDirectory,
+                storedResourceHash: storedResourceHash,
+                cachedResourceHash: cachedHash,
+                cacheKey: cacheKey
+            )
+        }.value
+
+        if let cacheKey = result.cacheKey,
+            let computedResourceHash = result.computedResourceHash
+        {
+            archiveHashCache[cacheKey] = computedResourceHash
+        }
+        return result.resourceBaseURL
+    }
+
+    private func extractedResourceBaseURLSynchronously(
+        forArchiveURL archiveURL: URL,
+        storedResourceHash: String?
+    ) throws -> URL {
+        let cacheKey = try? archiveHashCacheKey(forArchiveURL: archiveURL)
+        let cachedHash = cacheKey.flatMap { archiveHashCache[$0] }
+        let result = try Self.extractArchiveResourceBaseURL(
+            forArchiveURL: archiveURL,
+            temporaryDirectory: fileManager.temporaryDirectory,
+            storedResourceHash: storedResourceHash,
+            cachedResourceHash: cachedHash,
+            cacheKey: cacheKey
+        )
+        if let cacheKey = result.cacheKey,
+            let computedResourceHash = result.computedResourceHash
+        {
+            archiveHashCache[cacheKey] = computedResourceHash
+        }
+        return result.resourceBaseURL
+    }
+
+    private struct ArchiveExtractionResult: Sendable {
+        let resourceBaseURL: URL
+        let cacheKey: String?
+        let computedResourceHash: String?
+    }
+
+    nonisolated private static func extractArchiveResourceBaseURL(
+        forArchiveURL archiveURL: URL,
+        temporaryDirectory: URL,
+        storedResourceHash: String?,
+        cachedResourceHash: String?,
+        cacheKey: String?
+    ) throws -> ArchiveExtractionResult {
+        let resourceHash = try resolvedResourceHash(
+            forArchiveURL: archiveURL,
+            storedResourceHash: storedResourceHash,
+            cachedResourceHash: cachedResourceHash
+        )
+        let computedResourceHash =
+            storedResourceHash == nil && cachedResourceHash == nil ? resourceHash : nil
+        let extractedURL = extractedArchiveURL(
+            resourceHash: resourceHash,
+            temporaryDirectory: temporaryDirectory
+        )
+        let fileManager = FileManager.default
+        let extractedPath = extractedURL.path(percentEncoded: false)
+        var isDirectory: ObjCBool = false
+        if fileManager.fileExists(atPath: extractedPath, isDirectory: &isDirectory) {
+            if isDirectory.boolValue {
+                return ArchiveExtractionResult(
+                    resourceBaseURL: extractedURL,
+                    cacheKey: cacheKey,
+                    computedResourceHash: computedResourceHash
+                )
+            }
+            try fileManager.removeItem(at: extractedURL)
+        }
+
+        let package = try PluginDecoder.decode(url: archiveURL)
+        let stagingURL = temporaryDirectory.appending(
+            path: "\(Self.webKitExtractedArchivePrefix)staging-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        try? fileManager.removeItem(at: stagingURL)
+        defer {
+            try? fileManager.removeItem(at: stagingURL)
+        }
+
+        try package.extract(to: stagingURL, fileManager: fileManager)
+        do {
+            try fileManager.moveItem(at: stagingURL, to: extractedURL)
+        } catch {
+            var isDirectory: ObjCBool = false
+            if fileManager.fileExists(
+                atPath: extractedPath,
+                isDirectory: &isDirectory
+            ),
+                isDirectory.boolValue
+            {
+                return ArchiveExtractionResult(
+                    resourceBaseURL: extractedURL,
+                    cacheKey: cacheKey,
+                    computedResourceHash: computedResourceHash
+                )
+            }
+            throw error
+        }
+        return ArchiveExtractionResult(
+            resourceBaseURL: extractedURL,
+            cacheKey: cacheKey,
+            computedResourceHash: computedResourceHash
+        )
+    }
+
+    nonisolated private static func resolvedResourceHash(
+        forArchiveURL archiveURL: URL,
+        storedResourceHash: String?,
+        cachedResourceHash: String?
+    ) throws -> String {
+        if let storedResourceHash {
+            return storedResourceHash
+        }
+        if let cachedResourceHash {
+            return cachedResourceHash
+        }
+        return try PluginManifestParser.resourceHash(forArchiveURL: archiveURL)
+    }
+
+    nonisolated private static func extractedArchiveURL(
+        resourceHash: String,
+        temporaryDirectory: URL
+    ) -> URL {
+        let hashPrefix = String(resourceHash.prefix(16))
+        return temporaryDirectory.appending(
+            path: "\(Self.webKitExtractedArchivePrefix)\(hashPrefix)",
+            directoryHint: .isDirectory
+        )
+    }
+
+    private func cachedResourceHash(forArchiveURL archiveURL: URL) throws -> String {
+        let cacheKey = try? archiveHashCacheKey(forArchiveURL: archiveURL)
+        if let cacheKey, let cachedHash = archiveHashCache[cacheKey] {
+            return cachedHash
+        }
+
+        let hash = try PluginManifestParser.resourceHash(forArchiveURL: archiveURL)
+        if let cacheKey {
+            archiveHashCache[cacheKey] = hash
+        }
+        return hash
+    }
+
+    private func archiveHashCacheKey(forArchiveURL archiveURL: URL) throws -> String {
+        let path = archiveURL.standardizedFileURL.path(percentEncoded: false)
+        let attributes = try fileManager.attributesOfItem(atPath: path)
+        let fileSize = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+        let modificationDate =
+            (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "\(path)|\(fileSize)|\(modificationDate)"
     }
 
     private func refreshExtensionBundlePlugin(_ plugin: PluginDefinition) throws -> PluginDefinition
     {
-        let resourceURL = try resourceBaseURL(for: plugin)
+        let resourceURL = try resourceBaseURLSynchronously(for: plugin)
         let manifest = try manifestParser.parse(
             atResourceURL: resourceURL,
             fileManager: fileManager
@@ -1200,7 +1402,7 @@ class PluginStore {
             return updated
         }
 
-        let currentHash = try PluginManifestParser.resourceHash(forArchiveURL: resourceURL)
+        let currentHash = try cachedResourceHash(forArchiveURL: archiveURL(for: plugin))
         if let storedHash = plugin.resourceHash {
             if storedHash != currentHash {
                 updated = markPluginBlocked(updated)
@@ -1260,7 +1462,7 @@ class PluginStore {
             sourceType: sourceType,
             resourceBasePath: archiveFileName,
             resourceBookmark: nil,
-            resourceHash: try PluginManifestParser.resourceHash(forArchiveURL: installedArchiveURL),
+            resourceHash: try cachedResourceHash(forArchiveURL: installedArchiveURL),
             isBlocked: false,
             manifestUpdateURL: manifest.manifestUpdateURL,
             manifestVersion: manifest.version,
@@ -1378,7 +1580,10 @@ class PluginStore {
     }
 
     private func archiveURL(for plugin: PluginDefinition) throws -> URL {
-        try resourceBaseURL(for: plugin)
+        if plugin.sourceType == .localFolder {
+            return try resourceBaseURLSynchronously(for: plugin)
+        }
+        return pluginDirectoryURL.appending(path: plugin.resourceBasePath)
     }
 
     private func validateManifestRuntimeCompatibility(_ manifest: ExtensionPluginManifest) throws

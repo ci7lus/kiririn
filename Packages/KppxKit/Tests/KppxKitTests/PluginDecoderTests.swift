@@ -44,6 +44,29 @@ struct PluginDecoderTests {
         #expect(data == nil)
     }
 
+    @Test func extractsPackageToDirectory() throws {
+        let contents = Data("hello plugin".utf8)
+        let packageData = storedZIPData(files: [
+            ("manifest.json", Data("{}".utf8)),
+            ("pages/panel.html", contents),
+        ])
+        let tempURL = try tempFileForTest(data: packageData, suffix: "kppx")
+        let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "plugin_extract_\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer {
+            try? FileManager.default.removeItem(at: tempURL)
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+
+        let package = try PluginDecoder.decode(url: tempURL)
+        try package.extract(to: outputURL)
+
+        let extractedURL = outputURL.appending(path: "pages/panel.html")
+        #expect(try Data(contentsOf: extractedURL) == contents)
+    }
+
     @Test func rejectsAbsolutePath() throws {
         let packageData = storedZIPData(files: [
             ("/etc/passwd", Data("danger".utf8))
@@ -56,6 +79,39 @@ struct PluginDecoderTests {
             #expect(Bool(false))
         } catch {
             #expect(Bool(true))
+        }
+    }
+
+    @Test func rejectsEmptyPath() throws {
+        let packageData = storedZIPData(files: [
+            ("", Data("danger".utf8))
+        ])
+        let tempURL = try tempFileForTest(data: packageData, suffix: "kppx")
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        do {
+            _ = try PluginDecoder.decode(url: tempURL)
+            #expect(Bool(false))
+        } catch {
+            #expect(Bool(true))
+        }
+    }
+
+    @Test func rejectsSymbolicLinkEntry() throws {
+        let packageData = storedZIPData(entries: [
+            .file(path: "manifest.json", contents: Data("{}".utf8)),
+            .symbolicLink(path: "pages/panel.html", destination: "../../outside.html"),
+        ])
+        let tempURL = try tempFileForTest(data: packageData, suffix: "kppx")
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        do {
+            _ = try PluginDecoder.decode(url: tempURL)
+            #expect(Bool(false))
+        } catch let error as PluginDecoderError {
+            #expect(error == .unsupportedEntry)
+        } catch {
+            #expect(Bool(false))
         }
     }
 
@@ -75,12 +131,41 @@ struct PluginDecoderTests {
 }
 
 private func storedZIPData(files: [(String, Data)]) -> Data {
+    storedZIPData(entries: files.map { .file(path: $0.0, contents: $0.1) })
+}
+
+private struct TestZIPEntry {
+    let path: String
+    let contents: Data
+    let versionMadeBy: UInt16
+    let externalFileAttributes: UInt32
+
+    static func file(path: String, contents: Data) -> TestZIPEntry {
+        TestZIPEntry(
+            path: path,
+            contents: contents,
+            versionMadeBy: 20,
+            externalFileAttributes: 0
+        )
+    }
+
+    static func symbolicLink(path: String, destination: String) -> TestZIPEntry {
+        TestZIPEntry(
+            path: path,
+            contents: Data(destination.utf8),
+            versionMadeBy: UInt16((3 << 8) | 20),
+            externalFileAttributes: 0xa1ff_0000
+        )
+    }
+}
+
+private func storedZIPData(entries: [TestZIPEntry]) -> Data {
     var localEntries = Data()
     var centralDirectory = Data()
 
-    for (path, contents) in files {
-        let pathData = Data(path.utf8)
-        let crc = crc32(contents)
+    for entry in entries {
+        let pathData = Data(entry.path.utf8)
+        let crc = crc32(entry.contents)
         let localHeaderOffset = UInt32(localEntries.count)
 
         localEntries.append(littleEndian(UInt32(0x0403_4b50)))
@@ -90,29 +175,29 @@ private func storedZIPData(files: [(String, Data)]) -> Data {
         localEntries.append(littleEndian(UInt16(0)))
         localEntries.append(littleEndian(UInt16(0)))
         localEntries.append(littleEndian(crc))
-        localEntries.append(littleEndian(UInt32(contents.count)))
-        localEntries.append(littleEndian(UInt32(contents.count)))
+        localEntries.append(littleEndian(UInt32(entry.contents.count)))
+        localEntries.append(littleEndian(UInt32(entry.contents.count)))
         localEntries.append(littleEndian(UInt16(pathData.count)))
         localEntries.append(littleEndian(UInt16(0)))
         localEntries.append(pathData)
-        localEntries.append(contents)
+        localEntries.append(entry.contents)
 
         centralDirectory.append(littleEndian(UInt32(0x0201_4b50)))
-        centralDirectory.append(littleEndian(UInt16(20)))
+        centralDirectory.append(littleEndian(entry.versionMadeBy))
         centralDirectory.append(littleEndian(UInt16(20)))
         centralDirectory.append(littleEndian(UInt16(0)))
         centralDirectory.append(littleEndian(UInt16(0)))
         centralDirectory.append(littleEndian(UInt16(0)))
         centralDirectory.append(littleEndian(UInt16(0)))
         centralDirectory.append(littleEndian(crc))
-        centralDirectory.append(littleEndian(UInt32(contents.count)))
-        centralDirectory.append(littleEndian(UInt32(contents.count)))
+        centralDirectory.append(littleEndian(UInt32(entry.contents.count)))
+        centralDirectory.append(littleEndian(UInt32(entry.contents.count)))
         centralDirectory.append(littleEndian(UInt16(pathData.count)))
         centralDirectory.append(littleEndian(UInt16(0)))
         centralDirectory.append(littleEndian(UInt16(0)))
         centralDirectory.append(littleEndian(UInt16(0)))
         centralDirectory.append(littleEndian(UInt16(0)))
-        centralDirectory.append(littleEndian(UInt32(0)))
+        centralDirectory.append(littleEndian(entry.externalFileAttributes))
         centralDirectory.append(littleEndian(localHeaderOffset))
         centralDirectory.append(pathData)
     }
@@ -124,8 +209,8 @@ private func storedZIPData(files: [(String, Data)]) -> Data {
     output.append(littleEndian(UInt32(0x0605_4b50)))
     output.append(littleEndian(UInt16(0)))
     output.append(littleEndian(UInt16(0)))
-    output.append(littleEndian(UInt16(files.count)))
-    output.append(littleEndian(UInt16(files.count)))
+    output.append(littleEndian(UInt16(entries.count)))
+    output.append(littleEndian(UInt16(entries.count)))
     output.append(littleEndian(UInt32(centralDirectory.count)))
     output.append(littleEndian(centralDirectoryOffset))
     output.append(littleEndian(UInt16(0)))

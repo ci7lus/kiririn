@@ -346,9 +346,11 @@ final class ExtensionPluginRuntimeRegistry {
             return try await resolvePendingLoad(pendingLoad, for: plugin, store: store)
         }
 
-        let manifest = try store.resolvedManifest(for: plugin)
-
-        let resourceBaseURL = try store.resourceBaseURL(for: plugin)
+        let resourceBaseURL = try await store.resourceBaseURL(for: plugin)
+        let manifest = try store.resolvedManifest(
+            for: plugin,
+            resourceBaseURL: resourceBaseURL
+        )
         let pendingLoad = PendingRuntimeLoad(
             token: UUID(),
             task: Task { @MainActor in

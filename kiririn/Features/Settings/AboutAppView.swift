@@ -7,6 +7,14 @@ import SwiftUI
 private struct AboutAppHeaderView: View {
     let buildInfo: AppBuildInfo
 
+    private var displayedVersionDescription: String {
+        #if os(macOS)
+            buildInfo.versionWithGitCommitHashDescription
+        #else
+            buildInfo.versionDescription
+        #endif
+    }
+
     var body: some View {
         VStack(spacing: 20) {
             Image("AppIconImage")
@@ -17,7 +25,7 @@ private struct AboutAppHeaderView: View {
             VStack(spacing: 6) {
                 Text("kiririn")
                     .font(.title2.bold())
-                Text("バージョン\(buildInfo.versionDescription)")
+                Text("バージョン\(displayedVersionDescription)")
                     .font(.subheadline)
                     .foregroundStyle(.primary.opacity(0.72))
             }

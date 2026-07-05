@@ -376,8 +376,18 @@ public struct PluginManifestParser: Sendable {
 
     public static func resourceHash(forArchiveURL archiveURL: URL) throws -> String {
         do {
-            let data = try Data(contentsOf: archiveURL)
-            return data.sha256Hex
+            let handle = try FileHandle(forReadingFrom: archiveURL)
+            defer {
+                try? handle.close()
+            }
+
+            var hasher = SHA256()
+            while true {
+                let chunk = try handle.read(upToCount: 1024 * 1024) ?? Data()
+                guard !chunk.isEmpty else { break }
+                hasher.update(data: chunk)
+            }
+            return hasher.finalize().map { String(format: "%02x", $0) }.joined()
         } catch {
             throw PluginManifestValidationError(messages: [
                 "プラグインパッケージの読み込みに失敗しました: \(error.localizedDescription)"
@@ -406,11 +416,5 @@ public struct PluginManifestParser: Sendable {
         }
 
         return path
-    }
-}
-
-extension Data {
-    var sha256Hex: String {
-        SHA256.hash(data: self).map { String(format: "%02x", $0) }.joined()
     }
 }
