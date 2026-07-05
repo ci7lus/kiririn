@@ -228,6 +228,7 @@ class PluginStore {
     @ObservationIgnored var onLocalFolderManifestChanged: ((UUID) -> Void)?
 
     private var resolvedManifestCache: [UUID: ExtensionPluginManifest] = [:]
+    @ObservationIgnored private var archiveHashCache: [String: String] = [:]
     @ObservationIgnored private var localManifestWatchers: [UUID: DispatchSourceFileSystemObject] =
         [:]
     @ObservationIgnored private var localManifestWatcherPaths: [UUID: String] = [:]
@@ -534,7 +535,7 @@ class PluginStore {
                     "保存済みのローカルフォルダを読み込めませんでした"
                 ])
             }
-            updated.resourceHash = try PluginManifestParser.resourceHash(forArchiveURL: archiveURL)
+            updated.resourceHash = try cachedResourceHash(forArchiveURL: archiveURL)
         case .localFolder(let url, let bookmarkData):
             guard plugin.sourceType == .localFolder else {
                 throw PluginManifestValidationError(messages: [
@@ -1164,11 +1165,22 @@ class PluginStore {
             return URL(fileURLWithPath: plugin.resourceBasePath, isDirectory: true)
         }
 
-        return try extractedResourceBaseURL(forArchiveURL: archiveURL(for: plugin))
+        return try extractedResourceBaseURL(
+            forArchiveURL: archiveURL(for: plugin),
+            storedResourceHash: plugin.resourceHash
+        )
     }
 
-    private func extractedResourceBaseURL(forArchiveURL archiveURL: URL) throws -> URL {
-        let resourceHash = try PluginManifestParser.resourceHash(forArchiveURL: archiveURL)
+    private func extractedResourceBaseURL(
+        forArchiveURL archiveURL: URL,
+        storedResourceHash: String?
+    ) throws -> URL {
+        let resourceHash: String
+        if let storedResourceHash {
+            resourceHash = storedResourceHash
+        } else {
+            resourceHash = try cachedResourceHash(forArchiveURL: archiveURL)
+        }
         let extractedURL = extractedArchiveURL(resourceHash: resourceHash)
         var isDirectory: ObjCBool = false
         if fileManager.fileExists(
@@ -1192,9 +1204,6 @@ class PluginStore {
         }
 
         try package.extract(to: stagingURL, fileManager: fileManager)
-        if fileManager.fileExists(atPath: extractedURL.path(percentEncoded: false)) {
-            return extractedURL
-        }
         do {
             try fileManager.moveItem(at: stagingURL, to: extractedURL)
         } catch {
@@ -1218,6 +1227,28 @@ class PluginStore {
             path: "\(Self.webKitExtractedArchivePrefix)\(hashPrefix)",
             directoryHint: .isDirectory
         )
+    }
+
+    private func cachedResourceHash(forArchiveURL archiveURL: URL) throws -> String {
+        let cacheKey = try? archiveHashCacheKey(forArchiveURL: archiveURL)
+        if let cacheKey, let cachedHash = archiveHashCache[cacheKey] {
+            return cachedHash
+        }
+
+        let hash = try PluginManifestParser.resourceHash(forArchiveURL: archiveURL)
+        if let cacheKey {
+            archiveHashCache[cacheKey] = hash
+        }
+        return hash
+    }
+
+    private func archiveHashCacheKey(forArchiveURL archiveURL: URL) throws -> String {
+        let path = archiveURL.standardizedFileURL.path(percentEncoded: false)
+        let attributes = try fileManager.attributesOfItem(atPath: path)
+        let fileSize = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+        let modificationDate =
+            (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "\(path)|\(fileSize)|\(modificationDate)"
     }
 
     private func refreshExtensionBundlePlugin(_ plugin: PluginDefinition) throws -> PluginDefinition
@@ -1254,8 +1285,7 @@ class PluginStore {
             return updated
         }
 
-        let currentHash = try PluginManifestParser.resourceHash(
-            forArchiveURL: archiveURL(for: plugin))
+        let currentHash = try cachedResourceHash(forArchiveURL: archiveURL(for: plugin))
         if let storedHash = plugin.resourceHash {
             if storedHash != currentHash {
                 updated = markPluginBlocked(updated)
@@ -1315,7 +1345,7 @@ class PluginStore {
             sourceType: sourceType,
             resourceBasePath: archiveFileName,
             resourceBookmark: nil,
-            resourceHash: try PluginManifestParser.resourceHash(forArchiveURL: installedArchiveURL),
+            resourceHash: try cachedResourceHash(forArchiveURL: installedArchiveURL),
             isBlocked: false,
             manifestUpdateURL: manifest.manifestUpdateURL,
             manifestVersion: manifest.version,

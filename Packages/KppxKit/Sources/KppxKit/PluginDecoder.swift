@@ -17,12 +17,12 @@ public struct PluginPackage {
         guard let entry = archive[path] else {
             return false
         }
-        return entry.type != .directory
+        return entry.type == .file
     }
 
     public func fileData(named fileName: String) throws -> Data? {
         let path = try Self.validatedFileName(fileName)
-        guard let entry = archive[path], entry.type != .directory else {
+        guard let entry = archive[path], entry.type == .file else {
             return nil
         }
 
@@ -46,7 +46,15 @@ public struct PluginPackage {
 
         for entry in archive {
             let path = try Self.validatedFileName(entry.path)
-            let isDirectory = entry.type == .directory
+            let isDirectory: Bool
+            switch entry.type {
+            case .file:
+                isDirectory = false
+            case .directory:
+                isDirectory = true
+            case .symlink:
+                throw PluginDecoderError.unsupportedEntry
+            }
             let outputURL = destinationURL.appending(
                 path: path,
                 directoryHint: isDirectory ? .isDirectory : .notDirectory
@@ -66,6 +74,9 @@ public struct PluginPackage {
     private static func validateEntries(in archive: Archive) throws {
         for entry in archive {
             _ = try validatedFileName(entry.path)
+            guard entry.type != .symlink else {
+                throw PluginDecoderError.unsupportedEntry
+            }
         }
     }
 
@@ -84,10 +95,12 @@ public struct PluginPackage {
 
 public enum PluginDecoderError: LocalizedError, Equatable {
     case invalidArchive
+    case unsupportedEntry
 
     public var errorDescription: String? {
         switch self {
         case .invalidArchive: return "無効なプラグインパッケージです"
+        case .unsupportedEntry: return "シンボリックリンクを含むプラグインパッケージは利用できません"
         }
     }
 }
