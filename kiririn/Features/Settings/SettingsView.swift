@@ -78,6 +78,14 @@ struct SettingsView: View {
         appModel.cacheStore?.databaseFailureFeedback != nil
     }
 
+    private var displayedAppVersionDescription: String {
+        #if os(macOS)
+            buildInfo.appVersionWithGitCommitHashDescription
+        #else
+            buildInfo.appVersionDescription
+        #endif
+    }
+
     var body: some View {
         Form {
             if shouldShowCacheRecoverySection {
@@ -120,7 +128,7 @@ struct SettingsView: View {
                     Label("このアプリについて", systemImage: "info.circle")
                 }
             } footer: {
-                Text(buildInfo.appVersionDescription)
+                Text(displayedAppVersionDescription)
                     .font(.callout)
                     .foregroundStyle(.primary.opacity(0.72))
                     .frame(maxWidth: .infinity, alignment: .center)

@@ -10,8 +10,16 @@ struct AppBuildInfo {
         "\(version) (\(buildNumber), \(gitCommitHash))"
     }
 
+    var versionWithGitCommitHashDescription: String {
+        "\(version) (\(gitCommitHash))"
+    }
+
     var appVersionDescription: String {
         "\(appName) \(versionDescription)"
+    }
+
+    var appVersionWithGitCommitHashDescription: String {
+        "\(appName) \(versionWithGitCommitHashDescription)"
     }
 
     static var current: AppBuildInfo {
