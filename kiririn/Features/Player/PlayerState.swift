@@ -632,8 +632,8 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
     private func loadAudioTracks() {
         guard let player else {
-            availableAudioTracks = []
-            selectedAudioTrack = nil
+            if !availableAudioTracks.isEmpty { availableAudioTracks = [] }
+            if selectedAudioTrack != nil { selectedAudioTrack = nil }
             return
         }
 
@@ -647,23 +647,35 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
                     channels: channels
                 )
             }
-        availableAudioTracks = tracks
+        // トラック更新イベントは高頻度で発火するため、変化時のみ書き込む
+        // （@Observable は同値でも代入のたびに通知し、メニュー等の UI を作り直してしまう）
+        if availableAudioTracks != tracks {
+            availableAudioTracks = tracks
+        }
 
-        selectedAudioTrack = tracks.first(where: { $0.id == selectedAudioTrackID })
+        let selected = tracks.first(where: { $0.id == selectedAudioTrackID })
+        if selectedAudioTrack != selected {
+            selectedAudioTrack = selected
+        }
     }
 
     private func loadVideoTracks() {
         guard let player else {
-            availableVideoTracks = []
-            selectedVideoTrack = nil
+            if !availableVideoTracks.isEmpty { availableVideoTracks = [] }
+            if selectedVideoTrack != nil { selectedVideoTrack = nil }
             return
         }
 
         let tracks = player.videoTracks
             .filter { !$0.trackId.isEmpty }
             .map { PlayerVideoTrack(id: $0.trackId, name: $0.trackName) }
-        availableVideoTracks = tracks
-        selectedVideoTrack = tracks.first(where: { $0.id == selectedVideoTrackID })
+        if availableVideoTracks != tracks {
+            availableVideoTracks = tracks
+        }
+        let selected = tracks.first(where: { $0.id == selectedVideoTrackID })
+        if selectedVideoTrack != selected {
+            selectedVideoTrack = selected
+        }
     }
 
     private func refreshSubtitleTrack() {
@@ -1412,7 +1424,22 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     }
 
     private func clearPlaybackError() {
-        playbackErrorMessage = nil
+        if playbackErrorMessage != nil {
+            playbackErrorMessage = nil
+        }
+    }
+
+    // @Observable は同値でも代入のたびに通知するため、変化時のみ書き込むヘルパー。
+    private func setPlaybackLoadingIfChanged(_ value: Bool) {
+        if isPlaybackLoading != value {
+            isPlaybackLoading = value
+        }
+    }
+
+    private func setPlayingIfChanged(_ value: Bool) {
+        if isPlaying != value {
+            isPlaying = value
+        }
     }
 
     private func resolvePlaybackErrorMessage(preferredMessage: String?) -> String {
@@ -1456,30 +1483,34 @@ extension PlayerState {
         // VLCLibrary.currentErrorMessage is thread-local and must be read on the callback thread.
         let errorMessageOnCallbackThread = (state == .error) ? VLCLibrary.currentErrorMessage : nil
         Task { @MainActor in
+            // @Observable は同値でも代入のたびに通知するため、値が変わるときだけ書き込む。
+            // （.buffering はライブ視聴中に高頻度で発火する）
             switch state {
             case .opening, .buffering:
-                isPlaybackLoading = !didStartPlayback
+                setPlaybackLoadingIfChanged(!didStartPlayback)
             case .playing:
                 didStartPlayback = true
-                isPlaybackLoading = false
-                isPlaying = true
+                setPlaybackLoadingIfChanged(false)
+                setPlayingIfChanged(true)
                 clearPlaybackError()
                 didObservePlayingForRestore = true
                 syncAudioModesFromVLC()
                 applyAudioOutput()
                 requestPlaybackRestoreIfPossible(trigger: "state.playing")
             case .error:
-                isPlaybackLoading = false
-                isPlaying = false
+                setPlaybackLoadingIfChanged(false)
+                setPlayingIfChanged(false)
                 playbackErrorMessage = resolvePlaybackErrorMessage(
                     preferredMessage: errorMessageOnCallbackThread)
             case .paused, .stopped, .stopping:
-                isPlaybackLoading = false
-                isPlaying = false
+                setPlaybackLoadingIfChanged(false)
+                setPlayingIfChanged(false)
             default:
                 break
             }
-            playbackStatus.isPlaying = isPlaying
+            if playbackStatus.isPlaying != isPlaying {
+                playbackStatus.isPlaying = isPlaying
+            }
             syncCurrentPlayableSeekability()
         }
     }
@@ -1489,13 +1520,22 @@ extension PlayerState {
             guard let player = player else { return }
             let time = max(0, Double(player.time.intValue) / 1000.0)
             let duration = max(0, currentPlayable?.length ?? 0)
+            // @Observable は同値でも代入のたびに通知するため、値が変わるときだけ書き込む。
+            // （毎ティックの無条件代入は開いているメニュー等の UI を毎秒作り直してしまう）
             if duration == 0 || time <= duration {
-                playbackStatus.time = time
+                if playbackStatus.time != time {
+                    playbackStatus.time = time
+                }
             }
-            playbackStatus.position = Float(player.position)
+            let position = Float(player.position)
+            if playbackStatus.position != position {
+                playbackStatus.position = position
+            }
             if playbackStatus.time > 0 || playbackStatus.position > 0.001 {
                 didStartPlayback = true
-                isPlaybackLoading = false
+                if isPlaybackLoading {
+                    isPlaybackLoading = false
+                }
                 didObservePlaybackProgressForRestore = true
                 requestPlaybackRestoreIfPossible(trigger: "time.changed")
             }
