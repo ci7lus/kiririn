@@ -82,6 +82,21 @@ struct PluginDecoderTests {
         }
     }
 
+    @Test func rejectsEmptyPath() throws {
+        let packageData = storedZIPData(files: [
+            ("", Data("danger".utf8))
+        ])
+        let tempURL = try tempFileForTest(data: packageData, suffix: "kppx")
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        do {
+            _ = try PluginDecoder.decode(url: tempURL)
+            #expect(Bool(false))
+        } catch {
+            #expect(Bool(true))
+        }
+    }
+
     @Test func rejectsSymbolicLinkEntry() throws {
         let packageData = storedZIPData(entries: [
             .file(path: "manifest.json", contents: Data("{}".utf8)),

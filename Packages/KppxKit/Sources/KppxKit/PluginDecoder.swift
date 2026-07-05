@@ -81,7 +81,8 @@ public struct PluginPackage {
     }
 
     private static func validatedFileName(_ fileName: String) throws -> String {
-        guard !fileName.hasPrefix("/"),
+        guard !fileName.isEmpty,
+            !fileName.hasPrefix("/"),
             !fileName.split(separator: "/").contains("..")
         else {
             throw NSError(
