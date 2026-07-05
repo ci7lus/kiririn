@@ -18,145 +18,159 @@ enum PlayerPlaybackOptionCatalog {
     }
 }
 
-@ViewBuilder
-func playerPlaybackOptionMenuEntries(playerState: PlayerState, isSeekActionAvailable: Bool)
-    -> some View
-{
-    if isSeekActionAvailable {
+/// 再生オプションメニューの中身。
+///
+/// `PlayerOverlayView` の body は `playbackStatus` の時刻更新（VLC から毎秒数回）で頻繁に
+/// 再評価される。メニュー内容を独立した `View` として切り出すことで、`@Observable` の
+/// 追跡対象を再生速度・トラック・モード・プラグインに限定し、時刻更新による再生成を避ける。
+/// これをインラインの `@ViewBuilder func` にすると、開いているメニューが毎秒作り直されて
+/// チェックマークが点滅し、クリックも受け付けなくなる。
+struct PlayerPlaybackOptionMenuEntries: View {
+    let playerState: PlayerState
+    let isSeekActionAvailable: Bool
+
+    var body: some View {
+        content
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if isSeekActionAvailable {
+            Menu {
+                Picker(
+                    "再生速度",
+                    selection: Binding(
+                        get: { playerState.playbackRate },
+                        set: { playerState.setRate($0) }
+                    )
+                ) {
+                    ForEach(PlayerPlaybackOptionCatalog.rateOptions, id: \.self) { rate in
+                        Text(PlayerPlaybackOptionCatalog.rateLabel(rate)).tag(rate)
+                    }
+                }
+                .labelsHidden()
+            } label: {
+                Label {
+                    Text("再生速度")
+                } icon: {
+                    accentMenuIcon(systemName: "gauge")
+                }
+            }
+        }
+
         Menu {
             Picker(
-                "再生速度",
+                "映像トラック",
                 selection: Binding(
-                    get: { playerState.playbackRate },
-                    set: { playerState.setRate($0) }
+                    get: { playerState.selectedVideoTrack },
+                    set: { if let track = $0 { playerState.selectVideoTrack(track) } }
                 )
             ) {
-                ForEach(PlayerPlaybackOptionCatalog.rateOptions, id: \.self) { rate in
-                    Text(PlayerPlaybackOptionCatalog.rateLabel(rate)).tag(rate)
+                Text("トラックなし").tag(PlayerVideoTrack?.none).disabled(true).selectionDisabled()
+                ForEach(Array(playerState.availableVideoTracks.enumerated()), id: \.element.id) {
+                    index, track in
+                    Text(PlayerPlaybackOptionCatalog.videoTrackLabel(index: index, track: track))
+                        .tag(PlayerVideoTrack?.some(track))
                 }
             }
             .labelsHidden()
         } label: {
             Label {
-                Text("再生速度")
+                Text("映像トラック")
             } icon: {
-                accentMenuIcon(systemName: "gauge")
+                accentMenuIcon(systemName: "video")
             }
         }
-    }
 
-    Menu {
-        Picker(
-            "映像トラック",
-            selection: Binding(
-                get: { playerState.selectedVideoTrack },
-                set: { if let track = $0 { playerState.selectVideoTrack(track) } }
-            )
-        ) {
-            Text("トラックなし").tag(PlayerVideoTrack?.none).disabled(true).selectionDisabled()
-            ForEach(Array(playerState.availableVideoTracks.enumerated()), id: \.element.id) {
-                index, track in
-                Text(PlayerPlaybackOptionCatalog.videoTrackLabel(index: index, track: track))
-                    .tag(PlayerVideoTrack?.some(track))
-            }
-        }
-        .labelsHidden()
-    } label: {
-        Label {
-            Text("映像トラック")
-        } icon: {
-            accentMenuIcon(systemName: "video")
-        }
-    }
-
-    Menu {
-        Picker(
-            "音声トラック",
-            selection: Binding(
-                get: { playerState.selectedAudioTrack },
-                set: { if let track = $0 { playerState.selectAudioTrack(track) } }
-            )
-        ) {
-            Text("トラックなし").tag(PlayerAudioTrack?.none).disabled(true).selectionDisabled()
-            ForEach(Array(playerState.availableAudioTracks.enumerated()), id: \.element.id) {
-                index, track in
-                Text(PlayerPlaybackOptionCatalog.audioTrackLabel(index: index, track: track))
-                    .tag(PlayerAudioTrack?.some(track))
-            }
-        }
-        .labelsHidden()
-    } label: {
-        Label {
-            Text("音声トラック")
-        } icon: {
-            accentMenuIcon(systemName: "speaker.wave.2")
-        }
-    }
-
-    #if DEBUG
         Menu {
             Picker(
-                "ステレオモード",
+                "音声トラック",
                 selection: Binding(
-                    get: { playerState.selectedAudioStereoMode },
-                    set: { playerState.selectAudioStereoMode($0) }
+                    get: { playerState.selectedAudioTrack },
+                    set: { if let track = $0 { playerState.selectAudioTrack(track) } }
                 )
             ) {
-                ForEach(PlayerAudioStereoMode.allCases) { mode in
+                Text("トラックなし").tag(PlayerAudioTrack?.none).disabled(true).selectionDisabled()
+                ForEach(Array(playerState.availableAudioTracks.enumerated()), id: \.element.id) {
+                    index, track in
+                    Text(PlayerPlaybackOptionCatalog.audioTrackLabel(index: index, track: track))
+                        .tag(PlayerAudioTrack?.some(track))
+                }
+            }
+            .labelsHidden()
+        } label: {
+            Label {
+                Text("音声トラック")
+            } icon: {
+                accentMenuIcon(systemName: "speaker.wave.2")
+            }
+        }
+
+        #if DEBUG
+            Menu {
+                Picker(
+                    "ステレオモード",
+                    selection: Binding(
+                        get: { playerState.selectedAudioStereoMode },
+                        set: { playerState.selectAudioStereoMode($0) }
+                    )
+                ) {
+                    ForEach(PlayerAudioStereoMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .labelsHidden()
+            } label: {
+                Label {
+                    Text("ステレオモード")
+                } icon: {
+                    accentMenuIcon(systemName: "headphones")
+                }
+            }
+        #endif
+
+        Menu {
+            Picker(
+                "音声ミックスモード",
+                selection: Binding(
+                    get: { playerState.selectedAudioMixMode },
+                    set: { playerState.selectAudioMixMode($0) }
+                )
+            ) {
+                ForEach(PlayerAudioMixMode.allCases) { mode in
                     Text(mode.displayName).tag(mode)
                 }
             }
             .labelsHidden()
         } label: {
             Label {
-                Text("ステレオモード")
+                Text("音声モード")
             } icon: {
                 accentMenuIcon(systemName: "headphones")
             }
         }
-    #endif
 
-    Menu {
-        Picker(
-            "音声ミックスモード",
-            selection: Binding(
-                get: { playerState.selectedAudioMixMode },
-                set: { playerState.selectAudioMixMode($0) }
-            )
-        ) {
-            ForEach(PlayerAudioMixMode.allCases) { mode in
-                Text(mode.displayName).tag(mode)
-            }
-        }
-        .labelsHidden()
-    } label: {
-        Label {
-            Text("音声モード")
-        } icon: {
-            accentMenuIcon(systemName: "headphones")
-        }
-    }
-
-    Button {
-        playerState.reloadCurrentPlayable()
-    } label: {
-        Label {
-            Text("再読み込み")
-        } icon: {
-            accentMenuIcon(systemName: "arrow.clockwise")
-        }
-    }
-
-    if !playerState.availableOverlayPlugins.isEmpty {
         Button {
-            playerState.showingPluginOverlay.toggle()
+            playerState.reloadCurrentPlayable()
         } label: {
             Label {
-                Text(playerState.showingPluginOverlay ? "プラグイン非表示" : "プラグイン表示")
+                Text("再読み込み")
             } icon: {
-                accentMenuIcon(
-                    systemName: playerState.showingPluginOverlay
-                        ? "puzzlepiece.extension.fill" : "puzzlepiece.extension")
+                accentMenuIcon(systemName: "arrow.clockwise")
+            }
+        }
+
+        if !playerState.availableOverlayPlugins.isEmpty {
+            Button {
+                playerState.showingPluginOverlay.toggle()
+            } label: {
+                Label {
+                    Text(playerState.showingPluginOverlay ? "プラグイン非表示" : "プラグイン表示")
+                } icon: {
+                    accentMenuIcon(
+                        systemName: playerState.showingPluginOverlay
+                            ? "puzzlepiece.extension.fill" : "puzzlepiece.extension")
+                }
             }
         }
     }

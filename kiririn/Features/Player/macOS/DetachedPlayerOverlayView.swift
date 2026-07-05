@@ -380,127 +380,11 @@ struct DetachedPlayerOverlayView_macOS: View {
                 }
                 .keyboardShortcut("r", modifiers: .command)
 
-                Menu {
-                    if playerState.player?.isSeekable ?? false {
-                        Picker(
-                            "再生速度",
-                            selection: Binding(
-                                get: { playerState.playbackRate },
-                                set: { playerState.setRate($0) }
-                            )
-                        ) {
-                            ForEach(PlayerPlaybackOptionCatalog.rateOptions, id: \.self) {
-                                rate in
-                                Text(PlayerPlaybackOptionCatalog.rateLabel(rate)).tag(rate)
-                            }
-                        }
-                    }
-
-                    Picker(
-                        "映像トラック",
-                        selection: Binding(
-                            get: { playerState.selectedVideoTrack },
-                            set: {
-                                if let track = $0 { playerState.selectVideoTrack(track) }
-                            }
-                        )
-                    ) {
-                        Text("トラックなし").tag(PlayerVideoTrack?.none).disabled(true)
-                            .selectionDisabled(true)
-                        ForEach(
-                            Array(playerState.availableVideoTracks.enumerated()),
-                            id: \.element.id
-                        ) { index, track in
-                            Text(
-                                PlayerPlaybackOptionCatalog.videoTrackLabel(
-                                    index: index, track: track)
-                            )
-                            .tag(PlayerVideoTrack?.some(track))
-                        }
-                    }
-
-                    Picker(
-                        "音声トラック",
-                        selection: Binding(
-                            get: { playerState.selectedAudioTrack },
-                            set: {
-                                if let track = $0 { playerState.selectAudioTrack(track) }
-                            }
-                        )
-                    ) {
-                        Text("トラックなし").tag(PlayerAudioTrack?.none).disabled(true)
-                            .selectionDisabled(true)
-                        ForEach(
-                            Array(playerState.availableAudioTracks.enumerated()),
-                            id: \.element.id
-                        ) { index, track in
-                            Text(
-                                PlayerPlaybackOptionCatalog.audioTrackLabel(
-                                    index: index, track: track)
-                            )
-                            .tag(PlayerAudioTrack?.some(track))
-                        }
-                    }
-
-                    #if DEBUG
-                        Picker(
-                            "ステレオモード",
-                            selection: Binding(
-                                get: { playerState.selectedAudioStereoMode },
-                                set: { playerState.selectAudioStereoMode($0) }
-                            )
-                        ) {
-                            ForEach(PlayerAudioStereoMode.allCases) { mode in
-                                Text(mode.displayName).tag(mode)
-                            }
-                        }
-                    #endif
-
-                    Picker(
-                        "音声ミックスモード",
-                        selection: Binding(
-                            get: { playerState.selectedAudioMixMode },
-                            set: { playerState.selectAudioMixMode($0) }
-                        )
-                    ) {
-                        ForEach(PlayerAudioMixMode.allCases) { mode in
-                            Text(mode.displayName).tag(mode)
-                        }
-                    }
-
-                    Button {
-                        playerState.reloadCurrentPlayable()
-                    } label: {
-                        Label("再読み込み", systemImage: "arrow.clockwise")
-                    }
-
-                    if !playerState.availableOverlayPlugins.isEmpty {
-                        Button {
-                            playerState.showingPluginOverlay.toggle()
-                        } label: {
-                            if playerState.showingPluginOverlay {
-                                Image(systemName: "checkmark")
-                            }
-                            Text("プラグインを表示")
-                        }
-                    }
-
-                    Section("プラグインウィンドウ") {
-                        ForEach(
-                            pluginStore.plugins.filter {
-                                $0.isEnabled
-                            }
-                        ) { plugin in
-                            Button(plugin.name) {
-                                openWindow(id: AppWindowID.plugin.rawValue, value: plugin.id)
-                            }
-                        }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .frame(width: 20 * scale, height: 20 * scale)
-                        .contentShape(.rect)
-                }
+                DetachedPlayerOptionsMenu(
+                    playerState: playerState,
+                    pluginStore: pluginStore,
+                    scale: scale
+                )
             }
             .font(.system(size: 15 * scale, weight: .semibold))
             .padding(.horizontal, 12 * scale)
@@ -826,6 +710,165 @@ struct DetachedPlayerOverlayView_macOS: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: task)
     }
 
+}
+
+/// 再生オプションメニュー（macOS 分離プレイヤー用）。
+///
+/// SwiftUI の `Menu` を使うと、再生中の状態更新（VLC から毎秒数回）でホスト側の再評価が走った
+/// 際に、macOS 26 では開いているメニューごと再構築されてサブメニューのマークが点滅し、
+/// クリックも受け付けなくなる。素の `NSMenu` をクリック時に一度だけ構築してポップアップする
+/// ことで、SwiftUI の更新サイクルから完全に切り離す（表示中の内容は開いた時点のスナップショット）。
+private struct DetachedPlayerOptionsMenu: View {
+    let playerState: PlayerState
+    let pluginStore: PluginStore
+    let scale: CGFloat
+
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button {
+            presentMenu()
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 20 * scale, height: 20 * scale)
+                .contentShape(.rect)
+        }
+    }
+
+    private func presentMenu() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        if playerState.player?.isSeekable ?? false {
+            let rateMenu = NSMenu()
+            let currentRate = playerState.playbackRate
+            for rate in PlayerPlaybackOptionCatalog.rateOptions {
+                let item = ClosureMenuItem(
+                    title: PlayerPlaybackOptionCatalog.rateLabel(rate)
+                ) { [playerState] in
+                    playerState.setRate(rate)
+                }
+                item.state = currentRate == rate ? .on : .off
+                rateMenu.addItem(item)
+            }
+            menu.addItem(submenuItem(title: "再生速度", submenu: rateMenu))
+        }
+
+        let videoMenu = NSMenu()
+        let noVideoItem = NSMenuItem(title: "トラックなし", action: nil, keyEquivalent: "")
+        noVideoItem.isEnabled = false
+        noVideoItem.state = playerState.selectedVideoTrack == nil ? .on : .off
+        videoMenu.addItem(noVideoItem)
+        for (index, track) in playerState.availableVideoTracks.enumerated() {
+            let item = ClosureMenuItem(
+                title: PlayerPlaybackOptionCatalog.videoTrackLabel(index: index, track: track)
+            ) { [playerState] in
+                playerState.selectVideoTrack(track)
+            }
+            item.state = playerState.selectedVideoTrack == track ? .on : .off
+            videoMenu.addItem(item)
+        }
+        menu.addItem(submenuItem(title: "映像トラック", submenu: videoMenu))
+
+        let audioMenu = NSMenu()
+        let noAudioItem = NSMenuItem(title: "トラックなし", action: nil, keyEquivalent: "")
+        noAudioItem.isEnabled = false
+        noAudioItem.state = playerState.selectedAudioTrack == nil ? .on : .off
+        audioMenu.addItem(noAudioItem)
+        for (index, track) in playerState.availableAudioTracks.enumerated() {
+            let item = ClosureMenuItem(
+                title: PlayerPlaybackOptionCatalog.audioTrackLabel(index: index, track: track)
+            ) { [playerState] in
+                playerState.selectAudioTrack(track)
+            }
+            item.state = playerState.selectedAudioTrack == track ? .on : .off
+            audioMenu.addItem(item)
+        }
+        menu.addItem(submenuItem(title: "音声トラック", submenu: audioMenu))
+
+        #if DEBUG
+            let stereoMenu = NSMenu()
+            for mode in PlayerAudioStereoMode.allCases {
+                let item = ClosureMenuItem(title: mode.displayName) { [playerState] in
+                    playerState.selectAudioStereoMode(mode)
+                }
+                item.state = playerState.selectedAudioStereoMode == mode ? .on : .off
+                stereoMenu.addItem(item)
+            }
+            menu.addItem(submenuItem(title: "ステレオモード", submenu: stereoMenu))
+        #endif
+
+        let mixMenu = NSMenu()
+        for mode in PlayerAudioMixMode.allCases {
+            let item = ClosureMenuItem(title: mode.displayName) { [playerState] in
+                playerState.selectAudioMixMode(mode)
+            }
+            item.state = playerState.selectedAudioMixMode == mode ? .on : .off
+            mixMenu.addItem(item)
+        }
+        menu.addItem(submenuItem(title: "音声ミックスモード", submenu: mixMenu))
+
+        menu.addItem(
+            ClosureMenuItem(title: "再読み込み", systemImage: "arrow.clockwise") { [playerState] in
+                playerState.reloadCurrentPlayable()
+            }
+        )
+
+        if !playerState.availableOverlayPlugins.isEmpty {
+            let toggleItem = ClosureMenuItem(title: "プラグインを表示") { [playerState] in
+                playerState.showingPluginOverlay.toggle()
+            }
+            toggleItem.state = playerState.showingPluginOverlay ? .on : .off
+            menu.addItem(toggleItem)
+        }
+
+        let enabledPlugins = pluginStore.plugins.filter { $0.isEnabled }
+        if !enabledPlugins.isEmpty {
+            menu.addItem(.separator())
+            menu.addItem(.sectionHeader(title: "プラグインウィンドウ"))
+            for plugin in enabledPlugins {
+                let pluginID = plugin.id
+                menu.addItem(
+                    ClosureMenuItem(title: plugin.name) { [openWindow] in
+                        openWindow(id: AppWindowID.plugin.rawValue, value: pluginID)
+                    }
+                )
+            }
+        }
+
+        guard let event = NSApp.currentEvent,
+            let contentView = event.window?.contentView
+        else { return }
+        NSMenu.popUpContextMenu(menu, with: event, for: contentView)
+    }
+
+    private func submenuItem(title: String, submenu: NSMenu) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        return item
+    }
+}
+
+/// クロージャを実行できる NSMenuItem。SwiftUI から NSMenu を組み立てるための補助。
+private final class ClosureMenuItem: NSMenuItem {
+    private let handler: () -> Void
+
+    init(title: String, systemImage: String? = nil, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(invoke), keyEquivalent: "")
+        target = self
+        if let systemImage {
+            image = NSImage(systemSymbolName: systemImage, accessibilityDescription: nil)
+        }
+    }
+
+    required init(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    @objc private func invoke() {
+        handler()
+    }
 }
 
 private struct PlayerSlider: View {

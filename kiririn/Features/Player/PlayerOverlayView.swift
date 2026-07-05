@@ -1873,7 +1873,7 @@ struct PlayerOverlayView_iOS: View {
 
         if showsOptionsMenu {
             Menu {
-                playerPlaybackOptionMenuEntries(
+                PlayerPlaybackOptionMenuEntries(
                     playerState: playerState,
                     isSeekActionAvailable: isSeekActionAvailable
                 )
@@ -1894,7 +1894,7 @@ struct PlayerOverlayView_iOS: View {
         usesGlass: Bool
     ) -> some View {
         Menu {
-            playerPlaybackOptionMenuEntries(
+            PlayerPlaybackOptionMenuEntries(
                 playerState: playerState,
                 isSeekActionAvailable: isSeekActionAvailable
             )
