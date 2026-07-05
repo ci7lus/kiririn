@@ -63,10 +63,9 @@ struct ServiceListView: View {
         }
     }
 
-    private var serviceTypeFilteredServices: [TVService] {
+    private var sortedServices: [TVService] {
         let typeOrder = ["GR", "BS", "CS", "SKY"]
         return manager.services
-            .filter { $0.type == .digitalTelevision || $0.type == .uhdtv }
             .sorted { lhs, rhs in
                 let lt = lhs.channel?.type ?? "その他"
                 let rt = rhs.channel?.type ?? "その他"
@@ -295,7 +294,7 @@ struct ServiceListView: View {
 
     private var favoriteOrderingGroups: [FavoriteOrderingGroup] {
         buildServiceDisplayGroups(
-            from: serviceTypeFilteredServices.filter { manager.isFavorite($0) },
+            from: sortedServices.filter { manager.isFavorite($0) },
             usesFavoriteDisplayOrder: true
         )
         .map { group in
@@ -431,7 +430,7 @@ struct ServiceListView: View {
             return
         }
         let keyword = viewModel.searchText.normalizedForJapaneseSearch()
-        let currentServices = serviceTypeFilteredServices
+        let currentServices = sortedServices
         let favoriteServices = currentServices.filter { $0.favoritedAt != nil }
         let grouped = Dictionary(grouping: currentServices) { $0.channel?.type ?? "その他" }
         let order = ["お気に入り", "GR", "BS", "CS", "SKY"]

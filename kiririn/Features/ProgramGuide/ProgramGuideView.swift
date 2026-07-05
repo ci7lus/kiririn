@@ -714,7 +714,6 @@ struct ProgramGuideView: View {
         let typeOrder = ["GR", "BS", "CS", "SKY"]
         let sorted =
             services
-            .filter { $0.type == .digitalTelevision || $0.type == .uhdtv }
             .sorted { lhs, rhs in
                 let lhsFavorite = lhs.favoritedAt != nil
                 let rhsFavorite = rhs.favoritedAt != nil
