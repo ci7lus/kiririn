@@ -809,7 +809,7 @@ private struct DetachedPlayerOptionsMenu: View {
         menu.addItem(submenuItem(title: "音声ミックスモード", submenu: mixMenu))
 
         menu.addItem(
-            ClosureMenuItem(title: "再読み込み", systemImage: "arrow.clockwise") { [playerState] in
+            ClosureMenuItem(title: "再読み込み") { [playerState] in
                 playerState.reloadCurrentPlayable()
             }
         )
@@ -853,13 +853,10 @@ private struct DetachedPlayerOptionsMenu: View {
 private final class ClosureMenuItem: NSMenuItem {
     private let handler: () -> Void
 
-    init(title: String, systemImage: String? = nil, handler: @escaping () -> Void) {
+    init(title: String, handler: @escaping () -> Void) {
         self.handler = handler
         super.init(title: title, action: #selector(invoke), keyEquivalent: "")
         target = self
-        if let systemImage {
-            image = NSImage(systemSymbolName: systemImage, accessibilityDescription: nil)
-        }
     }
 
     required init(coder: NSCoder) {
