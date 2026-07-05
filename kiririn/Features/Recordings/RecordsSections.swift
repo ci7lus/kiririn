@@ -37,20 +37,16 @@ struct ServerRecordsView: View {
                         } description: {
                             Text(error)
                         } actions: {
-                            Button {
-                                Task {
-                                    await refreshRecords()
-                                }
-                            } label: {
-                                Text("再試行")
-                            }
+                            reloadButton
                         }
                     } else {
-                        ContentUnavailableView(
-                            "録画番組がありません",
-                            systemImage: "film.stack",
-                            description: Text("録画番組がある場合はここに表示されます")
-                        )
+                        ContentUnavailableView {
+                            Label("録画番組がありません", systemImage: "film.stack")
+                        } description: {
+                            Text("録画番組がある場合はここに表示されます")
+                        } actions: {
+                            reloadButton
+                        }
                     }
                 } else {
                     ScrollViewReader { proxy in
@@ -148,6 +144,16 @@ struct ServerRecordsView: View {
         .onDisappear {
             searchDebounceTask?.cancel()
             searchDebounceTask = nil
+        }
+    }
+
+    private var reloadButton: some View {
+        Button {
+            Task {
+                await refreshRecords()
+            }
+        } label: {
+            Text("再読み込み")
         }
     }
 
