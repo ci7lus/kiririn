@@ -809,7 +809,7 @@ private struct DetachedPlayerOptionsMenu: View {
         menu.addItem(submenuItem(title: "音声ミックスモード", submenu: mixMenu))
 
         menu.addItem(
-            ClosureMenuItem(title: "再読み込み", systemImage: "arrow.clockwise") { [playerState] in
+            ClosureMenuItem(title: "再読み込み") { [playerState] in
                 playerState.reloadCurrentPlayable()
             }
         )
@@ -853,13 +853,10 @@ private struct DetachedPlayerOptionsMenu: View {
 private final class ClosureMenuItem: NSMenuItem {
     private let handler: () -> Void
 
-    init(title: String, systemImage: String? = nil, handler: @escaping () -> Void) {
+    init(title: String, handler: @escaping () -> Void) {
         self.handler = handler
         super.init(title: title, action: #selector(invoke), keyEquivalent: "")
         target = self
-        if let systemImage {
-            image = NSImage(systemSymbolName: systemImage, accessibilityDescription: nil)
-        }
     }
 
     required init(coder: NSCoder) {
@@ -1054,209 +1051,161 @@ private struct WindowDragSurface: NSViewRepresentable {
 }
 
 #Preview("Detached Player Controls") {
-    DetachedPlayerOverlayChromePreview()
+    DetachedPlayerOverlayPreview()
         .frame(width: 1280, height: 720)
         .preferredColorScheme(.dark)
 }
 
-private struct DetachedPlayerOverlayChromePreview: View {
-    @State private var isPlaying = true
-    @State private var isMuted = false
-    @State private var volume: Double = 80
-    @State private var isRecording = false
-    @State private var isPipAvailable = true
-    @State private var isPipEnabled = false
-    @State private var isSubtitleEnabled = true
-    @State private var progress: Double = 0.32
-    @State private var isSeekable = true
+private struct DetachedPlayerOverlayPreview: View {
+    @State private var playerState = Self.makePlayerState()
     @State private var isAlwaysOnTop = false
-
-    private let totalTime: Double = 5400
-    private var currentTime: Double { totalTime * progress }
-    private let scale: CGFloat = 1.0
+    private let appModel = AppModel.shared
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.05, green: 0.0, blue: 0.1),
-                    Color(red: 0.18, green: 0.06, blue: 0.28),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+        DetachedPlayerOverlayView_macOS(
+            playerState: playerState,
+            appModel: appModel,
+            pluginStore: appModel.pluginStore,
+            isAlwaysOnTop: $isAlwaysOnTop,
+            playerWindow: nil,
+            onToggleFullscreen: {},
+            onControlsVisibilityChanged: { _ in }
+        )
+    }
 
-            VStack(spacing: 0) {
-                titleBar
-                Spacer()
-                controlsBar
-            }
+    private static func makePlayerState() -> PlayerState {
+        let state = PlayerState()
+        state.isPlaying = true
+        state.isSubtitleEnabled = true
+        state.isPipAvailable = true
+        state.volume = 80
+
+        guard let streamURL = URL(string: "https://example.com/preview") else {
+            return state
         }
-        .buttonStyle(.plain)
+
+        var playable = Playable(
+            streamURL: streamURL,
+            source: .liveService(serviceUniqueId: "preview"),
+            program: mockProgram(),
+            service: mockService()
+        )
+        playable.isSeekable = true
+        playable.length = previewProgramDuration
+
+        state.currentPlayable = playable
+        state.nextProgram = mockNextProgram()
+        state.playbackStatus = PlayerPlaybackStatus(
+            playableID: playable.id,
+            isPlaying: true,
+            time: previewProgramDuration * 0.8,
+            position: 0.8
+        )
+        state.player = DetachedPlayerOverlayPreviewVLCMediaPlayer(isSeekable: true)
+        return state
     }
 
-    private var titleBar: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("NHK総合 ニュースウォッチ9")
-                    .font(.system(size: 14 * scale, weight: .semibold))
-                    .lineLimit(1)
-                HStack(spacing: 6) {
-                    Text("NHK")
-                        .font(.system(size: 12 * scale, weight: .regular))
-                        .foregroundStyle(.secondary)
-                    Text("2024年1月15日 21:00 - 22:00")
-                        .font(.system(size: 12 * scale, weight: .regular))
-                        .foregroundStyle(.secondary)
-                }
-                Text("字幕付き")
-                    .font(.system(size: 12 * scale, weight: .regular))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.right")
-                    Text("22:00 ドラマ10「何かしてる」")
-                }
-                .font(.system(size: 12 * scale, weight: .regular))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            }
-            Spacer(minLength: 0)
+    private static let previewProgramDuration: TimeInterval = 30 * 60
+    private static let previewProgramStartAt = previewDate(
+        year: 2010,
+        month: 10,
+        day: 3,
+        hour: 23,
+        minute: 30
+    )
+    private static let previewProgramEndAt = previewProgramStartAt.addingTimeInterval(
+        previewProgramDuration
+    )
+
+    private static var previewCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        if let timeZone = TimeZone(identifier: "Asia/Tokyo") {
+            calendar.timeZone = timeZone
         }
-        .padding(.horizontal, 12 * scale)
-        .padding(.vertical, 8 * scale)
-        .padding(.leading, 76 * scale)
-        .background(.ultraThinMaterial)
-        .allowsHitTesting(false)
+        return calendar
     }
 
-    private var controlsBar: some View {
-        HStack(spacing: 12 * scale) {
-            if isSeekable {
-                Button {
-                    progress = max(0, progress - 10.0 / totalTime)
-                } label: {
-                    Image(systemName: "gobackward.10")
-                        .frame(width: 20 * scale, height: 20 * scale)
-                }
-            }
-
-            Button {
-                isPlaying.toggle()
-            } label: {
-                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 18 * scale, weight: .bold))
-                    .frame(width: 24 * scale, height: 24 * scale)
-            }
-
-            if isSeekable {
-                Button {
-                    progress = min(1, progress + 10.0 / totalTime)
-                } label: {
-                    Image(systemName: "goforward.10")
-                        .frame(width: 20 * scale, height: 20 * scale)
-                }
-            }
-
-            if isSeekable {
-                Text(currentTime.playerTimeString)
-                    .font(.system(size: 12 * scale, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 56 * scale, alignment: .leading)
-                    .lineLimit(1)
-
-                PlayerSlider(
-                    value: $progress,
-                    range: 0...1,
-                    scale: scale
-                )
-                .frame(height: 24 * scale)
-                .disabled(!isSeekable)
-
-                Text(totalTime.playerTimeString)
-                    .font(.system(size: 12 * scale, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 56 * scale, alignment: .trailing)
-                    .lineLimit(1)
-            } else {
-                Spacer(minLength: 0)
-            }
-
-            Button {
-                isMuted.toggle()
-            } label: {
-                Image(
-                    systemName: isMuted
-                        ? "speaker.slash.fill" : "speaker.wave.2.fill"
-                )
-                .frame(width: 20 * scale, height: 20 * scale)
-            }
-
-            PlayerSlider(
-                value: $volume,
-                range: 0...200,
-                scale: scale
-            )
-            .frame(width: 120 * scale, height: 24 * scale)
-            .opacity(isMuted ? 0.45 : 1)
-
-            if isPipAvailable {
-                Button {
-                    isPipEnabled.toggle()
-                } label: {
-                    Image(systemName: isPipEnabled ? "pip.exit" : "pip.enter")
-                        .frame(width: 20 * scale, height: 20 * scale)
-                }
-            }
-
-            Button {
-                isSubtitleEnabled.toggle()
-            } label: {
-                Image(
-                    systemName: isSubtitleEnabled
-                        ? "captions.bubble.fill" : "captions.bubble"
-                )
-                .frame(width: 20 * scale, height: 20 * scale)
-            }
-
-            Button {
-            } label: {
-                Image(systemName: "camera.fill")
-                    .frame(width: 20 * scale, height: 20 * scale)
-            }
-
-            Button {
-                isRecording.toggle()
-            } label: {
-                Image(
-                    systemName: isRecording
-                        ? "record.circle.fill" : "record.circle"
-                )
-                .foregroundStyle(isRecording ? .red : .primary)
-                .frame(width: 20 * scale, height: 20 * scale)
-            }
-
-            Menu {
-                Button("再生速度") {}
-                Button("映像トラック") {}
-                Button("音声トラック") {}
-                Divider()
-                Button("プラグインを表示") {}
-            } label: {
-                Image(systemName: "ellipsis")
-                    .frame(width: 20 * scale, height: 20 * scale)
-                    .contentShape(.rect)
-            }
+    private static func previewDate(
+        year: Int,
+        month: Int,
+        day: Int,
+        hour: Int,
+        minute: Int
+    ) -> Date {
+        var components = DateComponents()
+        components.calendar = previewCalendar
+        components.timeZone = previewCalendar.timeZone
+        components.year = year
+        components.month = month
+        components.day = day
+        components.hour = hour
+        components.minute = minute
+        guard let date = previewCalendar.date(from: components) else {
+            return Date(timeIntervalSince1970: 0)
         }
-        .font(.system(size: 15 * scale, weight: .semibold))
-        .padding(.horizontal, 12 * scale)
-        .padding(.vertical, 8 * scale)
-        .background(playerControlBackground)
-        .padding(8 * scale)
+        return date
     }
 
-    private var playerControlBackground: some View {
-        RoundedRectangle(cornerRadius: 8 * scale, style: .continuous)
-            .fill(.ultraThinMaterial)
+    private static func mockProgram() -> Program {
+        return Program(
+            id: "preview-program",
+            serverId: "preview",
+            eventId: 1,
+            serviceId: 23609,
+            networkId: 32391,
+            startAt: previewProgramStartAt,
+            endAt: previewProgramEndAt,
+            duration: previewProgramDuration,
+            name: "俺の妹がこんなに可愛いわけがない🈟",
+            desc: "#1「俺が妹と恋をするわけがない」",
+            extended: nil,
+            genres: [],
+            updatedAt: nil
+        )
     }
+
+    private static func mockNextProgram() -> Program {
+        return Program(
+            id: "preview-next-program",
+            serverId: "preview",
+            eventId: 2,
+            serviceId: 23609,
+            networkId: 32391,
+            startAt: previewProgramEndAt,
+            endAt: previewProgramEndAt.addingTimeInterval(previewProgramDuration),
+            duration: previewProgramDuration,
+            name: "閃光のナイトレイド🈟",
+            desc: nil,
+            extended: nil,
+            genres: [],
+            updatedAt: nil
+        )
+    }
+
+    private static func mockService() -> TVService {
+        TVService(
+            id: "preview-service",
+            providerIdentifier: nil,
+            serviceId: 23609,
+            networkId: 32391,
+            transportStreamId: nil,
+            name: "ＴＯＫＹＯ　ＭＸ１",
+            type: .digitalTelevision,
+            remoteControlKeyId: nil,
+            hasLogoData: false,
+            channel: nil,
+            serverId: "preview"
+        )
+    }
+}
+
+private final class DetachedPlayerOverlayPreviewVLCMediaPlayer: VLCMediaPlayer {
+    private let previewIsSeekable: Bool
+
+    init(isSeekable: Bool) {
+        previewIsSeekable = isSeekable
+        super.init()
+    }
+
+    override var isSeekable: Bool { previewIsSeekable }
 }

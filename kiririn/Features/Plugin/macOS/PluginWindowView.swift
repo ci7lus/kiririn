@@ -2,8 +2,8 @@ import KppxKit
 import SwiftUI
 
 struct PluginWindowView_macOS: View {
-    let appModel: AppModel
     let pluginID: UUID
+    @Environment(AppModel.self) private var appModel
 
     private var plugin: PluginDefinition? {
         appModel.pluginStore.plugins.first { $0.id == pluginID }

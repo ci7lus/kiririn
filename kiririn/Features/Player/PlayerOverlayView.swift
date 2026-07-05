@@ -3095,19 +3095,27 @@ private struct PlayerOverlayPreview: View {
         state.isPlaying = true
         state.isSubtitleEnabled = true
         state.isPipAvailable = true
+        state.volume = 80
+
+        guard let streamURL = URL(string: "https://example.com/preview") else {
+            return state
+        }
+
         var playable = Playable(
-            streamURL: URL(string: "https://example.com/preview")!,
+            streamURL: streamURL,
             source: .liveService(serviceUniqueId: "preview"),
-            program: PlayerOverlayPreview.mockProgram()
+            program: mockProgram(),
+            service: mockService()
         )
         playable.isSeekable = isSeekable
-        playable.length = 5400
+        playable.length = previewProgramDuration
         state.currentPlayable = playable
+        state.nextProgram = mockNextProgram()
         state.playbackStatus = PlayerPlaybackStatus(
             playableID: playable.id,
             isPlaying: true,
-            time: 5400 * 0.35,
-            position: 0.35
+            time: previewProgramDuration * 0.8,
+            position: 0.8
         )
         state.player = PreviewVLCMediaPlayer(isSeekable: isSeekable)
         return state
@@ -3122,25 +3130,96 @@ private struct PlayerOverlayPreview: View {
         )
     }
 
+    private static let previewProgramDuration: TimeInterval = 30 * 60
+    private static let previewProgramStartAt = previewDate(
+        year: 2010,
+        month: 10,
+        day: 3,
+        hour: 23,
+        minute: 30
+    )
+    private static let previewProgramEndAt = previewProgramStartAt.addingTimeInterval(
+        previewProgramDuration
+    )
+
+    private static var previewCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        if let timeZone = TimeZone(identifier: "Asia/Tokyo") {
+            calendar.timeZone = timeZone
+        }
+        return calendar
+    }
+
+    private static func previewDate(
+        year: Int,
+        month: Int,
+        day: Int,
+        hour: Int,
+        minute: Int
+    ) -> Date {
+        var components = DateComponents()
+        components.calendar = previewCalendar
+        components.timeZone = previewCalendar.timeZone
+        components.year = year
+        components.month = month
+        components.day = day
+        components.hour = hour
+        components.minute = minute
+        guard let date = previewCalendar.date(from: components) else {
+            return Date(timeIntervalSince1970: 0)
+        }
+        return date
+    }
+
     private static func mockProgram() -> Program {
-        let startAt = Date()
-        return Program(
+        Program(
             id: "preview-program",
             serverId: "preview",
             eventId: 1,
-            serviceId: 1,
-            networkId: 1,
-            startAt: startAt,
-            endAt: startAt.addingTimeInterval(3600),
-            duration: 3600,
-            name: "ニュース番組ニュース番組",
-            desc: "きょう1日の主なニュース項目をまとめてお伝えします。国内外の動きや経済情報を詳しく解説します。",
-            extended: [
-                "番組内容": "全国各地のニュースを迅速・正確にお伝えします。",
-                "出演者": "あああ いいい",
-            ],
-            genres: [ProgramGenre(lv1: 0x0, lv2: 0x0)],
+            serviceId: 23609,
+            networkId: 32391,
+            startAt: previewProgramStartAt,
+            endAt: previewProgramEndAt,
+            duration: previewProgramDuration,
+            name: "俺の妹がこんなに可愛いわけがない🈟",
+            desc: "#1「俺が妹と恋をするわけがない」",
+            extended: nil,
+            genres: [],
             updatedAt: nil
+        )
+    }
+
+    private static func mockNextProgram() -> Program {
+        Program(
+            id: "preview-next-program",
+            serverId: "preview",
+            eventId: 2,
+            serviceId: 23609,
+            networkId: 32391,
+            startAt: previewProgramEndAt,
+            endAt: previewProgramEndAt.addingTimeInterval(previewProgramDuration),
+            duration: previewProgramDuration,
+            name: "閃光のナイトレイド🈟",
+            desc: nil,
+            extended: nil,
+            genres: [],
+            updatedAt: nil
+        )
+    }
+
+    private static func mockService() -> TVService {
+        TVService(
+            id: "preview-service",
+            providerIdentifier: nil,
+            serviceId: 23609,
+            networkId: 32391,
+            transportStreamId: nil,
+            name: "ＴＯＫＹＯ　ＭＸ１",
+            type: .digitalTelevision,
+            remoteControlKeyId: nil,
+            hasLogoData: false,
+            channel: nil,
+            serverId: "preview"
         )
     }
 }

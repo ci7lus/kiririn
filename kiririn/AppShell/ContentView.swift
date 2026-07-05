@@ -17,7 +17,7 @@ extension EnvironmentValues {
 }
 
 struct ContentView: View {
-    let appModel: AppModel
+    @Environment(AppModel.self) private var appModel
 
     @State private var isLoadingIndicatorVisible = false
     @State private var loadingIndicatorHideTask: Task<Void, Never>?

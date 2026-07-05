@@ -190,49 +190,52 @@ struct KiririnApp: App {
     var body: some Scene {
         #if os(iOS)
             WindowGroup {
-                ContentView(appModel: appModel)
+                ContentView()
             }
+            .environment(appModel)
         #else
-            Window("kiririn", id: AppWindowID.main.rawValue) {
-                ContentView(appModel: appModel)
-            }
-            .commands {
-                AppCommands(appModel: appModel)
-            }
-
-            DocumentGroup(viewing: KiririnMediaDocument.self) { file in
-                DocumentPlaybackView(
-                    fileURL: file.fileURL,
-                    appModel: appModel
-                )
-            }
-            .windowStyle(.hiddenTitleBar)
-            .defaultSize(width: 1280, height: 720)
-
-            WindowGroup("プレイヤー", id: AppWindowID.player.rawValue, for: Playable.self) { $playable in
-                PlayerWindowView_macOS(appModel: appModel, initialPlayable: playable)
-            }
-            .defaultSize(width: 1280, height: 720)
-            .windowStyle(.hiddenTitleBar)
-            .commandsRemoved()
-
-            WindowGroup("プラグイン", id: AppWindowID.plugin.rawValue, for: UUID.self) { $pluginID in
-                if let pluginID {
-                    PluginWindowView_macOS(appModel: appModel, pluginID: pluginID)
+            Group {
+                Window("kiririn", id: AppWindowID.main.rawValue) {
+                    ContentView()
                 }
-            }
-            .defaultSize(width: 960, height: 640)
-            .commandsRemoved()
+                .commands {
+                    AppCommands(appModel: appModel)
+                }
 
-            Window("字幕履歴", id: AppWindowID.caption.rawValue) {
-                CaptionWindowView_macOS(appModel: appModel)
-            }
-            .defaultSize(width: 400, height: 600)
+                DocumentGroup(viewing: KiririnMediaDocument.self) { file in
+                    DocumentPlaybackView(fileURL: file.fileURL)
+                }
+                .windowStyle(.hiddenTitleBar)
+                .defaultSize(width: 1280, height: 720)
 
-            Window("番組情報", id: AppWindowID.programInfo.rawValue) {
-                ProgramInfoWindowView_macOS(appModel: appModel)
+                WindowGroup("プレイヤー", id: AppWindowID.player.rawValue, for: Playable.self) {
+                    $playable in
+                    PlayerWindowView_macOS(initialPlayable: playable)
+                }
+                .defaultSize(width: 1280, height: 720)
+                .windowStyle(.hiddenTitleBar)
+                .commandsRemoved()
+
+                WindowGroup("プラグイン", id: AppWindowID.plugin.rawValue, for: UUID.self) {
+                    $pluginID in
+                    if let pluginID {
+                        PluginWindowView_macOS(pluginID: pluginID)
+                    }
+                }
+                .defaultSize(width: 960, height: 640)
+                .commandsRemoved()
+
+                Window("字幕履歴", id: AppWindowID.caption.rawValue) {
+                    CaptionWindowView_macOS()
+                }
+                .defaultSize(width: 400, height: 600)
+
+                Window("番組情報", id: AppWindowID.programInfo.rawValue) {
+                    ProgramInfoWindowView_macOS()
+                }
+                .defaultSize(width: 480, height: 560)
             }
-            .defaultSize(width: 480, height: 560)
+            .environment(appModel)
         #endif
     }
 }
