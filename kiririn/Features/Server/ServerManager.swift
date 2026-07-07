@@ -197,7 +197,19 @@ class ServerManager {
         rebuildAggregatedData()
     }
 
-    private func noteCommunicationFailure() {
+    private func isCancellationError(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+        if let urlError = error as? URLError, urlError.code == .cancelled {
+            return true
+        }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+    }
+
+    private func noteCommunicationFailure(for error: Error) {
+        guard !isCancellationError(error) else { return }
         communicationFailureCount += 1
     }
 
@@ -297,7 +309,7 @@ class ServerManager {
             state.status = .error
             let message = recordLastError(error, for: state)
             state.version = nil
-            noteCommunicationFailure()
+            noteCommunicationFailure(for: error)
             rebuildAggregatedData()
             return .failed(message)
         }
@@ -347,7 +359,7 @@ class ServerManager {
                     state.status = .error
                     let message = recordLastError(error, for: state)
                     state.version = nil
-                    noteCommunicationFailure()
+                    noteCommunicationFailure(for: error)
                     logger.error(
                         "Failed to refresh program catalog for \(serverLogDescription(for: serverId)): \(error)"
                     )
@@ -359,7 +371,7 @@ class ServerManager {
             state.status = .error
             let message = recordLastError(error, for: state)
             state.version = nil
-            noteCommunicationFailure()
+            noteCommunicationFailure(for: error)
             rebuildAggregatedData()
             return .failed(message)
         }
@@ -910,7 +922,7 @@ class ServerManager {
             return try await provider.fetchRecords(
                 pageToken: pageToken, limit: limit, keyword: keyword)
         } catch {
-            noteCommunicationFailure()
+            noteCommunicationFailure(for: error)
             throw error
         }
     }
@@ -924,7 +936,7 @@ class ServerManager {
         do {
             return try await provider.fetchRecord(id: id)
         } catch {
-            noteCommunicationFailure()
+            noteCommunicationFailure(for: error)
             throw error
         }
     }
