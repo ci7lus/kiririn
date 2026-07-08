@@ -571,6 +571,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 ci7lus";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ローカルネットワーク上のサーバーと通信します。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -642,6 +643,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 ci7lus";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ローカルネットワーク上のサーバーと通信します。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

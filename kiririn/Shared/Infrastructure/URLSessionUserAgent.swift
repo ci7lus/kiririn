@@ -21,6 +21,7 @@ enum KiririnUserAgent {
 extension URLSessionConfiguration {
     nonisolated(unsafe) static var kiririnDefault: URLSessionConfiguration {
         let configuration = URLSessionConfiguration.default
+        configuration.waitsForConnectivity = true
         var headers = configuration.httpAdditionalHeaders ?? [:]
         headers["User-Agent"] = KiririnUserAgent.urlSessionUserAgent
         configuration.httpAdditionalHeaders = headers
