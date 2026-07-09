@@ -20,6 +20,10 @@ final class KonomiTVProvider: RecordingServerProvider {
         return info.version
     }
 
+    func cancelInFlightRequests() {
+        client.cancelInFlightRequests()
+    }
+
     func fetchHeaders() async throws -> [String: String] {
         client.defaultHeaders
     }

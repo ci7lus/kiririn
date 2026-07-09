@@ -3,6 +3,7 @@ import Foundation
 protocol ServerProvider {
     func checkConnection() async throws -> String?
     func fetchHeaders() async throws -> [String: String]
+    func cancelInFlightRequests()
 }
 
 protocol LiveServerProvider: ServerProvider {

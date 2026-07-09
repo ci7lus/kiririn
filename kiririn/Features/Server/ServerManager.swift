@@ -50,6 +50,15 @@ nonisolated enum ProgramCatalogRefreshExecutionResult: Sendable, Equatable {
     case failed(String)
 }
 
+nonisolated struct PlaybackReconnectionState: Sendable, Equatable {
+    let needsReconnection: Bool
+    let hasConnectingCandidate: Bool
+
+    var isAwaitingReconnection: Bool {
+        needsReconnection && !hasConnectingCandidate
+    }
+}
+
 #if !os(macOS)
     nonisolated private enum ProgramFetchNetworkState: Sendable {
         case unresolved
@@ -74,6 +83,7 @@ class ServerManager {
 
     private var cacheStore: CacheStore!
     private var serviceVariantsByAggregatedServiceId: [String: [TVService]] = [:]
+    private var serviceListVariantsByAggregatedServiceId: [String: [TVService]] = [:]
     private var servicesByUniqueId: [String: TVService] = [:]
     private var cachedServicesByServer: [String: [TVService]] = [:]
     private var favoriteStatesByUnifiedKey: [String: FavoriteServiceState] = [:]
@@ -83,6 +93,8 @@ class ServerManager {
     private var pendingProgramFullFetchServerIDs: Set<String> = []
     @ObservationIgnored
     private var periodicProgramRefreshTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var serverOperationGenerations: [String: Int] = [:]
     @ObservationIgnored
     private var isAutomaticProgramRefreshEvaluationRunning = false
     #if !os(macOS)
@@ -97,6 +109,7 @@ class ServerManager {
     #endif
 
     var isCacheReady = false
+    var serviceListServices: [TVService] = []
     var services: [TVService] = []
     var logos: [TVServiceLogo] = [] {
         didSet {
@@ -162,6 +175,7 @@ class ServerManager {
         for config in configStore.configurations {
             if providers[config.id] != nil {
                 if providerConfigurations[config.id] != config {
+                    cancelInFlightRequests(serverId: config.id)
                     providers[config.id] = createProvider(for: config)
                     providerConfigurations[config.id] = config
                     connectionStates[config.id]?.status = .disconnected
@@ -185,12 +199,14 @@ class ServerManager {
 
         let validIds = Set(configStore.configurations.map(\.id))
         for key in providers.keys where !validIds.contains(key) {
+            cancelInFlightRequests(serverId: key)
             providers.removeValue(forKey: key)
             providerConfigurations.removeValue(forKey: key)
             connectionStates.removeValue(forKey: key)
             cachedServicesByServer[key] = nil
             lastProgramFullFetchDatesByServer[key] = nil
             pendingProgramFullFetchServerIDs.remove(key)
+            serverOperationGenerations.removeValue(forKey: key)
         }
 
         serverSyncCount += 1
@@ -211,6 +227,19 @@ class ServerManager {
     private func noteCommunicationFailure(for error: Error) {
         guard !isCancellationError(error) else { return }
         communicationFailureCount += 1
+    }
+
+    private func cancelInFlightRequests(serverId: String) {
+        serverOperationGenerations[serverId, default: 0] += 1
+        providers[serverId]?.cancelInFlightRequests()
+    }
+
+    private func operationGeneration(for serverId: String) -> Int {
+        serverOperationGenerations[serverId] ?? 0
+    }
+
+    private func isStaleOperation(serverId: String, generation: Int) -> Bool {
+        operationGeneration(for: serverId) != generation
     }
 
     private func errorFeedback(for error: Error) -> (
@@ -281,6 +310,7 @@ class ServerManager {
         serverId: String,
         programRefreshPolicy: ProgramCatalogRefreshPolicy = .none
     ) async -> ProgramCatalogRefreshExecutionResult {
+        let generation = operationGeneration(for: serverId)
         guard let provider = providers[serverId],
             let state = connectionStates[serverId]
         else { return .skipped }
@@ -289,6 +319,9 @@ class ServerManager {
             clearLastError(for: state)
             state.version = nil
             rebuildAggregatedData()
+            return .skipped
+        }
+        guard state.status != .connecting else {
             return .skipped
         }
 
@@ -300,12 +333,18 @@ class ServerManager {
 
         do {
             let version = try await provider.checkConnection()
+            guard !isStaleOperation(serverId: serverId, generation: generation) else {
+                return .skipped
+            }
             state.status = .connected
             state.lastConnectedAt = Date()
             state.version = version
             return await refreshData(
                 serverId: serverId, programRefreshPolicy: programRefreshPolicy)
         } catch {
+            guard !isStaleOperation(serverId: serverId, generation: generation) else {
+                return .skipped
+            }
             state.status = .error
             let message = recordLastError(error, for: state)
             state.version = nil
@@ -320,6 +359,7 @@ class ServerManager {
         serverId: String,
         programRefreshPolicy: ProgramCatalogRefreshPolicy = .none
     ) async -> ProgramCatalogRefreshExecutionResult {
+        let generation = operationGeneration(for: serverId)
         guard let provider = liveProvider(for: serverId),
             let state = connectionStates[serverId],
             state.status == .connected
@@ -329,11 +369,20 @@ class ServerManager {
 
         do {
             let fetchedServices = try await provider.fetchServices()
+            guard !isStaleOperation(serverId: serverId, generation: generation) else {
+                return .skipped
+            }
             cachedServicesByServer[serverId] = fetchedServices
             await cacheStore.cacheServices(fetchedServices, serverId: serverId)
             rebuildAggregatedData()
 
-            let fetchedLogos = await fetchLogoData(for: fetchedServices, serverId: serverId)
+            let fetchedLogos = await fetchLogoData(
+                for: fetchedServices,
+                provider: provider
+            )
+            guard !isStaleOperation(serverId: serverId, generation: generation) else {
+                return .skipped
+            }
             mergeLogos(fetchedLogos)
             await cacheStore.cacheLogos(fetchedLogos)
             rebuildAggregatedData()
@@ -349,6 +398,9 @@ class ServerManager {
             case .fetchNow:
                 do {
                     let fetchedPrograms = try await provider.fetchPrograms()
+                    guard !isStaleOperation(serverId: serverId, generation: generation) else {
+                        return .skipped
+                    }
                     await cacheStore.cachePrograms(fetchedPrograms, serverId: serverId)
                     clearLastError(for: state)
                     lastProgramFullFetchDatesByServer[serverId] = Date()
@@ -356,6 +408,9 @@ class ServerManager {
                     rebuildAggregatedData()
                     return .refreshed
                 } catch {
+                    guard !isStaleOperation(serverId: serverId, generation: generation) else {
+                        return .skipped
+                    }
                     state.status = .error
                     let message = recordLastError(error, for: state)
                     state.version = nil
@@ -368,6 +423,9 @@ class ServerManager {
                 }
             }
         } catch {
+            guard !isStaleOperation(serverId: serverId, generation: generation) else {
+                return .skipped
+            }
             state.status = .error
             let message = recordLastError(error, for: state)
             state.version = nil
@@ -639,12 +697,34 @@ class ServerManager {
     }
 
     private func rebuildAggregatedData() {
+        let playbackData = buildAggregatedServiceData(includesConnectionErrors: false)
+        let serviceListData = buildAggregatedServiceData(includesConnectionErrors: true)
+
+        serviceVariantsByAggregatedServiceId = playbackData.variantsByAggregatedServiceId
+        serviceListVariantsByAggregatedServiceId = serviceListData.variantsByAggregatedServiceId
+        servicesByUniqueId = playbackData.resolvedServicesByUniqueId
+        services = playbackData.services
+        serviceListServices = serviceListData.services
+    }
+
+    private struct AggregatedServiceData {
+        var services: [TVService]
+        var variantsByAggregatedServiceId: [String: [TVService]]
+        var resolvedServicesByUniqueId: [String: TVService]
+    }
+
+    private func buildAggregatedServiceData(includesConnectionErrors: Bool) -> AggregatedServiceData
+    {
         var variantsByMergedKey: [String: [TVService]] = [:]
         var variantsByAggregatedServiceId: [String: [TVService]] = [:]
         var resolvedServicesByUniqueId: [String: TVService] = [:]
 
         for config in configStore.configurations {
-            guard shouldIncludeServerInAggregation(serverId: config.id) else { continue }
+            let shouldInclude =
+                includesConnectionErrors
+                ? shouldIncludeServerInServiceListAggregation(serverId: config.id)
+                : shouldIncludeServerInAggregation(serverId: config.id)
+            guard shouldInclude else { continue }
 
             let cachedServices = cachedServicesByServer[config.id] ?? []
 
@@ -667,9 +747,11 @@ class ServerManager {
             variantsByAggregatedServiceId[preferred.id] = sortedVariants
         }
 
-        serviceVariantsByAggregatedServiceId = variantsByAggregatedServiceId
-        servicesByUniqueId = resolvedServicesByUniqueId
-        services = mergedServices
+        return AggregatedServiceData(
+            services: mergedServices,
+            variantsByAggregatedServiceId: variantsByAggregatedServiceId,
+            resolvedServicesByUniqueId: resolvedServicesByUniqueId
+        )
     }
 
     private func rebuildLogoCache() {
@@ -720,6 +802,11 @@ class ServerManager {
         return state.status != .error
     }
 
+    private func shouldIncludeServerInServiceListAggregation(serverId: String) -> Bool {
+        guard isServerEnabled(serverId) else { return false }
+        return serverSupports(.live, serverId: serverId)
+    }
+
     private func sortServicesByServerPriority(_ services: [TVService]) -> [TVService] {
         let order = Dictionary(
             uniqueKeysWithValues: configStore.configurations.enumerated().map { ($1.id, $0) })
@@ -737,11 +824,12 @@ class ServerManager {
         variants.first
     }
 
-    private func fetchLogoData(for services: [TVService], serverId: String) async
+    private func fetchLogoData(
+        for services: [TVService],
+        provider: any LiveServerProvider
+    ) async
         -> [TVServiceLogo]
     {
-        guard let provider = providers[serverId] as? any LiveServerProvider else { return [] }
-
         return await withTaskGroup(of: TVServiceLogo?.self) { group in
             let oneweekago = Date().addingTimeInterval(-86400 * 7)
             var result: [TVServiceLogo] = []
@@ -858,6 +946,39 @@ class ServerManager {
     }
 
     func playbackCandidates(for service: TVService) -> [TVService] {
+        candidateServices(for: service)
+    }
+
+    func connectedPlaybackCandidates(for service: TVService) -> [TVService] {
+        candidateServices(for: service).filter {
+            connectionStates[$0.serverId]?.status == .connected
+        }
+    }
+
+    func reconnectionCandidates(for service: TVService) -> [TVService] {
+        serviceListCandidateServices(for: service).filter {
+            connectionStates[$0.serverId]?.status != .connected
+        }
+    }
+
+    func playbackReconnectionState(for service: TVService) -> PlaybackReconnectionState {
+        let connectedCandidates = connectedPlaybackCandidates(for: service)
+        let reconnectionCandidates = reconnectionCandidates(for: service)
+        let hasConnectingCandidate = reconnectionCandidates.contains {
+            connectionStates[$0.serverId]?.status == .connecting
+        }
+
+        return PlaybackReconnectionState(
+            needsReconnection: connectedCandidates.isEmpty && !reconnectionCandidates.isEmpty,
+            hasConnectingCandidate: hasConnectingCandidate
+        )
+    }
+
+    func needsReconnectionForPlayback(_ service: TVService) -> Bool {
+        playbackReconnectionState(for: service).needsReconnection
+    }
+
+    private func candidateServices(for service: TVService) -> [TVService] {
         if let variants = serviceVariantsByAggregatedServiceId[service.id] {
             return sortServicesByServerPriority(variants).filter {
                 isServerEnabled($0.serverId) && serverSupports(.live, serverId: $0.serverId)
@@ -867,6 +988,15 @@ class ServerManager {
             serverSupports(.live, serverId: service.serverId)
         else { return [] }
         return [service]
+    }
+
+    private func serviceListCandidateServices(for service: TVService) -> [TVService] {
+        if let variants = serviceListVariantsByAggregatedServiceId[service.id] {
+            return sortServicesByServerPriority(variants).filter {
+                isServerEnabled($0.serverId) && serverSupports(.live, serverId: $0.serverId)
+            }
+        }
+        return candidateServices(for: service)
     }
 
     func serverDisplayName(_ serverId: String) -> String {

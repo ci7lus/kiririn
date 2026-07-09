@@ -33,4 +33,12 @@ extension URLSession {
     static let kiririnShared: URLSession = {
         URLSession(configuration: .kiririnDefault)
     }()
+
+    nonisolated func cancelAllTasks() {
+        getAllTasks { tasks in
+            for task in tasks {
+                task.cancel()
+            }
+        }
+    }
 }

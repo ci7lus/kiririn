@@ -21,6 +21,7 @@ struct ServiceListView: View {
         @Environment(\.openWindow) private var openWindow
     #endif
     @State private var serviceSelectionForPlayback: TVService?
+    @State private var serviceSelectionForReconnection: TVService?
     @State private var showingFavoriteOrderingSheet = false
     @State private var viewModel = ServiceListViewModel()
     @State private var minuteRefreshTick = Date()
@@ -65,7 +66,7 @@ struct ServiceListView: View {
 
     private var sortedServices: [TVService] {
         let typeOrder = ["GR", "BS", "CS", "SKY"]
-        return manager.services
+        return manager.serviceListServices
             .sorted { lhs, rhs in
                 let lt = lhs.channel?.type ?? "その他"
                 let rt = rhs.channel?.type ?? "その他"
@@ -83,7 +84,7 @@ struct ServiceListView: View {
     var body: some View {
         VStack(spacing: 0) {
             Group {
-                if manager.isCacheReady && manager.services.isEmpty {
+                if manager.isCacheReady && manager.serviceListServices.isEmpty {
                     emptyStateView
                 } else if groupedServices.isEmpty {
                     if isBuildingList {
@@ -114,7 +115,7 @@ struct ServiceListView: View {
             guard isReady else { return }
             triggerRebuild()
         }
-        .onChange(of: manager.services) {
+        .onChange(of: manager.serviceListServices) {
             triggerRebuild()
         }
         .sheet(isPresented: $showingFavoriteOrderingSheet) {
@@ -220,6 +221,8 @@ struct ServiceListView: View {
 
     @ViewBuilder
     private func serviceRow(for item: ServiceListItem) -> some View {
+        let reconnectionState = manager.playbackReconnectionState(for: item.service)
+
         ServiceRowView(
             service: item.service,
             currentProgram: item.currentProgram,
@@ -228,16 +231,29 @@ struct ServiceListView: View {
             isFavorite: manager.isFavorite(item.service),
             logoImage: manager.logoImage(for: item.service)
         ) {
-            Task { await playService(item.service) }
+            if reconnectionState.needsReconnection {
+                serviceSelectionForReconnection = item.service
+            } else {
+                Task { await playService(item.service) }
+            }
         } onToggleFavorite: {
             Task { await manager.toggleFavorite(item.service) }
         }
+        .opacity(reconnectionState.isAwaitingReconnection ? 0.45 : 1)
         .playbackServerSelectionDialog(
             service: item.service,
             selectedService: $serviceSelectionForPlayback,
-            manager: manager
+            manager: manager,
+            showsOnlyConnectedCandidates: true
         ) { candidate in
             Task { await playCandidate(candidate) }
+        }
+        .reconnectionServerSelectionDialog(
+            service: item.service,
+            selectedService: $serviceSelectionForReconnection,
+            manager: manager
+        ) { serverId in
+            Task { await manager.connect(serverId: serverId) }
         }
     }
 
@@ -266,12 +282,17 @@ struct ServiceListView: View {
     }
 
     private func playService(_ service: TVService) async {
-        let candidates = manager.playbackCandidates(for: service)
+        let candidates = manager.connectedPlaybackCandidates(for: service)
+        guard !candidates.isEmpty else {
+            serviceSelectionForReconnection = service
+            return
+        }
         if candidates.count > 1 {
             serviceSelectionForPlayback = service
             return
         }
-        await playCandidate(candidates.first ?? service)
+        guard let candidate = candidates.first else { return }
+        await playCandidate(candidate)
     }
 
     private func playCandidate(_ service: TVService) async {
