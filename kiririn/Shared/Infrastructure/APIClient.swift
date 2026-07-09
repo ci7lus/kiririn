@@ -40,7 +40,7 @@ nonisolated final class APIClient: Sendable {
     }
 
     func cancelInFlightRequests() {
-        session.invalidateAndCancel()
+        session.cancelAllTasks()
     }
 
     func request<T: Decodable & Sendable>(

@@ -221,11 +221,7 @@ struct ServiceListView: View {
 
     @ViewBuilder
     private func serviceRow(for item: ServiceListItem) -> some View {
-        let needsReconnection = manager.needsReconnectionForPlayback(item.service)
-        let hasConnectingCandidate = manager.reconnectionCandidates(for: item.service).contains {
-            manager.connectionStates[$0.serverId]?.status == .connecting
-        }
-        let dimsForReconnection = needsReconnection && !hasConnectingCandidate
+        let reconnectionState = manager.playbackReconnectionState(for: item.service)
 
         ServiceRowView(
             service: item.service,
@@ -235,7 +231,7 @@ struct ServiceListView: View {
             isFavorite: manager.isFavorite(item.service),
             logoImage: manager.logoImage(for: item.service)
         ) {
-            if needsReconnection {
+            if reconnectionState.needsReconnection {
                 serviceSelectionForReconnection = item.service
             } else {
                 Task { await playService(item.service) }
@@ -243,7 +239,7 @@ struct ServiceListView: View {
         } onToggleFavorite: {
             Task { await manager.toggleFavorite(item.service) }
         }
-        .opacity(dimsForReconnection ? 0.45 : 1)
+        .opacity(reconnectionState.isAwaitingReconnection ? 0.45 : 1)
         .playbackServerSelectionDialog(
             service: item.service,
             selectedService: $serviceSelectionForPlayback,

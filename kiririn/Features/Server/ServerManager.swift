@@ -50,6 +50,15 @@ nonisolated enum ProgramCatalogRefreshExecutionResult: Sendable, Equatable {
     case failed(String)
 }
 
+nonisolated struct PlaybackReconnectionState: Sendable, Equatable {
+    let needsReconnection: Bool
+    let hasConnectingCandidate: Bool
+
+    var isAwaitingReconnection: Bool {
+        needsReconnection && !hasConnectingCandidate
+    }
+}
+
 #if !os(macOS)
     nonisolated private enum ProgramFetchNetworkState: Sendable {
         case unresolved
@@ -952,9 +961,21 @@ class ServerManager {
         }
     }
 
+    func playbackReconnectionState(for service: TVService) -> PlaybackReconnectionState {
+        let connectedCandidates = connectedPlaybackCandidates(for: service)
+        let reconnectionCandidates = reconnectionCandidates(for: service)
+        let hasConnectingCandidate = reconnectionCandidates.contains {
+            connectionStates[$0.serverId]?.status == .connecting
+        }
+
+        return PlaybackReconnectionState(
+            needsReconnection: connectedCandidates.isEmpty && !reconnectionCandidates.isEmpty,
+            hasConnectingCandidate: hasConnectingCandidate
+        )
+    }
+
     func needsReconnectionForPlayback(_ service: TVService) -> Bool {
-        connectedPlaybackCandidates(for: service).isEmpty
-            && !reconnectionCandidates(for: service).isEmpty
+        playbackReconnectionState(for: service).needsReconnection
     }
 
     private func candidateServices(for service: TVService) -> [TVService] {

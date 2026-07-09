@@ -94,7 +94,7 @@ final class GoogleDriveProvider: RecordingServerProvider {
     }
 
     func cancelInFlightRequests() {
-        session.invalidateAndCancel()
+        session.cancelAllTasks()
     }
 
     private func getValidAccessToken() async throws -> String? {
