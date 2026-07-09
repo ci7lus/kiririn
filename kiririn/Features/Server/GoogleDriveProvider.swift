@@ -37,6 +37,7 @@ private struct GoogleDriveCredentials {
 }
 
 final class GoogleDriveProvider: RecordingServerProvider {
+    private static let requestTimeout: TimeInterval = 60
     private let lock = NSLock()
     private var _configuration: ServerConfiguration
     var configuration: ServerConfiguration {
@@ -55,6 +56,7 @@ final class GoogleDriveProvider: RecordingServerProvider {
     var onConfigurationUpdated: (@Sendable (ServerConfiguration) -> Void)?
 
     private let logger = Logging.Logger(label: "GoogleDriveProvider")
+    private let session: URLSession
     private var _cachedFiles: [String: GoogleDriveFile] = [:]
     private var cachedFiles: [String: GoogleDriveFile] {
         get {
@@ -71,6 +73,10 @@ final class GoogleDriveProvider: RecordingServerProvider {
 
     init(configuration: ServerConfiguration) {
         self._configuration = configuration
+        let sessionConfiguration = URLSessionConfiguration.kiririnDefault
+        sessionConfiguration.timeoutIntervalForRequest = Self.requestTimeout
+        sessionConfiguration.timeoutIntervalForResource = Self.requestTimeout
+        self.session = URLSession(configuration: sessionConfiguration)
     }
 
     func checkConnection() async throws -> String? {
@@ -85,6 +91,10 @@ final class GoogleDriveProvider: RecordingServerProvider {
             headers["Authorization"] = "Bearer \(token)"
         }
         return headers
+    }
+
+    func cancelInFlightRequests() {
+        session.invalidateAndCancel()
     }
 
     private func getValidAccessToken() async throws -> String? {
@@ -131,6 +141,7 @@ final class GoogleDriveProvider: RecordingServerProvider {
         ]
 
         var request = URLRequest(url: components.url!)
+        request.timeoutInterval = Self.requestTimeout
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
@@ -138,7 +149,7 @@ final class GoogleDriveProvider: RecordingServerProvider {
         bodyComponents.queryItems = bodyItems
         request.httpBody = bodyComponents.query?.data(using: .utf8)
 
-        let (data, response) = try await URLSession.kiririnShared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
             (200...299).contains(httpResponse.statusCode)
         else {
@@ -321,11 +332,12 @@ final class GoogleDriveProvider: RecordingServerProvider {
 
         let resolvedURL = requestURL(url: url, queryItems: queryItems)
         var request = URLRequest(url: resolvedURL)
+        request.timeoutInterval = Self.requestTimeout
         for (key, value) in headers {
             request.setValue(value, forHTTPHeaderField: key)
         }
 
-        let (data, response) = try await URLSession.kiririnShared.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
@@ -436,6 +448,7 @@ private final class AuthenticationCoordinator: NSObject,
 }
 
 struct GoogleDriveAuthEditor: View {
+    private static let requestTimeout: TimeInterval = 60
     @Binding var auth: ServerAuth
     @Binding var name: String
 
@@ -538,6 +551,7 @@ struct GoogleDriveAuthEditor: View {
         ]
 
         var request = URLRequest(url: components.url!)
+        request.timeoutInterval = Self.requestTimeout
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 

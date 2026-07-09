@@ -2,6 +2,7 @@ import Foundation
 import Logging
 
 nonisolated final class APIClient: Sendable {
+    private static let requestTimeout: TimeInterval = 60
     let baseURL: URL?
     let defaultHeaders: [String: String]
     private let session: URLSession
@@ -33,8 +34,13 @@ nonisolated final class APIClient: Sendable {
         self.defaultHeaders = headers
 
         let config = URLSessionConfiguration.kiririnDefault
-        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForRequest = Self.requestTimeout
+        config.timeoutIntervalForResource = Self.requestTimeout
         self.session = URLSession(configuration: config)
+    }
+
+    func cancelInFlightRequests() {
+        session.invalidateAndCancel()
     }
 
     func request<T: Decodable & Sendable>(
@@ -45,6 +51,7 @@ nonisolated final class APIClient: Sendable {
             throw APIError.invalidURL
         }
         var request = URLRequest(url: url)
+        request.timeoutInterval = Self.requestTimeout
         for (key, value) in defaultHeaders {
             request.setValue(value, forHTTPHeaderField: key)
         }
@@ -111,6 +118,7 @@ nonisolated final class APIClient: Sendable {
             throw APIError.invalidURL
         }
         var request = URLRequest(url: url)
+        request.timeoutInterval = Self.requestTimeout
         for (key, value) in defaultHeaders {
             request.setValue(value, forHTTPHeaderField: key)
         }

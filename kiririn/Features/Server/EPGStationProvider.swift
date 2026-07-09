@@ -32,6 +32,10 @@ final class EPGStationProvider: LiveServerProvider, RecordingServerProvider {
         return version
     }
 
+    func cancelInFlightRequests() {
+        client.cancelInFlightRequests()
+    }
+
     private func fetchVersion() async -> String? {
         do {
             let info: EPGStationVersionInfo = try await client.request(path: "api/version")

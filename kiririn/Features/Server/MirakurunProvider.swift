@@ -16,6 +16,10 @@ final class MirakurunProvider: LiveServerProvider {
         return status.version
     }
 
+    func cancelInFlightRequests() {
+        client.cancelInFlightRequests()
+    }
+
     func fetchHeaders() async throws -> [String: String] {
         client.defaultHeaders
     }
