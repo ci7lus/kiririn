@@ -29,6 +29,7 @@ struct ProgramGuideSearchSheetView: View {
                                     onSelectResult(result)
                                 } label: {
                                     searchResultRow(result)
+                                        .contentShape(.rect)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -128,6 +129,7 @@ struct ProgramGuideSearchSheetView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         #if os(macOS)
             .padding(.vertical, 6)
         #else
