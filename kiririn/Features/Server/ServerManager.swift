@@ -312,6 +312,9 @@ class ServerManager {
             rebuildAggregatedData()
             return .skipped
         }
+        guard state.status != .connecting else {
+            return .skipped
+        }
 
         state.status = .connecting
         clearLastError(for: state)
@@ -366,7 +369,6 @@ class ServerManager {
 
             let fetchedLogos = await fetchLogoData(
                 for: fetchedServices,
-                serverId: serverId,
                 provider: provider
             )
             guard !isStaleOperation(serverId: serverId, generation: generation) else {
@@ -815,7 +817,6 @@ class ServerManager {
 
     private func fetchLogoData(
         for services: [TVService],
-        serverId: String,
         provider: any LiveServerProvider
     ) async
         -> [TVServiceLogo]
