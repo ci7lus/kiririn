@@ -67,6 +67,7 @@ struct PlayerOverlayView_iOS: View {
     @State private var isLandscapeOrientationLocked = false
     @State private var orientationButtonRotation: Double = 0
     @State private var orientationToggleTask: Task<Void, Never>?
+    @State private var collapsedBarReservedBottomHeight: CGFloat = 96
 
     init(
         playerState: PlayerState,
@@ -968,7 +969,8 @@ struct PlayerOverlayView_iOS: View {
                     pluginStore: pluginStore,
                     playerState: playerState,
                     appModel: appModel,
-                    selectedPluginID: $selectedPluginID
+                    selectedPluginID: $selectedPluginID,
+                    collapsedBarReservedHeight: collapsedBarReservedBottomHeight
                 )
             }
             .tag("plugin")
@@ -1019,11 +1021,14 @@ struct PlayerOverlayView_iOS: View {
     }
 
     private var infoSheetCollapsedBar: some View {
-        PlayerInfoSheetCollapsedBar {
-            withAnimation(.easeOut(duration: 0.22)) {
-                isInfoSheetVisible = true
-            }
-        }
+        PlayerInfoSheetCollapsedBar(
+            onTap: {
+                withAnimation(.easeOut(duration: 0.22)) {
+                    isInfoSheetVisible = true
+                }
+            },
+            onReservedHeightChange: { collapsedBarReservedBottomHeight = $0 }
+        )
     }
 
     @ViewBuilder
@@ -2947,23 +2952,49 @@ extension UIView {
     }
 }
 
+private struct CollapsedBarReservedHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 96
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct PlayerInfoSheetCollapsedBar: View {
     let onTap: () -> Void
+    var onReservedHeightChange: ((CGFloat) -> Void)? = nil
+
+    private static let capsuleBottomPadding: CGFloat = 64
+    private static let coordinateSpaceName = "PlayerInfoSheetCollapsedBar"
 
     var body: some View {
-        VStack(spacing: 8) {
-            Spacer()
+        GeometryReader { outerGeo in
+            VStack(spacing: 8) {
+                Spacer()
 
-            Button(action: onTap) {
-                Label("番組情報を開く", systemImage: "chevron.up")
-                    .font(.caption.weight(.bold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: Capsule())
+                Button(action: onTap) {
+                    Label("番組情報を開く", systemImage: "chevron.up")
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+                .background(
+                    GeometryReader { buttonGeo in
+                        Color.clear.preference(
+                            key: CollapsedBarReservedHeightPreferenceKey.self,
+                            value: outerGeo.size.height
+                                - buttonGeo.frame(in: .named(Self.coordinateSpaceName)).minY
+                        )
+                    }
+                )
+                .padding(.bottom, Self.capsuleBottomPadding)
             }
-            .padding(.bottom, 64)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .coordinateSpace(name: Self.coordinateSpaceName)
+        .onPreferenceChange(CollapsedBarReservedHeightPreferenceKey.self) { height in
+            onReservedHeightChange?(height)
+        }
     }
 }
 
@@ -2972,9 +3003,10 @@ private struct LowerContextPluginsView: View {
     @State var playerState: PlayerState
     let appModel: AppModel
     @Binding var selectedPluginID: UUID?
+    let collapsedBarReservedHeight: CGFloat
     private let pluginSwitcherHeight: CGFloat = 52
     private let pluginSwitcherBottomPadding: CGFloat = 52
-    private let infoSheetCollapsedBarCapsuleHeight: CGFloat = 32
+    private let singlePluginTooltipGap: CGFloat = 32
 
     private var enabledPlugins: [PluginDefinition] {
         pluginStore.plugins.filter { $0.isEnabled && $0.supports(area: .panel) }
@@ -3021,10 +3053,11 @@ private struct LowerContextPluginsView: View {
     private func panelSafeAreaInsets(containerSafeAreaInsets: EdgeInsets)
         -> PluginSafeAreaInsets
     {
-        var bottomInset = containerSafeAreaInsets.bottom + infoSheetCollapsedBarCapsuleHeight
-        if enabledPlugins.count > 1 {
-            bottomInset += pluginSwitcherHeight + pluginSwitcherBottomPadding
-        }
+        let additionalBottomInset =
+            enabledPlugins.count > 1
+            ? containerSafeAreaInsets.bottom
+            : singlePluginTooltipGap
+        let bottomInset = collapsedBarReservedHeight + additionalBottomInset
         return PluginSafeAreaInsets(
             top: containerSafeAreaInsets.top,
             right: containerSafeAreaInsets.trailing,

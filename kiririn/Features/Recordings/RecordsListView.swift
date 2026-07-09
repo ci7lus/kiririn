@@ -64,7 +64,7 @@ struct RecordsListView: View {
                                         typeName: manager.serverTypeName(serverId))
                                 }
                             }
-                            .padding(.horizontal, 2)
+                            .padding(.horizontal, serverPickerHorizontalPadding)
                         }
                     }
                     #if os(macOS)
@@ -160,6 +160,15 @@ struct RecordsListView: View {
 
     private var addMenuPlacement: ToolbarItemPlacement {
         recordingsAddMenuPlacement
+    }
+
+    private var serverPickerHorizontalPadding: CGFloat {
+        #if os(macOS)
+            if #available(macOS 26, *) {
+                return 4
+            }
+        #endif
+        return 2
     }
 
     private var selectedServerBinding: Binding<String> {
