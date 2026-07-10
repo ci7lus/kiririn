@@ -6,8 +6,17 @@ import SwiftUI
 struct PlayerWindowView_macOS: View {
     private let logger = Logger(label: "PlayerWindowView_macOS")
     private static let defaultWindowTitle = "プレイヤー"
-    private static let minimumWindowSize = NSSize(width: 640, height: 360)
-    private static let windowAspectRatio = NSSize(width: 16, height: 9)
+    private static let windowConfiguration = WindowConfiguration(
+        titleVisibility: .hidden,
+        titlebarAppearsTransparent: true,
+        titlebarSeparatorStyle: .automatic,
+        isOpaque: false,
+        backgroundColor: .windowBackgroundColor,
+        hasShadow: true,
+        minSize: NSSize(width: 640, height: 360),
+        contentMinSize: NSSize(width: 640, height: 360),
+        contentAspectRatio: NSSize(width: 16, height: 9)
+    )
     let initialPlayable: Playable?
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
@@ -123,15 +132,7 @@ struct PlayerWindowView_macOS: View {
             playerWindow = window
         }
         applyWindowTitle(window: window)
-        setTitleVisibility(.hidden, window: window)
-        setTitlebarAppearsTransparent(true, window: window)
-        setTitlebarSeparatorStyle(.automatic, window: window)
-        setIsOpaque(false, window: window)
-        setBackgroundColor(.windowBackgroundColor, window: window)
-        setHasShadow(true, window: window)
-        setMinimumWindowSize(Self.minimumWindowSize, window: window)
-        setContentMinimumWindowSize(Self.minimumWindowSize, window: window)
-        setContentAspectRatio(Self.windowAspectRatio, window: window)
+        Self.windowConfiguration.apply(to: window)
         applyWindowLevel(window: window, isAlwaysOnTop: isAlwaysOnTop)
         applyTrafficLightVisibility(window: window)
     }
@@ -174,66 +175,6 @@ struct PlayerWindowView_macOS: View {
     private func setWindowTitle(_ title: String, window: NSWindow) {
         if window.title != title {
             window.title = title
-        }
-    }
-
-    private func setTitleVisibility(
-        _ titleVisibility: NSWindow.TitleVisibility,
-        window: NSWindow
-    ) {
-        if window.titleVisibility != titleVisibility {
-            window.titleVisibility = titleVisibility
-        }
-    }
-
-    private func setTitlebarAppearsTransparent(_ isTransparent: Bool, window: NSWindow) {
-        if window.titlebarAppearsTransparent != isTransparent {
-            window.titlebarAppearsTransparent = isTransparent
-        }
-    }
-
-    private func setTitlebarSeparatorStyle(
-        _ separatorStyle: NSTitlebarSeparatorStyle,
-        window: NSWindow
-    ) {
-        if window.titlebarSeparatorStyle != separatorStyle {
-            window.titlebarSeparatorStyle = separatorStyle
-        }
-    }
-
-    private func setIsOpaque(_ isOpaque: Bool, window: NSWindow) {
-        if window.isOpaque != isOpaque {
-            window.isOpaque = isOpaque
-        }
-    }
-
-    private func setBackgroundColor(_ backgroundColor: NSColor, window: NSWindow) {
-        if window.backgroundColor?.isEqual(backgroundColor) != true {
-            window.backgroundColor = backgroundColor
-        }
-    }
-
-    private func setHasShadow(_ hasShadow: Bool, window: NSWindow) {
-        if window.hasShadow != hasShadow {
-            window.hasShadow = hasShadow
-        }
-    }
-
-    private func setMinimumWindowSize(_ size: NSSize, window: NSWindow) {
-        if window.minSize != size {
-            window.minSize = size
-        }
-    }
-
-    private func setContentMinimumWindowSize(_ size: NSSize, window: NSWindow) {
-        if window.contentMinSize != size {
-            window.contentMinSize = size
-        }
-    }
-
-    private func setContentAspectRatio(_ aspectRatio: NSSize, window: NSWindow) {
-        if window.contentAspectRatio != aspectRatio {
-            window.contentAspectRatio = aspectRatio
         }
     }
 
@@ -288,5 +229,47 @@ struct PlayerWindowView_macOS: View {
         logger.info(
             "window context (\(trigger)): playableID=\(playable?.id ?? "nil"), source=\(sourceDescription), serverId=\(serverID), serverState=\(serverState), providerExists=\(appModel.manager.providers[serverID] != nil)"
         )
+    }
+}
+
+private struct WindowConfiguration {
+    let titleVisibility: NSWindow.TitleVisibility
+    let titlebarAppearsTransparent: Bool
+    let titlebarSeparatorStyle: NSTitlebarSeparatorStyle
+    let isOpaque: Bool
+    let backgroundColor: NSColor
+    let hasShadow: Bool
+    let minSize: NSSize
+    let contentMinSize: NSSize
+    let contentAspectRatio: NSSize
+
+    func apply(to window: NSWindow) {
+        if window.titleVisibility != titleVisibility {
+            window.titleVisibility = titleVisibility
+        }
+        if window.titlebarAppearsTransparent != titlebarAppearsTransparent {
+            window.titlebarAppearsTransparent = titlebarAppearsTransparent
+        }
+        if window.titlebarSeparatorStyle != titlebarSeparatorStyle {
+            window.titlebarSeparatorStyle = titlebarSeparatorStyle
+        }
+        if window.isOpaque != isOpaque {
+            window.isOpaque = isOpaque
+        }
+        if window.backgroundColor?.isEqual(backgroundColor) != true {
+            window.backgroundColor = backgroundColor
+        }
+        if window.hasShadow != hasShadow {
+            window.hasShadow = hasShadow
+        }
+        if window.minSize != minSize {
+            window.minSize = minSize
+        }
+        if window.contentMinSize != contentMinSize {
+            window.contentMinSize = contentMinSize
+        }
+        if window.contentAspectRatio != contentAspectRatio {
+            window.contentAspectRatio = contentAspectRatio
+        }
     }
 }

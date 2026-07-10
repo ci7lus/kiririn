@@ -26,15 +26,15 @@ struct WindowConfigurator_macOS: NSViewRepresentable {
             guard let window = view.window else {
                 DispatchQueue.main.async { [weak self, weak view] in
                     guard let window = view?.window else { return }
-                    self?.configure(window: window, onWindowReady: onWindowReady)
+                    self?.scheduleConfiguration(window: window, onWindowReady: onWindowReady)
                 }
                 return
             }
 
-            configure(window: window, onWindowReady: onWindowReady)
+            scheduleConfiguration(window: window, onWindowReady: onWindowReady)
         }
 
-        private func configure(
+        private func scheduleConfiguration(
             window: NSWindow,
             onWindowReady: @escaping (NSWindow) -> Void
         ) {
@@ -43,6 +43,7 @@ struct WindowConfigurator_macOS: NSViewRepresentable {
             }
 
             scheduledWindow = window
+            // onWindowReady may update SwiftUI state, so run it after this update pass.
             DispatchQueue.main.async { [weak self, weak window] in
                 guard let self, let window else { return }
                 guard self.configuredWindow !== window else {
