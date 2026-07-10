@@ -6,6 +6,8 @@ import SwiftUI
 struct PlayerWindowView_macOS: View {
     private let logger = Logger(label: "PlayerWindowView_macOS")
     private static let defaultWindowTitle = "プレイヤー"
+    private static let minimumWindowSize = NSSize(width: 640, height: 360)
+    private static let windowAspectRatio = NSSize(width: 16, height: 9)
     let initialPlayable: Playable?
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
@@ -40,24 +42,12 @@ struct PlayerWindowView_macOS: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
             WindowConfigurator_macOS { window in
-                playerWindow = window
-                applyWindowTitle(window: window)
-                window.titleVisibility = .hidden
-                window.titlebarAppearsTransparent = true
-                window.titlebarSeparatorStyle = .automatic
-                window.isOpaque = false
-                window.backgroundColor = .windowBackgroundColor
-                window.hasShadow = true
-                window.minSize = NSSize(width: 640, height: 360)
-                window.contentMinSize = NSSize(width: 640, height: 360)
-                window.contentAspectRatio = NSSize(width: 16, height: 9)
-                window.level = isAlwaysOnTop ? .floating : .normal
-                applyTrafficLightVisibility(window: window)
+                configureWindow(window)
             }
             .allowsHitTesting(false)
         }
         .onChange(of: isAlwaysOnTop) { _, newValue in
-            playerWindow?.level = newValue ? .floating : .normal
+            applyWindowLevel(window: playerWindow, isAlwaysOnTop: newValue)
         }
         .onChange(of: playerState.currentPlayable?.title) { _, _ in
             applyWindowTitle(window: playerWindow)
@@ -128,6 +118,24 @@ struct PlayerWindowView_macOS: View {
         }
     }
 
+    private func configureWindow(_ window: NSWindow) {
+        if playerWindow !== window {
+            playerWindow = window
+        }
+        applyWindowTitle(window: window)
+        setTitleVisibility(.hidden, window: window)
+        setTitlebarAppearsTransparent(true, window: window)
+        setTitlebarSeparatorStyle(.automatic, window: window)
+        setIsOpaque(false, window: window)
+        setBackgroundColor(.windowBackgroundColor, window: window)
+        setHasShadow(true, window: window)
+        setMinimumWindowSize(Self.minimumWindowSize, window: window)
+        setContentMinimumWindowSize(Self.minimumWindowSize, window: window)
+        setContentAspectRatio(Self.windowAspectRatio, window: window)
+        applyWindowLevel(window: window, isAlwaysOnTop: isAlwaysOnTop)
+        applyTrafficLightVisibility(window: window)
+    }
+
     private func applyTrafficLightVisibility(window: NSWindow) {
         let visible = isOverlayVisible || window.styleMask.contains(.fullScreen)
         let trafficButtons: [NSWindow.ButtonType] = [
@@ -135,7 +143,10 @@ struct PlayerWindowView_macOS: View {
         ]
         for buttonType in trafficButtons {
             if let button = window.standardWindowButton(buttonType) {
-                button.isHidden = !visible
+                let isHidden = !visible
+                if button.isHidden != isHidden {
+                    button.isHidden = isHidden
+                }
             }
         }
     }
@@ -146,9 +157,83 @@ struct PlayerWindowView_macOS: View {
             playerState.currentPlayable?.title.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingARIBEnclosedGlyphsForDisplay()
         if let currentTitle, !currentTitle.isEmpty {
-            window.title = currentTitle
+            setWindowTitle(currentTitle, window: window)
         } else {
-            window.title = Self.defaultWindowTitle
+            setWindowTitle(Self.defaultWindowTitle, window: window)
+        }
+    }
+
+    private func applyWindowLevel(window: NSWindow?, isAlwaysOnTop: Bool) {
+        guard let window else { return }
+        let level: NSWindow.Level = isAlwaysOnTop ? .floating : .normal
+        if window.level != level {
+            window.level = level
+        }
+    }
+
+    private func setWindowTitle(_ title: String, window: NSWindow) {
+        if window.title != title {
+            window.title = title
+        }
+    }
+
+    private func setTitleVisibility(
+        _ titleVisibility: NSWindow.TitleVisibility,
+        window: NSWindow
+    ) {
+        if window.titleVisibility != titleVisibility {
+            window.titleVisibility = titleVisibility
+        }
+    }
+
+    private func setTitlebarAppearsTransparent(_ isTransparent: Bool, window: NSWindow) {
+        if window.titlebarAppearsTransparent != isTransparent {
+            window.titlebarAppearsTransparent = isTransparent
+        }
+    }
+
+    private func setTitlebarSeparatorStyle(
+        _ separatorStyle: NSTitlebarSeparatorStyle,
+        window: NSWindow
+    ) {
+        if window.titlebarSeparatorStyle != separatorStyle {
+            window.titlebarSeparatorStyle = separatorStyle
+        }
+    }
+
+    private func setIsOpaque(_ isOpaque: Bool, window: NSWindow) {
+        if window.isOpaque != isOpaque {
+            window.isOpaque = isOpaque
+        }
+    }
+
+    private func setBackgroundColor(_ backgroundColor: NSColor, window: NSWindow) {
+        if window.backgroundColor?.isEqual(backgroundColor) != true {
+            window.backgroundColor = backgroundColor
+        }
+    }
+
+    private func setHasShadow(_ hasShadow: Bool, window: NSWindow) {
+        if window.hasShadow != hasShadow {
+            window.hasShadow = hasShadow
+        }
+    }
+
+    private func setMinimumWindowSize(_ size: NSSize, window: NSWindow) {
+        if window.minSize != size {
+            window.minSize = size
+        }
+    }
+
+    private func setContentMinimumWindowSize(_ size: NSSize, window: NSWindow) {
+        if window.contentMinSize != size {
+            window.contentMinSize = size
+        }
+    }
+
+    private func setContentAspectRatio(_ aspectRatio: NSSize, window: NSWindow) {
+        if window.contentAspectRatio != aspectRatio {
+            window.contentAspectRatio = aspectRatio
         }
     }
 
