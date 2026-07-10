@@ -3,15 +3,20 @@ import Foundation
 struct AppBuildInfo {
     let appName: String
     let version: String
+    let temporaryMarketingVersion: String?
     let buildNumber: String
     let gitCommitHash: String
 
+    private var displayedVersion: String {
+        temporaryMarketingVersion ?? version
+    }
+
     var versionDescription: String {
-        "\(version) (\(buildNumber), \(gitCommitHash))"
+        "\(displayedVersion) (\(buildNumber), \(gitCommitHash))"
     }
 
     var versionWithGitCommitHashDescription: String {
-        "\(version) (\(gitCommitHash))"
+        "\(displayedVersion) (\(gitCommitHash))"
     }
 
     var appVersionDescription: String {
@@ -29,6 +34,10 @@ struct AppBuildInfo {
     init(bundle: Bundle) {
         appName = Self.infoValue("CFBundleDisplayName", from: bundle, fallback: "kiririn")
         version = Self.infoValue("CFBundleShortVersionString", from: bundle)
+        temporaryMarketingVersion = Self.optionalInfoValue(
+            "KiririnTemporaryMarketingVersion",
+            from: bundle
+        )
         buildNumber = Self.infoValue("CFBundleVersion", from: bundle)
         gitCommitHash = Self.infoValue("KiririnGitCommitHash", from: bundle)
     }
@@ -38,6 +47,14 @@ struct AppBuildInfo {
     {
         guard let value = bundle.object(forInfoDictionaryKey: key) as? String, !value.isEmpty else {
             return fallback
+        }
+
+        return value
+    }
+
+    private static func optionalInfoValue(_ key: String, from bundle: Bundle) -> String? {
+        guard let value = bundle.object(forInfoDictionaryKey: key) as? String, !value.isEmpty else {
+            return nil
         }
 
         return value
