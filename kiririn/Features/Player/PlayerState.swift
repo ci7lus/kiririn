@@ -278,18 +278,24 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     private let logger = Logger(label: "PlayerState")
     private let fallbackPlaybackErrorMessage = "メディアの読み込みに失敗しました"
 
-    private static let mediaPlayerOptions = [
-        "--hw-dec",
-        "--no-sub-autodetect-file",
-        "--no-save-recentplay",
-        "--no-keyboard-events",
-        "--no-mouse-events",
-        "--ts-standard=arib",
-        "--no-snapshot-preview",
-        "--snapshot-format=jpg",
-        "--aribcaption-font=Hiragino Maru Gothic ProN,Rounded M+ 1m WadaLab comp ARIB,Apple Symbols",
-        "--verbose=1",
-    ]
+    private static let mediaPlayerOptions: [String] = {
+        var options = [
+            "--hw-dec",
+            "--no-sub-autodetect-file",
+            "--no-save-recentplay",
+            "--no-keyboard-events",
+            "--no-mouse-events",
+            "--ts-standard=arib",
+            "--no-snapshot-preview",
+            "--snapshot-format=jpg",
+            "--aribcaption-font=Hiragino Maru Gothic ProN,Rounded M+ 1m WadaLab comp ARIB,Apple Symbols",
+            "--verbose=1",
+        ]
+        #if os(macOS)
+            options.append("--vout=samplebufferdisplay")
+        #endif
+        return options
+    }()
 
     override init() {
         self.player = nil
