@@ -10,6 +10,7 @@ class RecordsViewModel {
     var isLoading = false
     var hasMore = true
     var searchText = ""
+    var errorTitle: String?
     var errorMessage: String?
     var scrolledRecordId: String?
     var hasRestoredScroll = false
@@ -109,6 +110,7 @@ class RecordsViewModel {
         let previousFailedThumbnailKeys = failedThumbnailKeys
         let previousPageToken = pageToken
         let previousHasMore = hasMore
+        let previousErrorTitle = errorTitle
         let previousErrorMessage = errorMessage
 
         if reset {
@@ -118,9 +120,11 @@ class RecordsViewModel {
         }
         guard hasMore else { return }
         isLoading = true
+        errorTitle = nil
         errorMessage = nil
 
         guard manager.recordingProvider(for: serverId) != nil else {
+            errorTitle = "サーバーに接続できませんでした"
             errorMessage = "サーバーが利用できません"
             hasMore = false
             isLoading = false
@@ -156,6 +160,7 @@ class RecordsViewModel {
                     failedThumbnailKeys = previousFailedThumbnailKeys
                     pageToken = previousPageToken
                     hasMore = previousHasMore
+                    errorTitle = previousErrorTitle
                     errorMessage = previousErrorMessage
                 }
                 isLoading = false
@@ -169,8 +174,42 @@ class RecordsViewModel {
                 pageToken = nil
             }
             hasMore = false
-            errorMessage = error.localizedDescription
+            logger.error(
+                "failed to load records for server \(serverId): \(error.localizedDescription)")
+            let feedback = errorFeedback(for: error)
+            errorTitle = feedback.title
+            errorMessage = feedback.message
         }
         isLoading = false
+    }
+
+    private func errorFeedback(for error: Error) -> (title: String, message: String) {
+        if let apiError = error as? APIError {
+            let title =
+                switch apiError {
+                case .invalidURL:
+                    "サーバー設定を確認してください"
+                case .invalidResponse, .httpError, .decodingError, .notFound:
+                    "通信に失敗しました"
+                }
+            return (title, apiError.briefDescription)
+        }
+
+        if let urlError = error as? URLError {
+            let message =
+                switch urlError.code {
+                case .timedOut:
+                    "接続がタイムアウトしました"
+                case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+                    "サーバーに接続できませんでした"
+                case .networkConnectionLost, .notConnectedToInternet:
+                    "ネットワーク接続を確認してください"
+                default:
+                    "サーバーとの通信中にエラーが発生しました"
+                }
+            return ("通信に失敗しました", message)
+        }
+
+        return ("録画一覧を読み込めませんでした", "不明なエラーが発生しました")
     }
 }
