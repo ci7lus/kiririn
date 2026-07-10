@@ -6,6 +6,17 @@ import SwiftUI
 struct PlayerWindowView_macOS: View {
     private let logger = Logger(label: "PlayerWindowView_macOS")
     private static let defaultWindowTitle = "プレイヤー"
+    private static let windowConfiguration = WindowConfiguration(
+        titleVisibility: .hidden,
+        titlebarAppearsTransparent: true,
+        titlebarSeparatorStyle: .automatic,
+        isOpaque: false,
+        backgroundColor: .windowBackgroundColor,
+        hasShadow: true,
+        minSize: NSSize(width: 640, height: 360),
+        contentMinSize: NSSize(width: 640, height: 360),
+        contentAspectRatio: NSSize(width: 16, height: 9)
+    )
     let initialPlayable: Playable?
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
@@ -40,24 +51,12 @@ struct PlayerWindowView_macOS: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
             WindowConfigurator_macOS { window in
-                playerWindow = window
-                applyWindowTitle(window: window)
-                window.titleVisibility = .hidden
-                window.titlebarAppearsTransparent = true
-                window.titlebarSeparatorStyle = .automatic
-                window.isOpaque = false
-                window.backgroundColor = .windowBackgroundColor
-                window.hasShadow = true
-                window.minSize = NSSize(width: 640, height: 360)
-                window.contentMinSize = NSSize(width: 640, height: 360)
-                window.contentAspectRatio = NSSize(width: 16, height: 9)
-                window.level = isAlwaysOnTop ? .floating : .normal
-                applyTrafficLightVisibility(window: window)
+                configureWindow(window)
             }
             .allowsHitTesting(false)
         }
         .onChange(of: isAlwaysOnTop) { _, newValue in
-            playerWindow?.level = newValue ? .floating : .normal
+            applyWindowLevel(window: playerWindow, isAlwaysOnTop: newValue)
         }
         .onChange(of: playerState.currentPlayable?.title) { _, _ in
             applyWindowTitle(window: playerWindow)
@@ -128,6 +127,16 @@ struct PlayerWindowView_macOS: View {
         }
     }
 
+    private func configureWindow(_ window: NSWindow) {
+        if playerWindow !== window {
+            playerWindow = window
+        }
+        applyWindowTitle(window: window)
+        Self.windowConfiguration.apply(to: window)
+        applyWindowLevel(window: window, isAlwaysOnTop: isAlwaysOnTop)
+        applyTrafficLightVisibility(window: window)
+    }
+
     private func applyTrafficLightVisibility(window: NSWindow) {
         let visible = isOverlayVisible || window.styleMask.contains(.fullScreen)
         let trafficButtons: [NSWindow.ButtonType] = [
@@ -135,7 +144,10 @@ struct PlayerWindowView_macOS: View {
         ]
         for buttonType in trafficButtons {
             if let button = window.standardWindowButton(buttonType) {
-                button.isHidden = !visible
+                let isHidden = !visible
+                if button.isHidden != isHidden {
+                    button.isHidden = isHidden
+                }
             }
         }
     }
@@ -146,9 +158,23 @@ struct PlayerWindowView_macOS: View {
             playerState.currentPlayable?.title.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingARIBEnclosedGlyphsForDisplay()
         if let currentTitle, !currentTitle.isEmpty {
-            window.title = currentTitle
+            setWindowTitle(currentTitle, window: window)
         } else {
-            window.title = Self.defaultWindowTitle
+            setWindowTitle(Self.defaultWindowTitle, window: window)
+        }
+    }
+
+    private func applyWindowLevel(window: NSWindow?, isAlwaysOnTop: Bool) {
+        guard let window else { return }
+        let level: NSWindow.Level = isAlwaysOnTop ? .floating : .normal
+        if window.level != level {
+            window.level = level
+        }
+    }
+
+    private func setWindowTitle(_ title: String, window: NSWindow) {
+        if window.title != title {
+            window.title = title
         }
     }
 
@@ -203,5 +229,47 @@ struct PlayerWindowView_macOS: View {
         logger.info(
             "window context (\(trigger)): playableID=\(playable?.id ?? "nil"), source=\(sourceDescription), serverId=\(serverID), serverState=\(serverState), providerExists=\(appModel.manager.providers[serverID] != nil)"
         )
+    }
+}
+
+private struct WindowConfiguration {
+    let titleVisibility: NSWindow.TitleVisibility
+    let titlebarAppearsTransparent: Bool
+    let titlebarSeparatorStyle: NSTitlebarSeparatorStyle
+    let isOpaque: Bool
+    let backgroundColor: NSColor
+    let hasShadow: Bool
+    let minSize: NSSize
+    let contentMinSize: NSSize
+    let contentAspectRatio: NSSize
+
+    func apply(to window: NSWindow) {
+        if window.titleVisibility != titleVisibility {
+            window.titleVisibility = titleVisibility
+        }
+        if window.titlebarAppearsTransparent != titlebarAppearsTransparent {
+            window.titlebarAppearsTransparent = titlebarAppearsTransparent
+        }
+        if window.titlebarSeparatorStyle != titlebarSeparatorStyle {
+            window.titlebarSeparatorStyle = titlebarSeparatorStyle
+        }
+        if window.isOpaque != isOpaque {
+            window.isOpaque = isOpaque
+        }
+        if window.backgroundColor?.isEqual(backgroundColor) != true {
+            window.backgroundColor = backgroundColor
+        }
+        if window.hasShadow != hasShadow {
+            window.hasShadow = hasShadow
+        }
+        if window.minSize != minSize {
+            window.minSize = minSize
+        }
+        if window.contentMinSize != contentMinSize {
+            window.contentMinSize = contentMinSize
+        }
+        if window.contentAspectRatio != contentAspectRatio {
+            window.contentAspectRatio = contentAspectRatio
+        }
     }
 }
