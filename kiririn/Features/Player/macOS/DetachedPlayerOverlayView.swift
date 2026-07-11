@@ -205,9 +205,12 @@ struct DetachedPlayerOverlayView_macOS: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    BroadcastText(playerState.currentPlayable?.title ?? "")
-                        .font(.system(size: 14 * scale, weight: .semibold))
-                        .lineLimit(1)
+                    BroadcastText(
+                        playerState.currentPlayable?.title ?? "",
+                        size: 14 * scale,
+                        weight: .semibold
+                    )
+                    .lineLimit(1)
                     HStack {
                         if let serviceName = playerState.currentPlayable?.serviceName {
                             Text(serviceName)
@@ -234,15 +237,14 @@ struct DetachedPlayerOverlayView_macOS: View {
                     if let subtitle = playerState.currentPlayable?.subtitle,
                         !subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     {
-                        BroadcastText(subtitle)
-                            .font(.system(size: 12 * scale, weight: .regular))
+                        BroadcastText(subtitle, size: 12 * scale)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                     if let nextProgramText {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.right")
-                            BroadcastText(nextProgramText)
+                            BroadcastText(nextProgramText, size: 12 * scale)
                                 .lineLimit(1)
                         }
                         .font(.system(size: 12 * scale, weight: .regular))

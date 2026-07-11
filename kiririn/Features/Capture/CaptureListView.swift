@@ -367,9 +367,7 @@ private struct CaptureHistoryItemView: View {
                 .frame(maxWidth: .infinity)
 
             VStack(alignment: .leading, spacing: 2) {
-                BroadcastText(item.programName ?? "名称未設定")
-                    .font(.caption)
-                    .fontWeight(.semibold)
+                BroadcastText(item.programName ?? "名称未設定", style: .caption, weight: .semibold)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
 

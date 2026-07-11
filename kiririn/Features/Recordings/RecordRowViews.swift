@@ -73,17 +73,14 @@ struct RecordRowView: View {
                 thumbnailView
 
                 VStack(alignment: .leading, spacing: 4) {
-                    BroadcastText(record.name)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
+                    BroadcastText(record.name, style: .subheadline, weight: .medium)
                         .foregroundStyle(.primary)
 
                     if let channelName = record.serviceName?.trimmingCharacters(
                         in: .whitespacesAndNewlines),
                         !channelName.isEmpty
                     {
-                        BroadcastText(channelName)
-                            .font(.caption)
+                        BroadcastText(channelName, style: .caption)
                             .foregroundStyle(.secondary)
                     }
 
@@ -265,17 +262,14 @@ struct RecordDownloadRowView: View {
             .clipShape(.rect(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 4) {
-                BroadcastText(record.name)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+                BroadcastText(record.name, style: .subheadline, weight: .medium)
                     .foregroundStyle(.primary)
 
                 if let channelName = record.serviceName?.trimmingCharacters(
                     in: .whitespacesAndNewlines),
                     !channelName.isEmpty
                 {
-                    BroadcastText(channelName)
-                        .font(.caption)
+                    BroadcastText(channelName, style: .caption)
                         .foregroundStyle(.secondary)
                 }
 
@@ -315,9 +309,7 @@ struct RecordDownloadRowView: View {
                 .clipShape(.rect(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 4) {
-                BroadcastText(record.name)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+                BroadcastText(record.name, style: .subheadline, weight: .medium)
                     .foregroundStyle(.primary)
 
                 HStack(spacing: 4) {
