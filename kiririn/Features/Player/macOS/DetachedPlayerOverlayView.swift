@@ -122,6 +122,8 @@ struct DetachedPlayerOverlayView_macOS: View {
                                 Text("最前面に固定")
                             }
                         }
+                        .disabled(isPlayerFullscreen)
+                        .selectionDisabled(isPlayerFullscreen)
                     }
 
                 controllerOverlay(scale: overlayScale)
@@ -424,6 +426,8 @@ struct DetachedPlayerOverlayView_macOS: View {
                     Text("最前面に固定")
                 }
             }
+            .disabled(isPlayerFullscreen)
+            .selectionDisabled(isPlayerFullscreen)
         }
         .ignoresSafeArea()
     }

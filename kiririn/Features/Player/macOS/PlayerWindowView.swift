@@ -49,7 +49,7 @@ struct PlayerWindowView_macOS: View {
             .allowsHitTesting(false)
         }
         .onChange(of: isAlwaysOnTop) { _, newValue in
-            applyWindowLevel(window: playerWindow, isAlwaysOnTop: newValue)
+            updateAlwaysOnTop(newValue)
         }
         .onChange(of: isOverlayVisible) { _, _ in
             applyTrafficLightVisibility(window: playerWindow)
@@ -83,6 +83,14 @@ struct PlayerWindowView_macOS: View {
             if playerState.currentPlayable?.id != nil {
                 appModel.focusedPlayerID = playerState.id
             }
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)
+        ) { notification in
+            guard let window = notification.object as? NSWindow, window === playerWindow else {
+                return
+            }
+            prepareWindowForFullscreen(window)
         }
         .onReceive(
             NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)
@@ -160,6 +168,21 @@ struct PlayerWindowView_macOS: View {
         if window.level != level {
             window.level = level
         }
+    }
+
+    private func updateAlwaysOnTop(_ isEnabled: Bool) {
+        if isEnabled, playerWindow?.styleMask.contains(.fullScreen) == true {
+            isAlwaysOnTop = false
+            return
+        }
+        applyWindowLevel(window: playerWindow, isAlwaysOnTop: isEnabled)
+    }
+
+    private func prepareWindowForFullscreen(_ window: NSWindow) {
+        if isAlwaysOnTop {
+            isAlwaysOnTop = false
+        }
+        applyWindowLevel(window: window, isAlwaysOnTop: false)
     }
 
     private func applyTrafficLightVisibility(window: NSWindow?) {
