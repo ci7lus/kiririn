@@ -5,6 +5,8 @@ import SwiftUI
 import VLCKit
 
 struct DetachedPlayerOverlayView_macOS: View {
+    private static let overlayCoordinateSpaceName = "DetachedPlayerOverlay"
+
     @State var playerState: PlayerState
     let appModel: AppModel
     let pluginStore: PluginStore
@@ -16,6 +18,10 @@ struct DetachedPlayerOverlayView_macOS: View {
     @Environment(\.openWindow) private var openWindow
     @State private var isControllerVisible = true
     @State private var hideControllerTask: DispatchWorkItem?
+    @State private var isPointerOverTitleController = false
+    @State private var isPointerOverBottomController = false
+    @State private var titleControllerFrame = CGRect.zero
+    @State private var isPlayerFullscreen = false
     @State private var isSeeking = false
     @State private var seekValue: Double = 0
     @State private var isCursorHidden = false
@@ -95,33 +101,34 @@ struct DetachedPlayerOverlayView_macOS: View {
                     playbackLoadingIndicator
                 }
 
-                WindowDragSurface(
-                    onClick: {},
-                    onMouseMoved: {
-                        if !isControllerVisible {
-                            setControllerVisible(true, animated: true)
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(WindowDragGesture())
+                    .simultaneousGesture(
+                        TapGesture(count: 2)
+                            .onEnded {
+                                onToggleFullscreen()
+                            }
+                    )
+                    .allowsWindowActivationEvents()
+                    .contextMenu {
+                        Button {
+                            isAlwaysOnTop.toggle()
+                        } label: {
+                            HStack {
+                                if isAlwaysOnTop {
+                                    Image(systemName: "checkmark")
+                                }
+                                Text("最前面に固定")
+                            }
                         }
-                        scheduleControllerHide()
-                    },
-                    onMouseExited: {
-                        hideControllerTask?.cancel()
-                        hideControllerTask = nil
-                        setControllerVisible(false, animated: true, manageCursor: false)
-                        setCursorHidden(false)
-                    },
-                    onDoubleClick: {
-                        onToggleFullscreen()
-                    },
-                    isAlwaysOnTop: { isAlwaysOnTop },
-                    onToggleAlwaysOnTop: {
-                        isAlwaysOnTop.toggle()
+                        .disabled(isPlayerFullscreen)
+                        .selectionDisabled(isPlayerFullscreen)
                     }
-                )
 
                 controllerOverlay(scale: overlayScale)
                     .opacity(isControllerVisible ? 1 : 0)
                     .allowsHitTesting(isControllerVisible)
-                    .animation(.easeInOut(duration: 0.22), value: isControllerVisible)
 
                 seekFeedbackOverlay(scale: overlayScale)
                 volumeFeedbackOverlay(scale: overlayScale)
@@ -132,21 +139,20 @@ struct DetachedPlayerOverlayView_macOS: View {
             }
             .ignoresSafeArea()
             .contentShape(Rectangle())
+            .coordinateSpace(name: Self.overlayCoordinateSpaceName)
+            .onContinuousHover(perform: handleWindowHover)
             .animation(
                 .easeInOut(duration: 0.18),
                 value: playerState.showsPlaybackLoadingIndicator
             )
-            .onTapGesture(count: 2) {
-                onToggleFullscreen()
-            }
             .onAppear {
+                isPlayerFullscreen = playerWindow?.styleMask.contains(.fullScreen) ?? false
                 onControlsVisibilityChanged(isControllerVisible)
                 scheduleControllerHide()
             }
             .onDisappear {
                 hideControllerTask?.cancel()
                 hideControllerTask = nil
-                onControlsVisibilityChanged(true)
                 setCursorHidden(false)
                 seekFeedbackHideTask?.cancel()
                 seekFeedbackHideTask = nil
@@ -154,12 +160,23 @@ struct DetachedPlayerOverlayView_macOS: View {
                 volumeFeedbackHideTask = nil
                 captureFeedbackHideTask?.cancel()
                 captureFeedbackHideTask = nil
+                onControlsVisibilityChanged(true)
             }
             .onReceive(CaptureService.shared.didAddCapture) { (playerID, item) in
                 guard playerID == playerState.id else { return }
                 if item.type == .image {
                     showCaptureFeedback(text: "キャプチャを撮影しました", systemImage: "camera.fill")
                 }
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)
+            ) { notification in
+                updateFullscreenState(true, from: notification)
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)
+            ) { notification in
+                updateFullscreenState(false, from: notification)
             }
             .onChange(of: playerState.isRecording) { oldValue, newValue in
                 if newValue {
@@ -239,6 +256,11 @@ struct DetachedPlayerOverlayView_macOS: View {
             .padding(.leading, 76 * scale)
             .background(.ultraThinMaterial)
             .allowsHitTesting(false)
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .named(Self.overlayCoordinateSpaceName))
+            } action: { frame in
+                titleControllerFrame = frame
+            }
 
             Spacer()
 
@@ -390,6 +412,7 @@ struct DetachedPlayerOverlayView_macOS: View {
             .padding(.horizontal, 12 * scale)
             .padding(.vertical, 8 * scale)
             .background(playerControlBackground(scale: scale))
+            .onHover(perform: handleBottomControllerHover)
             .padding(8 * scale)
         }
         .contextMenu {
@@ -403,6 +426,8 @@ struct DetachedPlayerOverlayView_macOS: View {
                     Text("最前面に固定")
                 }
             }
+            .disabled(isPlayerFullscreen)
+            .selectionDisabled(isPlayerFullscreen)
         }
         .ignoresSafeArea()
     }
@@ -424,11 +449,15 @@ struct DetachedPlayerOverlayView_macOS: View {
     private func controlScale(for containerSize: CGSize) -> CGFloat {
         let baseScale = min(containerSize.width / 1920, containerSize.height / 1080)
         let clampedScale = min(max(baseScale, 1.0), 1.7)
-        let isFullscreen = playerWindow?.styleMask.contains(.fullScreen) ?? false
-        if isFullscreen {
+        if isPlayerFullscreen {
             return clampedScale
         }
         return min(clampedScale, 1.15)
+    }
+
+    private func updateFullscreenState(_ isFullscreen: Bool, from notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === playerWindow else { return }
+        isPlayerFullscreen = isFullscreen
     }
 
     private var keyboardShortcuts: some View {
@@ -471,11 +500,48 @@ struct DetachedPlayerOverlayView_macOS: View {
 
     private func scheduleControllerHide() {
         hideControllerTask?.cancel()
+        guard !isPointerOverController else {
+            hideControllerTask = nil
+            return
+        }
         let task = DispatchWorkItem {
+            guard !isPointerOverController else { return }
             setControllerVisible(false, animated: true)
         }
         hideControllerTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: task)
+    }
+
+    private var isPointerOverController: Bool {
+        isPointerOverTitleController || isPointerOverBottomController
+    }
+
+    private func handleBottomControllerHover(_ isHovering: Bool) {
+        isPointerOverBottomController = isHovering
+        if isHovering {
+            hideControllerTask?.cancel()
+            hideControllerTask = nil
+        } else if isControllerVisible {
+            scheduleControllerHide()
+        }
+    }
+
+    private func handleWindowHover(_ phase: HoverPhase) {
+        switch phase {
+        case .active(let location):
+            if !isControllerVisible {
+                setControllerVisible(true, animated: true)
+            }
+            isPointerOverTitleController = titleControllerFrame.contains(location)
+            scheduleControllerHide()
+        case .ended:
+            hideControllerTask?.cancel()
+            hideControllerTask = nil
+            isPointerOverTitleController = false
+            isPointerOverBottomController = false
+            setControllerVisible(false, animated: true, manageCursor: false)
+            setCursorHidden(false)
+        }
     }
 
     private func setControllerVisible(
@@ -483,7 +549,9 @@ struct DetachedPlayerOverlayView_macOS: View {
     ) {
         let didChange = isControllerVisible != visible
         if animated {
-            isControllerVisible = visible
+            withAnimation(.easeInOut(duration: 0.22)) {
+                isControllerVisible = visible
+            }
         } else {
             var transaction = Transaction()
             transaction.disablesAnimations = true
@@ -876,9 +944,9 @@ private struct PlayerSlider: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let width = geometry.size.width
-            let progress = CGFloat(
-                (value - range.lowerBound) / (range.upperBound - range.lowerBound))
+            let width = max(geometry.size.width, 0)
+            let rawProgress = (value - range.lowerBound) / (range.upperBound - range.lowerBound)
+            let progress = CGFloat(rawProgress.isFinite ? min(max(rawProgress, 0), 1) : 0)
             let thumbWidth: CGFloat = 4 * scale
             let thumbHeight: CGFloat = 16 * scale
             let trackHeight: CGFloat = 4 * scale
@@ -906,6 +974,7 @@ private struct PlayerSlider: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { gesture in
+                        guard width > 0 else { return }
                         onEditingChanged(true)
                         let rawProgress = gesture.location.x / width
                         let clampedProgress = min(max(rawProgress, 0), 1)
@@ -917,135 +986,6 @@ private struct PlayerSlider: View {
                         onEditingChanged(false)
                     }
             )
-        }
-    }
-}
-
-private struct WindowDragSurface: NSViewRepresentable {
-    let onClick: () -> Void
-    let onMouseMoved: () -> Void
-    let onMouseExited: () -> Void
-    let onDoubleClick: () -> Void
-    let isAlwaysOnTop: () -> Bool
-    let onToggleAlwaysOnTop: () -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = DragView()
-        view.onClick = onClick
-        view.onMouseMoved = onMouseMoved
-        view.onMouseExited = onMouseExited
-        view.onDoubleClick = onDoubleClick
-        view.isAlwaysOnTop = isAlwaysOnTop
-        view.onToggleAlwaysOnTop = onToggleAlwaysOnTop
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        guard let dragView = nsView as? DragView else { return }
-        dragView.onClick = onClick
-        dragView.onMouseMoved = onMouseMoved
-        dragView.onMouseExited = onMouseExited
-        dragView.onDoubleClick = onDoubleClick
-        dragView.isAlwaysOnTop = isAlwaysOnTop
-        dragView.onToggleAlwaysOnTop = onToggleAlwaysOnTop
-    }
-
-    private final class DragView: NSView {
-        var onClick: (() -> Void)?
-        var onMouseMoved: (() -> Void)?
-        var onMouseExited: (() -> Void)?
-        var onDoubleClick: (() -> Void)?
-        var isAlwaysOnTop: (() -> Bool)?
-        var onToggleAlwaysOnTop: (() -> Void)?
-        private var globalMouseMonitor: Any?
-        private var wasPointerInsideWindow = true
-
-        override func mouseDragged(with event: NSEvent) {
-            super.mouseDragged(with: event)
-            window?.performDrag(with: event)
-        }
-
-        override func mouseMoved(with event: NSEvent) {
-            super.mouseMoved(with: event)
-            onMouseMoved?()
-        }
-
-        override func mouseExited(with event: NSEvent) {
-            super.mouseExited(with: event)
-            onMouseExited?()
-        }
-
-        override func mouseDown(with event: NSEvent) {
-            if event.clickCount == 1 {
-                onClick?()
-            } else if event.clickCount == 2 {
-                onDoubleClick?()
-            }
-        }
-
-        override func rightMouseDown(with event: NSEvent) {
-            let isPinned = isAlwaysOnTop?() ?? false
-            let menu = NSMenu(title: "")
-            let item = NSMenuItem(
-                title: "最前面に固定",
-                action: #selector(toggleAlwaysOnTop),
-                keyEquivalent: ""
-            )
-            item.state = isPinned ? .on : .off
-            item.target = self
-            menu.addItem(item)
-            NSMenu.popUpContextMenu(menu, with: event, for: self)
-        }
-
-        @objc private func toggleAlwaysOnTop() {
-            onToggleAlwaysOnTop?()
-        }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            stopGlobalMouseMonitor()
-            guard window != nil else { return }
-            wasPointerInsideWindow = true
-            globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
-                matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
-            ) { [weak self] _ in
-                self?.handleGlobalPointerLocationChange()
-            }
-        }
-
-        override func updateTrackingAreas() {
-            super.updateTrackingAreas()
-            for trackingArea in trackingAreas {
-                removeTrackingArea(trackingArea)
-            }
-            addTrackingArea(
-                NSTrackingArea(
-                    rect: bounds,
-                    options: [
-                        .mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect,
-                    ],
-                    owner: self
-                )
-            )
-        }
-
-        deinit {
-            stopGlobalMouseMonitor()
-        }
-
-        private func stopGlobalMouseMonitor() {
-            guard let monitor = globalMouseMonitor else { return }
-            NSEvent.removeMonitor(monitor)
-            globalMouseMonitor = nil
-        }
-
-        private func handleGlobalPointerLocationChange() {
-            guard let window else { return }
-            let isInsideWindow = window.frame.contains(NSEvent.mouseLocation)
-            if wasPointerInsideWindow && !isInsideWindow {
-                onMouseExited?()
-            }
-            wasPointerInsideWindow = isInsideWindow
         }
     }
 }

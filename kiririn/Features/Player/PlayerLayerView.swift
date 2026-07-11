@@ -30,7 +30,7 @@ import VLCKit
     }
 
     final class VLCPlayerView: NSView {
-        private let videoView = VLCVideoView()
+        private let videoView = GeometrySafeVLCVideoView()
 
         var onPipAvailableChanged: ((Bool) -> Void)?
         var onPipEnabledChanged: ((Bool) -> Void)?

@@ -213,8 +213,12 @@ struct KiririnApp: App {
                     PlayerWindowView_macOS(initialPlayable: playable)
                 }
                 .defaultSize(width: 1280, height: 720)
-                .windowStyle(.hiddenTitleBar)
-                .commandsRemoved()
+                .windowStyle(.titleBar)
+                .commands {
+                    CommandGroup(replacing: .newItem) {
+                        EmptyView()
+                    }
+                }
 
                 WindowGroup("プラグイン", id: AppWindowID.plugin.rawValue, for: UUID.self) {
                     $pluginID in

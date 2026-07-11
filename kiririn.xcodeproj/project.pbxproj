@@ -72,6 +72,7 @@
 				Features/Capture/macOS/ShortcutRecorderView.swift = (macos, );
 				Features/Player/PlayerOverlayView.swift = (ios, );
 				Features/Player/macOS/DetachedPlayerOverlayView.swift = (macos, );
+				Features/Player/macOS/GeometrySafeVLCVideoView.swift = (macos, );
 				Features/Player/macOS/PlayerWindowView.swift = (macos, );
 				Features/Plugin/iOS/PluginEditableList.swift = (ios, );
 				Features/Plugin/macOS/PluginSelectionList.swift = (macos, );
@@ -580,9 +581,9 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.4;
+				KIRIRIN_TEMPORARY_MARKETING_VERSION = 0.1.2;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				KIRIRIN_TEMPORARY_MARKETING_VERSION = 0.1.2;
 				MACOSX_DEPLOYMENT_TARGET = 15.4;
 				MARKETING_VERSION = 0.1.2;
 				"MARKETING_VERSION[sdk=iphoneos*]" = 0.1.1;
@@ -654,9 +655,9 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.4;
+				KIRIRIN_TEMPORARY_MARKETING_VERSION = 0.1.2;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				KIRIRIN_TEMPORARY_MARKETING_VERSION = 0.1.2;
 				MACOSX_DEPLOYMENT_TARGET = 15.4;
 				MARKETING_VERSION = 0.1.2;
 				"MARKETING_VERSION[sdk=iphoneos*]" = 0.1.1;
