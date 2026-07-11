@@ -31,13 +31,15 @@ struct ServerRecordsView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if visibleRecords.isEmpty {
-                    if let error = viewModel.errorMessage {
+                    if let errorTitle = viewModel.errorTitle,
+                        let errorMessage = viewModel.errorMessage
+                    {
                         ContentUnavailableView {
-                            Label("エラー", systemImage: "exclamationmark.triangle")
+                            Label(errorTitle, systemImage: "exclamationmark.triangle")
                         } description: {
-                            Text(error)
+                            Text(errorMessage)
                         } actions: {
-                            reloadButton
+                            Button("再接続", action: reloadRecords)
                         }
                     } else {
                         ContentUnavailableView {
@@ -45,7 +47,7 @@ struct ServerRecordsView: View {
                         } description: {
                             Text("録画番組がある場合はここに表示されます")
                         } actions: {
-                            reloadButton
+                            Button("再読み込み", action: reloadRecords)
                         }
                     }
                 } else {
@@ -147,13 +149,9 @@ struct ServerRecordsView: View {
         }
     }
 
-    private var reloadButton: some View {
-        Button {
-            Task {
-                await refreshRecords()
-            }
-        } label: {
-            Text("再読み込み")
+    private func reloadRecords() {
+        Task {
+            await refreshRecords()
         }
     }
 
