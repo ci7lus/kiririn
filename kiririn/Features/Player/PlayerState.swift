@@ -1534,8 +1534,11 @@ extension PlayerState {
                 }
             }
             let position = Float(player.position)
-            if playbackStatus.position != position {
-                playbackStatus.position = position
+            if position.isFinite {
+                let clampedPosition = min(max(position, 0), 1)
+                if playbackStatus.position != clampedPosition {
+                    playbackStatus.position = clampedPosition
+                }
             }
             if playbackStatus.time > 0 || playbackStatus.position > 0.001 {
                 didStartPlayback = true
