@@ -139,6 +139,10 @@ extension Notification.Name {
     import AppKit
 
     class AppDelegate_macOS: NSObject, NSApplicationDelegate {
+        func applicationWillFinishLaunching(_: Notification) {
+            NSWindow.allowsAutomaticWindowTabbing = false
+        }
+
         func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
             true
         }
