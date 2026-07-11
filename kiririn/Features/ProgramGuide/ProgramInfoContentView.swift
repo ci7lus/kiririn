@@ -17,9 +17,7 @@ struct ProgramInfoContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            BroadcastText(program.name)
-                .font(.title3)
-                .fontWeight(.bold)
+            BroadcastText(program.name, style: .title3, weight: .bold)
                 .contextMenu {
                     if showsCopyContextMenu {
                         copyMenuButton("タイトルをコピー", text: program.name)
@@ -75,8 +73,8 @@ struct ProgramInfoContentView: View {
             if let rawDescription = program.desc,
                 !rawDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             {
-                BroadcastText(rawDescription)
-                    .font(.subheadline)
+                Text(rawDescription)
+                    .font(.systemWithARIBFallback(.subheadline))
                     .foregroundStyle(.secondary)
                     .contextMenu {
                         if showsCopyContextMenu {
@@ -97,7 +95,6 @@ struct ProgramInfoContentView: View {
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
                             Text(linkedAttributedString(for: entry.value))
-                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
                         }
@@ -162,8 +159,11 @@ struct ProgramInfoContentView: View {
             }
         }
 
-        return AttributedString(mutable)
+        var attributedString = AttributedString(mutable)
+        attributedString.font = .systemWithARIBFallback(.subheadline)
+        return attributedString
     }
+
     private static func normalizedExtendedEntries(
         extended: OrderedDictionary<String, String>?
     ) -> [ExtendedEntry] {

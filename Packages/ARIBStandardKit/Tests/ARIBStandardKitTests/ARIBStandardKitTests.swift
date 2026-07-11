@@ -55,5 +55,6 @@ struct ARIBStandardKitTests {
         #expect(String.aribEnclosedGlyphLabels["🈐"] == "手")
         #expect(String.aribEnclosedGlyphLabels["🆞"] == "4K")
         #expect(String.aribEnclosedGlyphLabels["🆧"] == "HDR")
+        #expect(String.aribEnclosedGlyphLabels["🈀"] == nil)
     }
 }

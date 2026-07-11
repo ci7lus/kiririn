@@ -3,10 +3,21 @@ import SwiftUI
 
 struct BroadcastText: View {
     private let source: String
+    private let font: Font
     private let badgeSpacing = "\u{2005}"
 
-    init(_ source: String) {
+    init(
+        _ source: String,
+        style: Font.TextStyle = .body,
+        weight: Font.Weight = .regular
+    ) {
         self.source = source
+        font = .systemWithARIBFallback(style, weight: weight)
+    }
+
+    init(_ source: String, size: CGFloat, weight: Font.Weight = .regular) {
+        self.source = source
+        font = .systemWithARIBFallback(size: size, weight: weight)
     }
 
     var body: some View {
@@ -17,9 +28,11 @@ struct BroadcastText: View {
             !segment.isEnclosed
         {
             Text(segment.text)
+                .font(font)
         } else {
             renderedText(using: segments)
                 .textRenderer(BroadcastBadgeTextRenderer())
+                .font(font)
         }
     }
 

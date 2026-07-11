@@ -125,9 +125,7 @@ struct ProgramCellView: View, Equatable {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let programTitle {
-                BroadcastText(programTitle)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
+                BroadcastText(programTitle, style: .subheadline, weight: .semibold)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
@@ -145,8 +143,7 @@ struct ProgramCellView: View, Equatable {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if let desc = compactDescription {
-                BroadcastText(desc)
-                    .font(.caption2)
+                BroadcastText(desc, style: .caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
                     .frame(maxWidth: .infinity, alignment: .leading)

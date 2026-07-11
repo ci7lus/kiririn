@@ -1146,11 +1146,13 @@ struct PlayerOverlayView_iOS: View {
                         VStack {
                             Spacer()
                             VStack(alignment: .leading, spacing: 2) {
-                                BroadcastText(playerState.currentPlayable?.title ?? "")
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(.white)
-                                    .lineLimit(1)
+                                BroadcastText(
+                                    playerState.currentPlayable?.title ?? "",
+                                    style: .caption,
+                                    weight: .semibold
+                                )
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
                                 if let sub = playerState.currentPlayable?.serviceName {
                                     Text(sub)
                                         .font(.caption2)
@@ -1612,7 +1614,11 @@ struct PlayerOverlayView_iOS: View {
     private func legacyFullscreenTopControls(isPortraitFullscreen: Bool) -> some View {
         if isPortraitFullscreen {
             VStack(alignment: .leading, spacing: 8) {
-                fullscreenTitleBlock(titleFont: .subheadline, subtitleFont: .caption)
+                fullscreenTitleBlock(
+                    titleStyle: .subheadline,
+                    titleWeight: .semibold,
+                    subtitleStyle: .caption
+                )
 
                 HStack {
                     Spacer()
@@ -1627,8 +1633,12 @@ struct PlayerOverlayView_iOS: View {
             .padding(.top, 8)
         } else {
             HStack {
-                fullscreenTitleBlock(titleFont: .subheadline, subtitleFont: .caption)
-                    .padding(.leading)
+                fullscreenTitleBlock(
+                    titleStyle: .subheadline,
+                    titleWeight: .semibold,
+                    subtitleStyle: .caption
+                )
+                .padding(.leading)
 
                 Spacer()
 
@@ -1643,18 +1653,23 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @ViewBuilder
-    private func fullscreenTitleBlock(titleFont: Font, subtitleFont: Font) -> some View {
+    private func fullscreenTitleBlock(
+        titleStyle: Font.TextStyle,
+        titleWeight: Font.Weight,
+        subtitleStyle: Font.TextStyle
+    ) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            BroadcastText(playerState.currentPlayable?.title ?? "")
-                .font(titleFont)
-                .fontWeight(.semibold)
-                .foregroundStyle(.white)
-                .lineLimit(1)
+            BroadcastText(
+                playerState.currentPlayable?.title ?? "",
+                style: titleStyle,
+                weight: titleWeight
+            )
+            .foregroundStyle(.white)
+            .lineLimit(1)
             if let sub = playerState.currentPlayable?.subtitle,
                 !sub.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             {
-                BroadcastText(sub)
-                    .font(subtitleFont)
+                BroadcastText(sub, style: subtitleStyle)
                     .foregroundStyle(.white.opacity(0.7))
                     .lineLimit(1)
             }
@@ -1667,9 +1682,12 @@ struct PlayerOverlayView_iOS: View {
         bottomPadding: CGFloat
     ) -> some View {
         HStack(alignment: .bottom, spacing: 6) {
-            fullscreenTitleBlock(titleFont: .title2, subtitleFont: .caption)
-                .fontWeight(.bold)
-                .layoutPriority(1)
+            fullscreenTitleBlock(
+                titleStyle: .title2,
+                titleWeight: .bold,
+                subtitleStyle: .caption
+            )
+            .layoutPriority(1)
 
             Spacer(minLength: 4)
 
@@ -2826,15 +2844,12 @@ struct PlayerInfoSheet: View {
             )
         } else {
             VStack(alignment: .leading, spacing: 12) {
-                BroadcastText(playable?.title ?? "")
-                    .font(.title3)
-                    .fontWeight(.bold)
+                BroadcastText(playable?.title ?? "", style: .title3, weight: .bold)
 
                 if let sub = playable?.subtitle,
                     !sub.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 {
-                    BroadcastText(sub)
-                        .font(.subheadline)
+                    BroadcastText(sub, style: .subheadline)
                         .foregroundStyle(.secondary)
                 }
             }

@@ -960,13 +960,10 @@ struct ServiceRowView: View {
                     if let program = currentProgram,
                         !program.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     {
-                        BroadcastText(program.name)
-                            .font(.headline)
-                            .fontWeight(.semibold)
+                        BroadcastText(program.name, style: .headline, weight: .semibold)
                             .foregroundStyle(.primary)
                         if let programDescriptionText = programDescriptionText {
-                            BroadcastText(programDescriptionText)
-                                .font(.caption)
+                            BroadcastText(programDescriptionText, style: .caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
@@ -988,7 +985,7 @@ struct ServiceRowView: View {
                     if let nextProgramText {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.right")
-                            BroadcastText(nextProgramText)
+                            BroadcastText(nextProgramText, style: .footnote)
                                 .lineLimit(1)
                         }
                         .font(.footnote)
