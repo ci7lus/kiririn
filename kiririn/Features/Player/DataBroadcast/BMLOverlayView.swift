@@ -15,4 +15,14 @@ import WebKit
 
         func updateNSView(_ nsView: WKWebView, context: Context) {}
     }
+#elseif os(iOS)
+    struct BMLOverlayView_iOS: UIViewRepresentable {
+        let session: DataBroadcastSession
+
+        func makeUIView(context: Context) -> WKWebView {
+            session.webView
+        }
+
+        func updateUIView(_ uiView: WKWebView, context: Context) {}
+    }
 #endif

@@ -6,7 +6,19 @@ import SwiftUI
 /// 各キーはコンテンツがusedKeyListで宣言したグループに応じて有効化される
 /// (dボタンのみ常時有効 - コンテンツはinvisible状態から起動されるため)。
 struct BMLRemoteControlView: View {
+    enum Layout {
+        case panel
+        case tab
+    }
+
     let playerState: PlayerState
+    var layout: Layout = .panel
+    var showsDataButton = true
+
+    private let spacing: CGFloat = 10
+    private var buttonHeight: CGFloat { layout == .tab ? 38 : 26 }
+    private var buttonFontSize: CGFloat { layout == .tab ? 16 : 12 }
+    private var directionalButtonWidth: CGFloat { layout == .tab ? 72 : 52 }
 
     private var session: DataBroadcastSession? { playerState.dataBroadcastSession }
     private var usedKeyGroups: Set<String> { session?.usedKeyGroups ?? [] }
@@ -21,24 +33,29 @@ struct BMLRemoteControlView: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: spacing) {
             dataButtonRow
             arrowPad
             colorButtonRow
             digitGrid
         }
         .padding(12)
-        .frame(width: 196)
+        .frame(
+            minWidth: layout == .panel ? 196 : nil,
+            maxWidth: layout == .tab ? .infinity : 196
+        )
     }
 
     private var dataButtonRow: some View {
         HStack(spacing: 8) {
-            remoteKey(enabled: playerState.bmlAvailable, help: "d") {
-                playerState.pressBMLDataButton()
-            } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: "d.circle\(playerState.bmlContentVisible ? ".fill" : "")")
-                    Text("データ")
+            if showsDataButton {
+                remoteKey(enabled: playerState.bmlAvailable, help: "d") {
+                    playerState.pressBMLDataButton()
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "d.circle\(playerState.bmlContentVisible ? ".fill" : "")")
+                        Text("データ")
+                    }
                 }
             }
             remoteKey(enabled: basicEnabled, help: "Delete / Esc") {
@@ -59,11 +76,13 @@ struct BMLRemoteControlView: View {
                 } label: {
                     Text("決定")
                 }
-                .frame(width: 52)
+                .frame(width: directionalButtonWidth)
                 arrowKey("chevron.right", code: 4, help: "⌥→")
             }
             arrowKey("chevron.down", code: 2, help: "⌥↓")
         }
+        .frame(maxWidth: layout == .tab ? 360 : nil)
+        .frame(maxWidth: .infinity)
     }
 
     private func arrowKey(_ systemImage: String, code: Int, help: String) -> some View {
@@ -72,7 +91,7 @@ struct BMLRemoteControlView: View {
         } label: {
             Image(systemName: systemImage)
         }
-        .frame(width: 52)
+        .frame(width: directionalButtonWidth)
         .buttonRepeatBehavior(.enabled)
     }
 
@@ -90,10 +109,10 @@ struct BMLRemoteControlView: View {
             press(code)
         } label: {
             Text(label)
-                .font(.system(size: 12, weight: .bold))
+                .font(.system(size: buttonFontSize, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
-                .frame(height: 24)
+                .frame(height: buttonHeight)
                 .background(color.opacity(0.75), in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
         }
@@ -136,9 +155,9 @@ struct BMLRemoteControlView: View {
     ) -> some View {
         Button(action: action) {
             label()
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: buttonFontSize, weight: .semibold))
                 .frame(maxWidth: .infinity)
-                .frame(height: 26)
+                .frame(height: buttonHeight)
                 .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
         }
