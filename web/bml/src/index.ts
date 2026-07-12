@@ -1,4 +1,10 @@
-import { BMLBrowser, BMLBrowserFontFace } from "../../web-bml/client/bml_browser";
+import {
+    BMLBrowser,
+    BMLBrowserFontFace,
+    InputApplication,
+    InputApplicationLaunchOptions,
+    InputCancelReason,
+} from "../../web-bml/client/bml_browser";
 import { AribKeyCode } from "../../web-bml/client/content";
 import { postToNative, log } from "./bridge";
 import { MahironAdapter } from "./mahiron";
@@ -55,6 +61,60 @@ const audioContext = new AudioContext();
 const audioGain = audioContext.createGain();
 audioGain.connect(audioContext.destination);
 
+class KiririnInputApplication implements InputApplication {
+    private nextRequestId = 1;
+    private activeRequest: { id: number; callback: (value: string) => void } | null = null;
+
+    launch(options: InputApplicationLaunchOptions): void {
+        if (this.activeRequest != null) {
+            postToNative({
+                type: "inputCancelled",
+                requestId: this.activeRequest.id,
+                reason: "other",
+            });
+        }
+        const requestId = this.nextRequestId++;
+        this.activeRequest = { id: requestId, callback: options.callback };
+        postToNative({
+            type: "inputRequest",
+            requestId,
+            characterType: options.characterType,
+            allowedCharacters: options.allowedCharacters,
+            maxLength: options.maxLength,
+            value: options.value,
+            inputMode: options.inputMode,
+            // web-bml currently marks HTMLInputElement requests as multiline;
+            // match its existing overlay input behavior and use one line here.
+            multiline: false,
+        });
+    }
+
+    cancel(reason: InputCancelReason): void {
+        const request = this.activeRequest;
+        if (request == null) return;
+        this.activeRequest = null;
+        postToNative({ type: "inputCancelled", requestId: request.id, reason });
+    }
+
+    submit(requestId: number, value: string): void {
+        const request = this.takeRequest(requestId);
+        request?.callback(value);
+    }
+
+    dismiss(requestId: number): void {
+        this.takeRequest(requestId);
+    }
+
+    private takeRequest(requestId: number): { id: number; callback: (value: string) => void } | null {
+        if (this.activeRequest?.id !== requestId) return null;
+        const request = this.activeRequest;
+        this.activeRequest = null;
+        return request;
+    }
+}
+
+const inputApplication = new KiririnInputApplication();
+
 const bmlBrowser = new BMLBrowser({
     containerElement: stage,
     mediaElement,
@@ -63,6 +123,7 @@ const bmlBrowser = new BMLBrowser({
     audioNodeProvider: {
         getAudioDestinationNode: () => audioGain,
     },
+    inputApplication,
     indicator: {
         setUrl() {},
         // 実機でいう画面下の「データ取得中...」表示 - ネイティブ側でバッジ表示する
@@ -199,6 +260,12 @@ window.kiririnBML = {
             }
             case "audioOutput":
                 audioGain.gain.value = message.muted ? 0 : message.volume / 100;
+                break;
+            case "inputResult":
+                inputApplication.submit(message.requestId, message.value);
+                break;
+            case "inputCancel":
+                inputApplication.dismiss(message.requestId);
                 break;
             case "reset":
                 adapter = new MahironAdapter((m) => bmlBrowser.emitMessage(m));

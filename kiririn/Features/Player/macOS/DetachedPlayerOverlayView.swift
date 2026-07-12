@@ -147,6 +147,19 @@ struct DetachedPlayerOverlayView_macOS: View {
                     .opacity(isControllerVisible ? 1 : 0)
                     .allowsHitTesting(isControllerVisible)
 
+                if let session = playerState.dataBroadcastSession,
+                    let request = session.inputRequest
+                {
+                    Color.black.opacity(0.35)
+                        .ignoresSafeArea()
+                    BMLTextInputView(
+                        request: request,
+                        onSubmit: { session.submitInput($0, requestId: request.id) },
+                        onCancel: { session.cancelInput(requestId: request.id) }
+                    )
+                    .id(request.id)
+                }
+
                 seekFeedbackOverlay(scale: overlayScale)
                 volumeFeedbackOverlay(scale: overlayScale)
                 captureFeedbackOverlay(scale: overlayScale)
@@ -211,6 +224,9 @@ struct DetachedPlayerOverlayView_macOS: View {
             }
             .onChange(of: playerState.bmlContentVisible) { _, _ in syncBMLKeyMonitor() }
             .onChange(of: playerState.dataBroadcastSession?.status) { _, _ in syncBMLKeyMonitor() }
+            .onChange(of: playerState.dataBroadcastSession?.inputRequest) { _, _ in
+                syncBMLKeyMonitor()
+            }
             .onDisappear {
                 bmlKeyMonitor?.stop()
                 bmlKeyMonitor = nil
@@ -540,7 +556,8 @@ struct DetachedPlayerOverlayView_macOS: View {
         // the dボタン itself goes through the native button/shortcut
         // (pressBMLDataButton) and works regardless of this monitor.
         guard playerState.bmlContentVisible,
-            let session = playerState.dataBroadcastSession
+            let session = playerState.dataBroadcastSession,
+            session.inputRequest == nil
         else { return }
         let monitor = BMLKeyMonitor(session: session, targetWindow: { playerWindow })
         monitor.start()

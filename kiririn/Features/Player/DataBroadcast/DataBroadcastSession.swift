@@ -17,6 +17,16 @@ import WebKit
 @MainActor
 @Observable
 final class DataBroadcastSession {
+    struct InputRequest: Identifiable, Equatable {
+        let id: Int
+        let characterType: String
+        let allowedCharacters: String?
+        let maxLength: Int
+        let value: String
+        let isSecure: Bool
+        let isMultiline: Bool
+    }
+
     enum Status: Equatable {
         case idle
         case connecting
@@ -32,6 +42,7 @@ final class DataBroadcastSession {
     /// 保留中のあいだtrue (web-bmlのIndicator.setReceivingStatus由来)。
     private(set) var isReceiving = false
     private(set) var usedKeyGroups: Set<String> = []
+    private(set) var inputRequest: InputRequest?
     private var receivingClearTask: Task<Void, Never>?
 
     let webView: WKWebView
@@ -112,6 +123,7 @@ final class DataBroadcastSession {
         receivingClearTask?.cancel()
         receivingClearTask = nil
         isReceiving = false
+        inputRequest = nil
         sseClient.cancelAll()
         // In-flight fetch Tasks capture `self` weakly and are cheap
         // no-ops if this session is deallocated before they complete.
@@ -399,6 +411,20 @@ final class DataBroadcastSession {
         post(#"{"type":"key","action":"\#(down ? "down" : "up")","aribKeyCode":\#(aribKeyCode)}"#)
     }
 
+    func submitInput(_ value: String, requestId: Int) {
+        guard inputRequest?.id == requestId else { return }
+        inputRequest = nil
+        post(
+            #"{"type":"inputResult","requestId":\#(requestId),"value":\#(Self.jsonEscapedString(value))}"#
+        )
+    }
+
+    func cancelInput(requestId: Int) {
+        guard inputRequest?.id == requestId else { return }
+        inputRequest = nil
+        post(#"{"type":"inputCancel","requestId":\#(requestId)}"#)
+    }
+
     private func post(_ json: String) {
         guard isReady else {
             pendingMessages.append(json)
@@ -480,6 +506,31 @@ final class DataBroadcastSession {
             logger.info("BML usedKeyList: \(usedKeyGroups.sorted())")
         case "postalCodeChanged":
             DataBroadcastSettings.setPostalCode(body["postalCode"] as? String)
+        case "inputRequest":
+            guard let requestId = body["requestId"] as? Int,
+                let characterType = body["characterType"] as? String,
+                let maxLength = body["maxLength"] as? Int,
+                let value = body["value"] as? String,
+                let inputMode = body["inputMode"] as? String,
+                let multiline = body["multiline"] as? Bool
+            else {
+                logger.warning("invalid BML input request")
+                return
+            }
+            inputRequest = InputRequest(
+                id: requestId,
+                characterType: characterType,
+                allowedCharacters: body["allowedCharacters"] as? String,
+                maxLength: maxLength,
+                value: value,
+                isSecure: inputMode == "password",
+                isMultiline: multiline
+            )
+        case "inputCancelled":
+            guard let requestId = body["requestId"] as? Int,
+                inputRequest?.id == requestId
+            else { return }
+            inputRequest = nil
         case "error":
             logger.warning("BML error: \(body["message"] as? String ?? "unknown")")
         case "log":
