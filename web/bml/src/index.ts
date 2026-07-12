@@ -124,6 +124,12 @@ const bmlBrowser = new BMLBrowser({
         getAudioDestinationNode: () => audioGain,
     },
     inputApplication,
+    epg: {
+        tune(originalNetworkId, transportStreamId, serviceId) {
+            postToNative({ type: "tune", originalNetworkId, transportStreamId, serviceId });
+            return true;
+        },
+    },
     indicator: {
         setUrl() {},
         // 実機でいう画面下の「データ取得中...」表示 - ネイティブ側でバッジ表示する

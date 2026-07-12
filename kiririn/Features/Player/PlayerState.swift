@@ -1178,12 +1178,49 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
         let session = DataBroadcastSession(
             endpoint: endpoint,
-            postalCode: DataBroadcastSettings.postalCode()
-        ) { [weak self] in
-            self?.makeBMLProgramInfoPayload()
-        }
+            postalCode: DataBroadcastSettings.postalCode(),
+            programInfoProvider: { [weak self] in
+                self?.makeBMLProgramInfoPayload()
+            },
+            tuneHandler: { [weak self] request in
+                self?.handleBMLTuneRequest(request)
+            }
+        )
         session.setAudioOutput(volume: volume, isMuted: isMuted)
         dataBroadcastSession = session
+    }
+
+    private func handleBMLTuneRequest(_ request: BMLTuneRequest) {
+        let expectedPlayableID = currentPlayable?.id
+        Task { @MainActor [weak self] in
+            guard let self, let expectedPlayableID,
+                self.currentPlayable?.id == expectedPlayableID,
+                let manager = self.manager,
+                let service = manager.bmlTuneService(
+                    for: request, preferredServerId: self.currentPlayable?.serverId)
+            else {
+                self?.logger.warning("BML tune target is unavailable")
+                return
+            }
+
+            if let currentService = self.currentPlayable?.displayService,
+                request.matches(currentService)
+            {
+                return
+            }
+
+            guard let provider = manager.liveProvider(for: service.serverId) else { return }
+            let currentProgram = await manager.currentProgram(for: service)
+            guard self.currentPlayable?.id == expectedPlayableID else { return }
+
+            do {
+                let playable = try provider.buildLiveStreamPlayable(
+                    service: service, currentProgram: currentProgram)
+                self.play(playable: playable)
+            } catch {
+                self.logger.warning("BML tune failed: \(error)")
+            }
+        }
     }
 
     private func makeBMLProgramInfoPayload() -> BMLProgramInfoPayload? {

@@ -50,6 +50,7 @@ final class DataBroadcastSession {
     private let endpoint: DataBroadcastEndpoint
     private let postalCode: String?
     private let programInfoProvider: () -> BMLProgramInfoPayload?
+    private let tuneHandler: (BMLTuneRequest) -> Void
     private let sseClient = SSEClient()
     private let logger = Logger(label: "DataBroadcastSession")
 
@@ -89,11 +90,13 @@ final class DataBroadcastSession {
 
     init(
         endpoint: DataBroadcastEndpoint, postalCode: String?,
-        programInfoProvider: @escaping () -> BMLProgramInfoPayload?
+        programInfoProvider: @escaping () -> BMLProgramInfoPayload?,
+        tuneHandler: @escaping (BMLTuneRequest) -> Void
     ) {
         self.endpoint = endpoint
         self.postalCode = DataBroadcastSettings.validatedPostalCode(postalCode)
         self.programInfoProvider = programInfoProvider
+        self.tuneHandler = tuneHandler
         let proxy = LeakAversionBMLMessageHandler()
         self.scriptMessageProxy = proxy
         self.webView = Self.makeWebView(messageHandler: proxy)
@@ -470,6 +473,12 @@ final class DataBroadcastSession {
             logger.info("BML web bundle ready (flushing \(pendingMessages.count) pending messages)")
             isReady = true
             flushPendingMessages()
+        case "tune":
+            guard let request = BMLTuneRequest(bridgeMessage: body) else {
+                logger.warning("invalid BML tune request")
+                return
+            }
+            tuneHandler(request)
         case "videoRect":
             if let x = body["x"] as? Double, let y = body["y"] as? Double,
                 let width = body["width"] as? Double, let height = body["height"] as? Double

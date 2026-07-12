@@ -25,6 +25,43 @@ struct StoreBehaviorTests {
         #expect(DataBroadcastSettings.validatedPostalCode("1234567") == "1234567")
     }
 
+    @Test func bmlTuneRequestRequiresCompleteValidIdentifiers() {
+        let request = BMLTuneRequest(bridgeMessage: [
+            "originalNetworkId": 0x7880,
+            "transportStreamId": 0x7881,
+            "serviceId": 0x0400,
+        ])
+
+        #expect(request?.originalNetworkId == 0x7880)
+        #expect(request?.transportStreamId == 0x7881)
+        #expect(request?.serviceId == 0x0400)
+        #expect(BMLTuneRequest(bridgeMessage: ["originalNetworkId": 1]) == nil)
+        #expect(
+            BMLTuneRequest(bridgeMessage: [
+                "originalNetworkId": 1,
+                "transportStreamId": 2,
+                "serviceId": 65_536,
+            ]) == nil)
+    }
+
+    @Test func bmlTuneRequestMatchesAllThreeServiceIdentifiers() throws {
+        let request = try #require(
+            BMLTuneRequest(bridgeMessage: [
+                "originalNetworkId": 1,
+                "transportStreamId": 2,
+                "serviceId": 3,
+            ]))
+        let exact = makeService(networkId: 1, transportStreamId: 2, serviceId: 3)
+        let missingTransportStream = makeService(
+            networkId: 1, transportStreamId: nil, serviceId: 3)
+        let differentTransportStream = makeService(
+            networkId: 1, transportStreamId: 4, serviceId: 3)
+
+        #expect(request.matches(exact))
+        #expect(!request.matches(missingTransportStream))
+        #expect(!request.matches(differentTransportStream))
+    }
+
     @Test func serverConfigStorePersistsConfigurationsAndEnabledStates() {
         let (defaults, suiteName) = makeIsolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -152,4 +189,20 @@ struct StoreBehaviorTests {
         #expect(favoriteByKey["1-101"]?.displayOrder == 1)
         #expect(favoriteByKey["1-102"]?.displayOrder == 0)
     }
+}
+
+private func makeService(networkId: Int, transportStreamId: Int?, serviceId: Int) -> TVService {
+    TVService(
+        id: "\(networkId)-\(transportStreamId ?? -1)-\(serviceId)",
+        providerIdentifier: nil,
+        serviceId: serviceId,
+        networkId: networkId,
+        transportStreamId: transportStreamId,
+        name: "Test",
+        type: .digitalTelevision,
+        remoteControlKeyId: nil,
+        hasLogoData: false,
+        channel: nil,
+        serverId: "server-1"
+    )
 }

@@ -955,6 +955,20 @@ class ServerManager {
         }
     }
 
+    func bmlTuneService(for request: BMLTuneRequest, preferredServerId: String?) -> TVService? {
+        let matches = servicesByUniqueId.values.filter {
+            request.matches($0)
+                && connectionStates[$0.serverId]?.status == .connected
+                && liveProvider(for: $0.serverId) != nil
+        }
+        if let preferredServerId,
+            let preferred = matches.first(where: { $0.serverId == preferredServerId })
+        {
+            return preferred
+        }
+        return sortServicesByServerPriority(matches).first
+    }
+
     func reconnectionCandidates(for service: TVService) -> [TVService] {
         serviceListCandidateServices(for: service).filter {
             connectionStates[$0.serverId]?.status != .connected

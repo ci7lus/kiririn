@@ -1,5 +1,31 @@
 import Foundation
 
+nonisolated struct BMLTuneRequest: Equatable, Sendable {
+    let originalNetworkId: Int
+    let transportStreamId: Int
+    let serviceId: Int
+
+    init?(bridgeMessage: [String: Any]) {
+        guard let originalNetworkId = bridgeMessage["originalNetworkId"] as? Int,
+            let transportStreamId = bridgeMessage["transportStreamId"] as? Int,
+            let serviceId = bridgeMessage["serviceId"] as? Int,
+            UInt16(exactly: originalNetworkId) != nil,
+            UInt16(exactly: transportStreamId) != nil,
+            UInt16(exactly: serviceId) != nil
+        else { return nil }
+
+        self.originalNetworkId = originalNetworkId
+        self.transportStreamId = transportStreamId
+        self.serviceId = serviceId
+    }
+
+    func matches(_ service: TVService) -> Bool {
+        service.networkId == originalNetworkId
+            && service.transportStreamId == transportStreamId
+            && service.serviceId == serviceId
+    }
+}
+
 // MARK: - Mahiron SSE payload shapes (minimal - only what's needed to schedule
 // module fetches; the JS adapter re-parses the full raw JSON independently,
 // see web/bml/src/mahiron.ts). All Mahiron JSON knowledge that isn't purely

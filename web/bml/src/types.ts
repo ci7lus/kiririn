@@ -24,6 +24,12 @@ export type NativeToWebMessage =
 // JS -> Swift (webkit.messageHandlers.bml.postMessage)
 export type WebToNativeMessage =
     | { type: "ready" }
+    | {
+          type: "tune";
+          originalNetworkId: number;
+          transportStreamId: number;
+          serviceId: number;
+      }
     | { type: "loaded"; width: number; height: number; profile: string }
     | { type: "videoRect"; x: number; y: number; width: number; height: number }
     | { type: "invisible"; value: boolean }
