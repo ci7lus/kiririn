@@ -13,6 +13,11 @@ struct LicenseListView: View {
                 } label: {
                     Text("VLCKit")
                 }
+                NavigationLink {
+                    WebBMLAboutView()
+                } label: {
+                    Text("web-bml")
+                }
                 ForEach(libraries) { library in
                     NavigationLink {
                         LicenseDetailView(library: library)
@@ -24,6 +29,52 @@ struct LicenseListView: View {
         }
         .formStyle(.grouped)
         .navigationTitle("ライセンス")
+        #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
+}
+
+private struct WebBMLAboutView: View {
+    private let sourceCodeURL = URL(string: "https://github.com/otya128/web-bml")!
+    private let license = """
+        MIT License
+
+        Copyright (c) 2022 otya
+
+        Permission is hereby granted, free of charge, to any person obtaining a copy
+        of this software and associated documentation files (the "Software"), to deal
+        in the Software without restriction, including without limitation the rights
+        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+        copies of the Software, and to permit persons to whom the Software is
+        furnished to do so, subject to the following conditions:
+
+        The above copyright notice and this permission notice shall be included in all
+        copies or substantial portions of the Software.
+
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+        SOFTWARE.
+        """
+
+    var body: some View {
+        Form {
+            Section {
+                Link("ソースコード", destination: sourceCodeURL)
+            }
+
+            Section("ライセンス") {
+                Text(license)
+                    .font(.caption)
+                    .textSelection(.enabled)
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("web-bml")
         #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
         #endif
