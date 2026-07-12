@@ -329,6 +329,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
     private var pendingCapturePath: URL?
     private var pendingPluginOverlayTask: Task<CGImage?, Never>?
+    private var pendingDataBroadcastSnapshotTask: Task<DataBroadcastCaptureSnapshot?, Never>?
     private var pendingOverlayManifestIDs: [String] = []
     private let vlcLogForwarder = VLCLogForwarder()
 
@@ -1389,18 +1390,37 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         )
         let snapshotWidth: Int32 = max(1, Int32(Double(snapshotHeight) * displayAspectRatio))
 
+        let dataBroadcastLayout: DataBroadcastCaptureLayout?
+        if bmlContentVisible, let session = dataBroadcastSession {
+            dataBroadcastLayout = session.captureLayout(outputHeight: CGFloat(snapshotHeight))
+            if let dataBroadcastLayout {
+                pendingDataBroadcastSnapshotTask = Task { @MainActor in
+                    await session.takeCaptureSnapshot(layout: dataBroadcastLayout)
+                }
+            } else {
+                pendingDataBroadcastSnapshotTask = nil
+            }
+        } else {
+            dataBroadcastLayout = nil
+            pendingDataBroadcastSnapshotTask = nil
+        }
+
         if CaptureService.shared.shouldCompositePluginOverlay && !visibleOverlayPlugins.isEmpty {
             let playerID = self.id
             pendingOverlayManifestIDs = visibleOverlayPlugins.map(\.manifestID)
-            let snapshotSize = CGSize(
-                width: CGFloat(snapshotWidth),
-                height: CGFloat(snapshotHeight)
-            )
+            let snapshotSize =
+                dataBroadcastLayout?.canvasSize
+                ?? CGSize(width: CGFloat(snapshotWidth), height: CGFloat(snapshotHeight))
+            let pluginFrame = dataBroadcastLayout?.videoFrame
+            let pluginAspectRatio =
+                pluginFrame.map { Double($0.width / $0.height) }
+                ?? displayAspectRatio
             pendingPluginOverlayTask = Task { @MainActor in
                 await PluginOverlaySnapshotRegistry.shared.takeCompositeSnapshot(
                     for: playerID,
                     targetSize: snapshotSize,
-                    targetAspectRatio: displayAspectRatio
+                    targetAspectRatio: pluginAspectRatio,
+                    targetFrame: pluginFrame
                 )
             }
         } else {
@@ -1806,6 +1826,16 @@ extension PlayerState {
                     pendingPluginOverlayTask = nil
                 }
                 let overlayManifestIDs = pendingOverlayManifestIDs
+
+                if let snapshotTask = pendingDataBroadcastSnapshotTask,
+                    let snapshot = await snapshotTask.value
+                {
+                    try? await CaptureService.shared.composeDataBroadcastCapture(
+                        at: path,
+                        snapshot: snapshot
+                    )
+                }
+                pendingDataBroadcastSnapshotTask = nil
 
                 try? await CaptureService.shared.saveCapture(
                     tempURL: path,

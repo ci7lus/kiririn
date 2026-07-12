@@ -20,7 +20,8 @@ final class PluginOverlaySnapshotRegistry {
     func takeCompositeSnapshot(
         for playerID: String,
         targetSize: CGSize,
-        targetAspectRatio: Double
+        targetAspectRatio: Double,
+        targetFrame: CGRect? = nil
     ) async -> CGImage? {
         let webViews =
             registry
@@ -39,7 +40,11 @@ final class PluginOverlaySnapshotRegistry {
             }
         }
         guard !cgImages.isEmpty else { return nil }
-        return composite(images: cgImages, targetSize: targetSize)
+        return composite(
+            images: cgImages,
+            targetSize: targetSize,
+            targetFrame: targetFrame ?? CGRect(origin: .zero, size: targetSize)
+        )
     }
 
     private func takeSnapshotAsCGImage(from webView: WKWebView) async -> CGImage? {
@@ -55,7 +60,7 @@ final class PluginOverlaySnapshotRegistry {
         }
     }
 
-    private func composite(images: [CGImage], targetSize: CGSize) -> CGImage? {
+    private func composite(images: [CGImage], targetSize: CGSize, targetFrame: CGRect) -> CGImage? {
         let width = Int(targetSize.width)
         let height = Int(targetSize.height)
         guard width > 0, height > 0 else { return nil }
@@ -72,7 +77,10 @@ final class PluginOverlaySnapshotRegistry {
             )
         else { return nil }
 
-        let rect = CGRect(x: 0, y: 0, width: width, height: height)
+        let rect = CaptureImageGeometry.bitmapFrame(
+            fromTopLeft: targetFrame,
+            canvasHeight: CGFloat(height)
+        )
         for image in images {
             context.draw(image, in: rect)
         }

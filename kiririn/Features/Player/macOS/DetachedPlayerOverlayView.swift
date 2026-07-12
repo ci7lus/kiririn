@@ -93,6 +93,8 @@ struct DetachedPlayerOverlayView_macOS: View {
                                     playerID: playerState.id
                                 )
                                 .id(plugin.id)
+                                .frame(width: videoFrame.width, height: videoFrame.height)
+                                .position(x: videoFrame.midX, y: videoFrame.midY)
                                 .opacity(playerState.showingPluginOverlay ? 1 : 0)
                                 .allowsHitTesting(false)
                             }

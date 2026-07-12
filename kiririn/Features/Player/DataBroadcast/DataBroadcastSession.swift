@@ -2,6 +2,22 @@ import Foundation
 import Logging
 import WebKit
 
+#if os(macOS)
+    import AppKit
+#elseif os(iOS)
+    import UIKit
+#endif
+
+struct DataBroadcastCaptureLayout {
+    let canvasSize: CGSize
+    let videoFrame: CGRect
+}
+
+struct DataBroadcastCaptureSnapshot {
+    let image: CGImage
+    let layout: DataBroadcastCaptureLayout
+}
+
 /// Owns everything needed to run データ放送 for one live playback session:
 /// the Mahiron SSE subscription, module fetch scheduling, and the WKWebView
 /// hosting the vendored web-bml bundle. Lifecycle is tied to `PlayerState`
@@ -46,6 +62,42 @@ final class DataBroadcastSession {
     private var receivingClearTask: Task<Void, Never>?
 
     let webView: WKWebView
+
+    func captureLayout(outputHeight: CGFloat) -> DataBroadcastCaptureLayout? {
+        let sourceSize = webView.bounds.size
+        guard sourceSize.width > 0, sourceSize.height > 0, outputHeight > 0,
+            let videoRect, videoRect.width > 0, videoRect.height > 0
+        else { return nil }
+
+        let scale = outputHeight / sourceSize.height
+        return DataBroadcastCaptureLayout(
+            canvasSize: CGSize(width: sourceSize.width * scale, height: outputHeight),
+            videoFrame: CGRect(
+                x: videoRect.minX * scale,
+                y: videoRect.minY * scale,
+                width: videoRect.width * scale,
+                height: videoRect.height * scale
+            )
+        )
+    }
+
+    func takeCaptureSnapshot(layout: DataBroadcastCaptureLayout) async
+        -> DataBroadcastCaptureSnapshot?
+    {
+        await withCheckedContinuation { continuation in
+            webView.takeSnapshot(with: nil) { image, _ in
+                #if os(macOS)
+                    let cgImage = image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                #else
+                    let cgImage = image?.cgImage
+                #endif
+                continuation.resume(
+                    returning: cgImage.map {
+                        DataBroadcastCaptureSnapshot(image: $0, layout: layout)
+                    })
+            }
+        }
+    }
 
     private let endpoint: DataBroadcastEndpoint
     private let postalCode: String?

@@ -187,6 +187,66 @@ final class CaptureService: ObservableObject {
         }
     }
 
+    func composeDataBroadcastCapture(
+        at url: URL,
+        snapshot: DataBroadcastCaptureSnapshot
+    ) async throws {
+        try await Task.detached(priority: .userInitiated) {
+            let outputURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString + ".jpg")
+            defer { try? FileManager.default.removeItem(at: outputURL) }
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                let videoImage = CGImageSourceCreateImageAtIndex(source, 0, nil),
+                let composed = Self.composeDataBroadcastImage(
+                    video: videoImage,
+                    dataBroadcast: snapshot.image,
+                    layout: snapshot.layout
+                ),
+                let destination = CGImageDestinationCreateWithURL(
+                    outputURL as CFURL, UTType.jpeg.identifier as CFString, 1, nil)
+            else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+
+            CGImageDestinationAddImage(destination, composed, nil)
+            guard CGImageDestinationFinalize(destination) else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+            _ = try FileManager.default.replaceItemAt(url, withItemAt: outputURL)
+        }.value
+    }
+
+    nonisolated static func composeDataBroadcastImage(
+        video: CGImage,
+        dataBroadcast: CGImage,
+        layout: DataBroadcastCaptureLayout
+    ) -> CGImage? {
+        let width = Int(layout.canvasSize.width.rounded())
+        let height = Int(layout.canvasSize.height.rounded())
+        guard width > 0, height > 0 else { return nil }
+        guard
+            let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        else { return nil }
+
+        context.setFillColor(CGColor(gray: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let videoFrame = CaptureImageGeometry.bitmapFrame(
+            fromTopLeft: layout.videoFrame,
+            canvasHeight: CGFloat(height)
+        )
+        context.draw(video, in: videoFrame)
+        context.draw(dataBroadcast, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
+    }
+
     func saveRecording(
         tempURL: URL, programName: String?, serviceName: String?, caption: String? = nil,
         broadcastTime: Date? = nil
