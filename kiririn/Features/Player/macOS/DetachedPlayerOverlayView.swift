@@ -38,6 +38,7 @@ struct DetachedPlayerOverlayView_macOS: View {
     @State private var isPlaybackErrorAlertPresented = false
     @State private var playbackErrorAlertMessage = ""
     @State private var bmlKeyMonitor: BMLKeyMonitor?
+    @State private var bmlRemotePanel: BMLRemotePanelController?
 
     private var displayDuration: Double { playerState.currentPlayable?.length ?? 0 }
     private var displayProgress: Double {
@@ -222,7 +223,7 @@ struct DetachedPlayerOverlayView_macOS: View {
                 playbackErrorAlertMessage = message
                 isPlaybackErrorAlertPresented = true
             }
-            .onChange(of: playerState.bmlContentVisible) { _, _ in syncBMLKeyMonitor() }
+            .onAppear { syncBMLKeyMonitor() }
             .onChange(of: playerState.dataBroadcastSession?.status) { _, _ in syncBMLKeyMonitor() }
             .onChange(of: playerState.dataBroadcastSession?.inputRequest) { _, _ in
                 syncBMLKeyMonitor()
@@ -230,6 +231,8 @@ struct DetachedPlayerOverlayView_macOS: View {
             .onDisappear {
                 bmlKeyMonitor?.stop()
                 bmlKeyMonitor = nil
+                bmlRemotePanel?.close()
+                bmlRemotePanel = nil
             }
             .alert("再生エラー", isPresented: $isPlaybackErrorAlertPresented) {
                 Button("OK", role: .cancel) {}
@@ -313,7 +316,6 @@ struct DetachedPlayerOverlayView_macOS: View {
                         Image(systemName: "gobackward.10")
                             .frame(width: 20 * scale, height: 20 * scale)
                     }
-                    .keyboardShortcut(.leftArrow, modifiers: [])
                 }
 
                 Button {
@@ -323,7 +325,6 @@ struct DetachedPlayerOverlayView_macOS: View {
                         .font(.system(size: 18 * scale, weight: .bold))
                         .frame(width: 24 * scale, height: 24 * scale)
                 }
-                .keyboardShortcut(.space, modifiers: [])
 
                 if playerState.player?.isSeekable ?? false {
                     Button {
@@ -332,7 +333,6 @@ struct DetachedPlayerOverlayView_macOS: View {
                         Image(systemName: "goforward.10")
                             .frame(width: 20 * scale, height: 20 * scale)
                     }
-                    .keyboardShortcut(.rightArrow, modifiers: [])
                 }
 
                 if playerState.player?.isSeekable ?? false {
@@ -387,7 +387,6 @@ struct DetachedPlayerOverlayView_macOS: View {
                     )
                     .frame(width: 20 * scale, height: 20 * scale)
                 }
-                .keyboardShortcut("m", modifiers: [])
 
                 PlayerSlider(
                     value: Binding(
@@ -422,7 +421,19 @@ struct DetachedPlayerOverlayView_macOS: View {
                     .disabled(!playerState.bmlAvailable)
                     .opacity(playerState.bmlAvailable ? 1 : 0.4)
                     .help("データ放送")
-                    .keyboardShortcut("d", modifiers: [])
+
+                    Button {
+                        toggleBMLRemotePanel()
+                    } label: {
+                        Image(
+                            systemName: bmlRemotePanel != nil
+                                ? "appletvremote.gen4.fill" : "appletvremote.gen4"
+                        )
+                        .frame(width: 20 * scale, height: 20 * scale)
+                    }
+                    .disabled(!playerState.bmlAvailable)
+                    .opacity(playerState.bmlAvailable ? 1 : 0.4)
+                    .help("リモコン")
                 }
 
                 Button {
@@ -434,7 +445,6 @@ struct DetachedPlayerOverlayView_macOS: View {
                     )
                     .frame(width: 20 * scale, height: 20 * scale)
                 }
-                .keyboardShortcut("t", modifiers: [])
 
                 Button {
                     playerState.takeCapture()
@@ -442,7 +452,6 @@ struct DetachedPlayerOverlayView_macOS: View {
                     Image(systemName: "camera.fill")
                         .frame(width: 20 * scale, height: 20 * scale)
                 }
-                .keyboardShortcut("s", modifiers: .command)
 
                 Button {
                     playerState.toggleRecording()
@@ -454,7 +463,6 @@ struct DetachedPlayerOverlayView_macOS: View {
                     .foregroundStyle(playerState.isRecording ? .red : .primary)
                     .frame(width: 20 * scale, height: 20 * scale)
                 }
-                .keyboardShortcut("r", modifiers: .command)
 
                 DetachedPlayerOptionsMenu(
                     playerState: playerState,
@@ -549,14 +557,30 @@ struct DetachedPlayerOverlayView_macOS: View {
         return rect
     }
 
+    private func toggleBMLRemotePanel() {
+        if let panel = bmlRemotePanel {
+            bmlRemotePanel = nil
+            panel.close()
+        } else {
+            let panel = BMLRemotePanelController(playerState: playerState) {
+                bmlRemotePanel = nil
+            }
+            panel.show(near: playerWindow)
+            bmlRemotePanel = panel
+        }
+    }
+
     private func syncBMLKeyMonitor() {
         bmlKeyMonitor?.stop()
         bmlKeyMonitor = nil
-        // Navigation keys route to the content only while it presents itself;
-        // the dボタン itself goes through the native button/shortcut
+        // Stays installed across ARIB visibility changes (the monitor checks
+        // visibility per-event) so that a keyUp arriving after the content
+        // hid itself is still delivered - web-bml wedges its key handling
+        // otherwise. Torn down during text input so typing reaches the field.
+        // The dボタン itself goes through the native button/shortcut
         // (pressBMLDataButton) and works regardless of this monitor.
-        guard playerState.bmlContentVisible,
-            let session = playerState.dataBroadcastSession,
+        guard let session = playerState.dataBroadcastSession,
+            session.status == .active,
             session.inputRequest == nil
         else { return }
         let monitor = BMLKeyMonitor(session: session, targetWindow: { playerWindow })
@@ -578,11 +602,20 @@ struct DetachedPlayerOverlayView_macOS: View {
         isPlayerFullscreen = isFullscreen
     }
 
+    /// 全キーボードショートカットの置き場。コントロールバーのボタンには
+    /// 付けない: controllerOverlayは自動非表示で.opacity(0)になり、SwiftUIは
+    /// opacity 0のビューのkeyboardShortcutを無効化するため、コントロールが
+    /// 隠れている間はキーが未処理になりbeepが鳴ってしまう(この置き場自体が
+    /// 0.001なのも同じ理由)。
     private var keyboardShortcuts: some View {
         Group {
             Button("") { playerState.togglePlayPause() }
                 .buttonStyle(.plain)
                 .keyboardShortcut("p", modifiers: [])
+
+            Button("") { playerState.togglePlayPause() }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.space, modifiers: [])
 
             Button("") { jump(seconds: -10) }
                 .buttonStyle(.plain)
@@ -605,6 +638,31 @@ struct DetachedPlayerOverlayView_macOS: View {
             }
             .buttonStyle(.plain)
             .keyboardShortcut(.downArrow, modifiers: [])
+
+            Button("") {
+                playerState.toggleMute()
+                showVolumeFeedback()
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("m", modifiers: [])
+
+            Button("") {
+                playerState.setSubtitleEnabled(!playerState.isSubtitleEnabled)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("t", modifiers: [])
+
+            Button("") { playerState.pressBMLDataButton() }
+                .buttonStyle(.plain)
+                .keyboardShortcut("d", modifiers: [])
+
+            Button("") { playerState.takeCapture() }
+                .buttonStyle(.plain)
+                .keyboardShortcut("s", modifiers: .command)
+
+            Button("") { playerState.toggleRecording() }
+                .buttonStyle(.plain)
+                .keyboardShortcut("r", modifiers: .command)
         }
         .opacity(0.001)
         .allowsHitTesting(false)
