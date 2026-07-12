@@ -202,7 +202,9 @@ struct PlayerOverlayView_iOS: View {
 
                 floatingOrientationLockButton(geo: geo)
 
-                if isLandscapeBMLRemoteVisible && verticalSizeClass == .compact {
+                if isLandscapeBMLRemoteVisible
+                    && expandedModeUsesFullscreenLayout(in: geo.size)
+                {
                     landscapeBMLRemoteOverlay(geo: geo)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                         .zIndex(20)
