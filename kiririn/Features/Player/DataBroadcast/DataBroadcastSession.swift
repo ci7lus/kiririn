@@ -57,9 +57,13 @@ final class DataBroadcastSession {
     /// 実機の「データ取得中...」に相当。コンテンツが待っているモジュール取得が
     /// 保留中のあいだtrue (web-bmlのIndicator.setReceivingStatus由来)。
     private(set) var isReceiving = false
+    /// 実機の「通信中...」に相当。通信コンテンツのHTTP GET/POSTが進行中の
+    /// あいだtrue (web-bmlのIndicator.setNetworkingGet/PostStatus由来)。
+    private(set) var isNetworking = false
     private(set) var usedKeyGroups: Set<String> = []
     private(set) var inputRequest: InputRequest?
     private var receivingClearTask: Task<Void, Never>?
+    private var networkingClearTask: Task<Void, Never>?
 
     let webView: WKWebView
 
@@ -151,7 +155,9 @@ final class DataBroadcastSession {
         self.tuneHandler = tuneHandler
         let proxy = LeakAversionBMLMessageHandler()
         self.scriptMessageProxy = proxy
-        self.webView = Self.makeWebView(messageHandler: proxy)
+        self.webView = Self.makeWebView(
+            messageHandler: proxy,
+            allowsInternetAccess: DataBroadcastSettings.internetAccessEnabled())
         proxy.session = self
         loadContent()
     }
@@ -178,6 +184,9 @@ final class DataBroadcastSession {
         receivingClearTask?.cancel()
         receivingClearTask = nil
         isReceiving = false
+        networkingClearTask?.cancel()
+        networkingClearTask = nil
+        isNetworking = false
         inputRequest = nil
         sseClient.cancelAll()
         // In-flight fetch Tasks capture `self` weakly and are cheap
@@ -562,6 +571,20 @@ final class DataBroadcastSession {
                     self?.isReceiving = false
                 }
             }
+        case "networking":
+            networkingClearTask?.cancel()
+            networkingClearTask = nil
+            if (body["value"] as? Bool) ?? false {
+                isNetworking = true
+            } else {
+                // receivingと同様、連続するリクエストでバッジがちらつかない
+                // よう少し保持してから消す。
+                networkingClearTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard !Task.isCancelled else { return }
+                    self?.isNetworking = false
+                }
+            }
         case "usedKeyList":
             usedKeyGroups = Set((body["groups"] as? [String]) ?? [])
             logger.info("BML usedKeyList: \(usedKeyGroups.sorted())")
@@ -611,11 +634,23 @@ final class DataBroadcastSession {
     // message handler on `webView.configuration` afterwards can silently do
     // nothing. Build the content controller into the configuration BEFORE
     // creating the web view (same order as PluginOverlayView).
-    private static func makeWebView(messageHandler: WKScriptMessageHandler) -> WKWebView {
+    private static func makeWebView(
+        messageHandler: WKScriptMessageHandler, allowsInternetAccess: Bool
+    ) -> WKWebView {
         let config = WKWebViewConfiguration()
-        config.setURLSchemeHandler(BMLURLSchemeHandler(), forURLScheme: BMLURLSchemeHandler.scheme)
+        config.setURLSchemeHandler(
+            BMLURLSchemeHandler(allowsInternetAccess: allowsInternetAccess),
+            forURLScheme: BMLURLSchemeHandler.scheme)
         let contentController = WKUserContentController()
         contentController.add(messageHandler, name: "bml")
+        // BMLBrowserはバンドルスクリプト評価時(initメッセージより前)に生成
+        // されるので、生成時点で確定していなければならない設定はここで
+        // atDocumentStartに注入する - web/bml/src/index.tsが参照。
+        contentController.addUserScript(
+            WKUserScript(
+                source: "window.kiririnBMLConfig = { internetAccess: \(allowsInternetAccess) };",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true))
         config.userContentController = contentController
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.isInspectable = true

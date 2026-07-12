@@ -3,6 +3,13 @@ import Foundation
 enum DataBroadcastSettings {
     static let enabledKey = "dataBroadcast.enabled"
     static let postalCodeKey = "dataBroadcast.receiverInfo.postalCode"
+    static let internetAccessKey = "dataBroadcast.internetAccess"
+
+    /// 通信コンテンツ(データ放送のインターネット接続機能)を許可するか。
+    /// コンテンツが放送局などの外部サーバーへHTTP接続するためデフォルトOFF。
+    static func internetAccessEnabled(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: internetAccessKey)
+    }
 
     static func postalCode(in defaults: UserDefaults = .standard) -> String? {
         validatedPostalCode(defaults.string(forKey: postalCodeKey))

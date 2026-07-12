@@ -7,6 +7,7 @@ import {
 } from "../../web-bml/client/bml_browser";
 import { AribKeyCode } from "../../web-bml/client/content";
 import { postToNative, log } from "./bridge";
+import { createIP } from "./ip";
 import { MahironAdapter } from "./mahiron";
 import { NativeToWebMessage } from "./types";
 
@@ -56,6 +57,19 @@ const squareGothic: BMLBrowserFontFace = { source: `url(${squareGothicRegularUrl
 // web-bml re-invokes setReceivingStatus with the same value on every pending
 // fetch-queue change; dedupe so the bridge only sees transitions.
 let lastReceivingStatus: boolean | null = null;
+
+// 実機でいう「通信中...」表示。GET(通信コンテンツ取得)とPOST(電文送信)を
+// まとめてひとつのバッジとしてネイティブへ通知する。
+let networkingGet = false;
+let networkingPost = false;
+let lastNetworkingStatus: boolean | null = null;
+function postNetworkingStatus(): void {
+    const networking = networkingGet || networkingPost;
+    if (networking !== lastNetworkingStatus) {
+        lastNetworkingStatus = networking;
+        postToNative({ type: "networking", value: networking });
+    }
+}
 
 const audioContext = new AudioContext();
 const audioGain = audioContext.createGain();
@@ -130,6 +144,10 @@ const bmlBrowser = new BMLBrowser({
             return true;
         },
     },
+    // 設定でインターネット接続が無効のときはipごと渡さない: web-bmlは
+    // ip.get等のnullチェックで通信コンテンツ対応/非対応を判定するので、
+    // 未対応の受信機として正しく振る舞う(getBrowserSupportも0を返す)。
+    ip: window.kiririnBMLConfig?.internetAccess === true ? createIP() : undefined,
     indicator: {
         setUrl() {},
         // 実機でいう画面下の「データ取得中...」表示 - ネイティブ側でバッジ表示する
@@ -139,8 +157,14 @@ const bmlBrowser = new BMLBrowser({
                 postToNative({ type: "receiving", value: receiving });
             }
         },
-        setNetworkingGetStatus() {},
-        setNetworkingPostStatus() {},
+        setNetworkingGetStatus(get: boolean) {
+            networkingGet = get;
+            postNetworkingStatus();
+        },
+        setNetworkingPostStatus(post: boolean) {
+            networkingPost = post;
+            postNetworkingStatus();
+        },
         setEventName() {},
     },
     showErrorMessage: (title, message, code) => {

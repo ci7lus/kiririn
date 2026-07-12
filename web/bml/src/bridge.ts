@@ -10,6 +10,11 @@ declare global {
         kiririnBML?: {
             onNativeMessage: (message: unknown) => void;
         };
+        // ネイティブ側がWKUserScript(atDocumentStart)で注入する設定。
+        // BMLBrowser生成時に確定している必要がある値だけをここで受け取る。
+        kiririnBMLConfig?: {
+            internetAccess?: boolean;
+        };
     }
 }
 

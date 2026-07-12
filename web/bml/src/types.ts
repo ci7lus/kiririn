@@ -34,6 +34,7 @@ export type WebToNativeMessage =
     | { type: "videoRect"; x: number; y: number; width: number; height: number }
     | { type: "invisible"; value: boolean }
     | { type: "receiving"; value: boolean }
+    | { type: "networking"; value: boolean }
     | { type: "usedKeyList"; groups: string[] }
     | { type: "postalCodeChanged"; postalCode: string | null }
     | {

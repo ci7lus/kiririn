@@ -2,6 +2,8 @@ import SwiftUI
 
 struct DataBroadcastSettingsView: View {
     @AppStorage(DataBroadcastSettings.enabledKey) private var isDataBroadcastEnabled = false
+    @AppStorage(DataBroadcastSettings.internetAccessKey) private var isInternetAccessEnabled =
+        false
     @State private var postalCode = ""
 
     private var isPostalCodeValid: Bool {
@@ -15,6 +17,15 @@ struct DataBroadcastSettingsView: View {
             } footer: {
                 Text(
                     "実験的機能です。Mirakurun互換サーバーのライブ視聴でのみ動作し、対応していないサーバーでは何も起こりません。"
+                )
+            }
+            Section {
+                Toggle("インターネット接続を許可", isOn: $isInternetAccessEnabled)
+            } header: {
+                Text("通信")
+            } footer: {
+                Text(
+                    "データ放送コンテンツが放送局などのサーバーと通信できるようになります（通信コンテンツ）。視聴中の番組に関する情報が外部へ送信されることがあります。変更は次の選局から反映されます。"
                 )
             }
             Section {
