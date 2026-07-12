@@ -1176,12 +1176,14 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             let endpoint = provider.dataBroadcastEndpoint(for: service)
         else { return }
 
-        dataBroadcastSession = DataBroadcastSession(
+        let session = DataBroadcastSession(
             endpoint: endpoint,
             postalCode: DataBroadcastSettings.postalCode()
         ) { [weak self] in
             self?.makeBMLProgramInfoPayload()
         }
+        session.setAudioOutput(volume: volume, isMuted: isMuted)
+        dataBroadcastSession = session
     }
 
     private func makeBMLProgramInfoPayload() -> BMLProgramInfoPayload? {
@@ -1470,6 +1472,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     private func applyAudioOutput() {
         player?.audio?.volume = Int32(volume.rounded())
         player?.audio?.isMuted = isMuted
+        dataBroadcastSession?.setAudioOutput(volume: volume, isMuted: isMuted)
     }
 
     private func applyAudioStereoMode() {

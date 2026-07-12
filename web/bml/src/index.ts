@@ -51,11 +51,18 @@ const squareGothic: BMLBrowserFontFace = { source: `url(${squareGothicRegularUrl
 // fetch-queue change; dedupe so the bridge only sees transitions.
 let lastReceivingStatus: boolean | null = null;
 
+const audioContext = new AudioContext();
+const audioGain = audioContext.createGain();
+audioGain.connect(audioContext.destination);
+
 const bmlBrowser = new BMLBrowser({
     containerElement: stage,
     mediaElement,
     fonts: { roundGothic, boldRoundGothic, squareGothic },
     videoPlaneModeEnabled: true,
+    audioNodeProvider: {
+        getAudioDestinationNode: () => audioGain,
+    },
     indicator: {
         setUrl() {},
         // 実機でいう画面下の「データ取得中...」表示 - ネイティブ側でバッジ表示する
@@ -190,6 +197,9 @@ window.kiririnBML = {
                 }
                 break;
             }
+            case "audioOutput":
+                audioGain.gain.value = message.muted ? 0 : message.volume / 100;
+                break;
             case "reset":
                 adapter = new MahironAdapter((m) => bmlBrowser.emitMessage(m));
                 break;

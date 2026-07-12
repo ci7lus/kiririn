@@ -15,6 +15,7 @@ export type NativeToWebMessage =
       }
     | { type: "programInfo"; programInfo: ProgramInfoMessage }
     | { type: "key"; action: "down" | "up"; aribKeyCode: number }
+    | { type: "audioOutput"; volume: number; muted: boolean }
     | { type: "reset" };
 
 // JS -> Swift (webkit.messageHandlers.bml.postMessage)

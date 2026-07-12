@@ -134,6 +134,12 @@ final class DataBroadcastSession {
         sendProgramInfo(asInit: false)
     }
 
+    func setAudioOutput(volume: Float, isMuted: Bool) {
+        post(
+            #"{"type":"audioOutput","volume":\#(volume),"muted":\#(isMuted)}"#
+        )
+    }
+
     // MARK: - SSE
 
     private func connectSSE() {
