@@ -4,6 +4,15 @@ import Testing
 
 @testable import kiririn
 
+/// 各テストが他のテストや実アプリのUserDefaultsを汚さないよう、テストごとに
+/// 使い捨てのsuiteを払い出す(d26e7b7で消失していたヘルパーの復元)。
+private func makeIsolatedDefaults() -> (UserDefaults, String) {
+    let suiteName = "kiririn.tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defaults.removePersistentDomain(forName: suiteName)
+    return (defaults, suiteName)
+}
+
 struct StoreBehaviorTests {
 
     @Test func dataBroadcastSettingsPersistsValidPostalCode() {
