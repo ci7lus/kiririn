@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import Combine
 import KppxKit
@@ -1331,3 +1332,4 @@ private final class DetachedPlayerOverlayPreviewVLCMediaPlayer: VLCMediaPlayer {
 
     override var isSeekable: Bool { previewIsSeekable }
 }
+#endif

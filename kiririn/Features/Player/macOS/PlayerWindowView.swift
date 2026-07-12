@@ -1,3 +1,4 @@
+#if os(macOS)
 import ARIBStandardKit
 import AppKit
 import Logging
@@ -262,3 +263,4 @@ struct PlayerWindowView_macOS: View {
         )
     }
 }
+#endif

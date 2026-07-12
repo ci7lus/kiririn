@@ -53,7 +53,11 @@ enum DataBroadcastSettings {
         defaults.set(storage, forKey: webStorageKey)
         // 郵便番号は設定UIにも表示するので、NVRAM側の変更を設定値へ同期する。
         if key == postalCodeStorageKey {
-            setPostalCode(value.flatMap(postalCode(fromStorageValue:)), in: defaults)
+            if let value {
+                setPostalCode(postalCode(fromStorageValue: value), in: defaults)
+            } else {
+                setPostalCode(nil, in: defaults)
+            }
         }
     }
 
