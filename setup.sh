@@ -34,3 +34,16 @@ curl -sL "https://raw.githubusercontent.com/neneka/vlckit/refs/tags/$REVISION/sh
 
 # Rounded M+ 1m WadaLab mix ARIB
 curl -sL "https://github.com/vivid-lapin/rounded-mplus-wadalab-mix/releases/download/202606272034/rounded-mplus-1m-wadalab-comp-arib.ttf" -o "kiririn/rounded-mplus-1m-wadalab-comp-arib.ttf"
+
+# BML (データ放送) Webバンドル
+echo "Building BML web bundle..."
+git submodule update --init web/web-bml
+if ! command -v npm >/dev/null 2>&1; then
+  echo "npm is required to build the BML web bundle (see web/bml)." >&2
+  exit 1
+fi
+(cd web/bml && npm ci && npm run build)
+BML_DEST="kiririn/Features/Player/DataBroadcast/Web/dist"
+rm -rf "$BML_DEST"
+mkdir -p "$(dirname "$BML_DEST")"
+cp -R web/bml/dist "$BML_DEST"

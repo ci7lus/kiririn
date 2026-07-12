@@ -69,3 +69,8 @@ fastlane/test_output
 .sentryclirc
 
 /kiririn/rounded-mplus-1m-wadalab-comp-arib.ttf
+
+# BML web bundle (built by setup.sh, see web/bml)
+/web/bml/node_modules/
+/web/bml/dist/
+/kiririn/Features/Player/DataBroadcast/Web/dist/

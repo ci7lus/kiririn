@@ -59,6 +59,28 @@ final class MirakurunProvider: LiveServerProvider {
     }
 }
 
+extension MirakurunProvider: DataBroadcastProviding {
+    // Only Mahiron (a Mirakurun-compatible server) implements these endpoints;
+    // against plain Mirakurun the events request 404s and the session reports
+    // `.unsupported`. There's no capability probe, so we always hand back an
+    // endpoint here and let the SSE connection attempt itself be the check.
+    func dataBroadcastEndpoint(for service: TVService) -> DataBroadcastEndpoint? {
+        guard let providerIdentifier = service.providerIdentifier,
+            let eventsURL = client.buildStreamURL(
+                path: "api/services/\(providerIdentifier)/data-broadcast/events"),
+            let moduleBaseURL = client.buildStreamURL(
+                path: "api/services/\(providerIdentifier)/data-broadcast/modules")
+        else {
+            return nil
+        }
+        return DataBroadcastEndpoint(
+            eventsURL: eventsURL,
+            headers: client.defaultHeaders,
+            moduleBaseURL: moduleBaseURL
+        )
+    }
+}
+
 private nonisolated struct MirakurunStatus: Codable, Sendable {
     let time: Int64?
     let version: String?

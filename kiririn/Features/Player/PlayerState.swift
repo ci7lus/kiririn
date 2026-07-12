@@ -236,6 +236,25 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     var selectedAudioMixMode: PlayerAudioMixMode = .unset
     var showingPluginOverlay = true
     var plugins: [PluginDefinition] = []
+    var dataBroadcastSession: DataBroadcastSession?
+    var bmlAvailable: Bool {
+        guard let session = dataBroadcastSession else { return false }
+        switch session.status {
+        case .unsupported, .failed:
+            return false
+        default:
+            return true
+        }
+    }
+    /// Whether the BML content is currently presenting itself. Visibility is
+    /// content-driven (ARIB receivers auto-start data broadcasting in an
+    /// invisible state; the content shows itself upon receiving the
+    /// DataButton key), so this mirrors web-bml's `invisible` state rather
+    /// than any native toggle.
+    var bmlContentVisible: Bool {
+        guard let session = dataBroadcastSession else { return false }
+        return session.status == .active && !session.isInvisible
+    }
     var isRecording = false
     var caption: String = ""
     var captionHistory: [CaptionHistoryItem] = []
@@ -356,6 +375,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         currentPlayable = playableForPlayback
         captionHistory = []
         nextProgram = nil
+        setupDataBroadcastSessionIfNeeded()
         startPeriodicRefresh()
         startProgramBootstrapRefreshLoop()
         Task { @MainActor [weak self] in
@@ -1011,6 +1031,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             let current = await manager.currentProgram(for: resolvedService)
             guard currentPlayable?.id == expectedPlayableID else { return }
             currentPlayable?.program = current
+            dataBroadcastSession?.refreshProgramInfo()
 
             let next = await manager.nextProgram(for: resolvedService, currentProgram: current)
             guard currentPlayable?.id == expectedPlayableID else { return }
@@ -1091,6 +1112,8 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
     func cleanup(releasePlayer: Bool = false, releaseSecurityScope: Bool = false) {
         savePlaybackPositionIfNeeded(force: true)
+        dataBroadcastSession?.stop()
+        dataBroadcastSession = nil
         restoreAfterPlayingTask?.cancel()
         restoreAfterPlayingTask = nil
         didObservePlayingForRestore = false
@@ -1134,6 +1157,55 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         if releaseSecurityScope {
             releaseSecurityScopedPlaybackURL()
         }
+    }
+
+    /// データ放送(BML)対応。実験的機能につき既定はオフ - see
+    /// kiririn/Features/Settings/DataBroadcastSettingsView.swift for the
+    /// toggle backing this key.
+    private static let dataBroadcastEnabledDefaultsKey = "dataBroadcast.enabled"
+
+    private func setupDataBroadcastSessionIfNeeded() {
+        dataBroadcastSession?.stop()
+        dataBroadcastSession = nil
+
+        guard UserDefaults.standard.bool(forKey: Self.dataBroadcastEnabledDefaultsKey) else {
+            return
+        }
+        guard case .liveService = currentPlayable?.source else { return }
+        guard let serverId = currentPlayable?.serverId,
+            let provider = manager?.providers[serverId] as? (any DataBroadcastProviding),
+            let service = currentPlayable?.displayService,
+            let endpoint = provider.dataBroadcastEndpoint(for: service)
+        else { return }
+
+        dataBroadcastSession = DataBroadcastSession(endpoint: endpoint) { [weak self] in
+            self?.makeBMLProgramInfoPayload()
+        }
+    }
+
+    private func makeBMLProgramInfoPayload() -> BMLProgramInfoPayload? {
+        guard let service = currentPlayable?.displayService else { return nil }
+        let program = currentPlayable?.displayProgram
+        return BMLProgramInfoPayload(
+            originalNetworkId: service.networkId,
+            transportStreamId: service.transportStreamId,
+            serviceId: service.serviceId,
+            eventId: program?.eventId,
+            eventName: program?.name,
+            startTimeUnixMillis: program.map { $0.startAt.timeIntervalSince1970 * 1000 },
+            durationSeconds: program?.duration,
+            indefiniteDuration: false,
+            networkId: service.networkId
+        )
+    }
+
+    /// Forwards the dボタン to the BML content as an ARIB DataButton key
+    /// press. The content itself toggles between invisible/visible in
+    /// response (DataButtonPressed event), exactly like a hardware receiver.
+    func pressBMLDataButton() {
+        guard let session = dataBroadcastSession, session.status == .active else { return }
+        session.sendKey(down: true, aribKeyCode: 20)  // AribKeyCode.DataButton
+        session.sendKey(down: false, aribKeyCode: 20)
     }
 
     private func savePlaybackPositionIfNeeded(force: Bool = false) {
@@ -1503,6 +1575,10 @@ extension PlayerState {
                 syncAudioModesFromVLC()
                 applyAudioOutput()
                 requestPlaybackRestoreIfPossible(trigger: "state.playing")
+                // SSE connects only after VLC actually starts pulling the
+                // stream, so it joins the tuner session `play()` created
+                // instead of racing it into creating a second one.
+                dataBroadcastSession?.startIfIdle()
             case .error:
                 setPlaybackLoadingIfChanged(false)
                 setPlayingIfChanged(false)

@@ -37,6 +37,7 @@ struct DetachedPlayerOverlayView_macOS: View {
     @State private var captureFeedbackHideTask: DispatchWorkItem?
     @State private var isPlaybackErrorAlertPresented = false
     @State private var playbackErrorAlertMessage = ""
+    @State private var bmlKeyMonitor: BMLKeyMonitor?
 
     private var displayDuration: Double { playerState.currentPlayable?.length ?? 0 }
     private var displayProgress: Double {
@@ -55,6 +56,7 @@ struct DetachedPlayerOverlayView_macOS: View {
                 Color.black
 
                 GeometryReader { videoGeo in
+                    let videoFrame = bmlVideoFrame(in: videoGeo.size)
                     ZStack {
                         if let player = playerState.player {
                             PlayerLayerView(
@@ -72,6 +74,8 @@ struct DetachedPlayerOverlayView_macOS: View {
                                     }
                                 }
                             )
+                            .frame(width: videoFrame.width, height: videoFrame.height)
+                            .position(x: videoFrame.midX, y: videoFrame.midY)
                         } else {
                             Color.black
                         }
@@ -92,6 +96,17 @@ struct DetachedPlayerOverlayView_macOS: View {
                                 .allowsHitTesting(false)
                             }
                         }
+
+                        if let session = playerState.dataBroadcastSession {
+                            // Visibility is content-driven (ARIB invisible state):
+                            // the content shows itself on DataButton. Mouse input
+                            // never reaches this layer anyway - WindowDragSurface
+                            // sits above it in the ZStack; BML is keyboard-only.
+                            BMLOverlayView_macOS(session: session)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .opacity(playerState.bmlContentVisible ? 1 : 0)
+                                .allowsHitTesting(false)
+                        }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
@@ -100,6 +115,8 @@ struct DetachedPlayerOverlayView_macOS: View {
                 if playerState.showsPlaybackLoadingIndicator {
                     playbackLoadingIndicator
                 }
+
+                bmlReceivingOverlay(scale: overlayScale)
 
                 Color.clear
                     .contentShape(Rectangle())
@@ -191,6 +208,12 @@ struct DetachedPlayerOverlayView_macOS: View {
                 guard !message.isEmpty else { return }
                 playbackErrorAlertMessage = message
                 isPlaybackErrorAlertPresented = true
+            }
+            .onChange(of: playerState.bmlContentVisible) { _, _ in syncBMLKeyMonitor() }
+            .onChange(of: playerState.dataBroadcastSession?.status) { _, _ in syncBMLKeyMonitor() }
+            .onDisappear {
+                bmlKeyMonitor?.stop()
+                bmlKeyMonitor = nil
             }
             .alert("再生エラー", isPresented: $isPlaybackErrorAlertPresented) {
                 Button("OK", role: .cancel) {}
@@ -373,6 +396,19 @@ struct DetachedPlayerOverlayView_macOS: View {
                     }
                 }
 
+                if playerState.dataBroadcastSession != nil {
+                    Button {
+                        playerState.pressBMLDataButton()
+                    } label: {
+                        Image(systemName: "d.circle\(playerState.bmlContentVisible ? ".fill" : "")")
+                            .frame(width: 20 * scale, height: 20 * scale)
+                    }
+                    .disabled(!playerState.bmlAvailable)
+                    .opacity(playerState.bmlAvailable ? 1 : 0.4)
+                    .help("データ放送")
+                    .keyboardShortcut("d", modifiers: [])
+                }
+
                 Button {
                     playerState.setSubtitleEnabled(!playerState.isSubtitleEnabled)
                 } label: {
@@ -446,6 +482,69 @@ struct DetachedPlayerOverlayView_macOS: View {
             .allowsHitTesting(false)
             .accessibilityLabel("動画を読み込み中")
             .transition(.opacity)
+    }
+
+    /// 実機の画面下に出る「データ取得中...」表示。BMLコンテンツが表示中で、
+    /// かつ待ちのモジュール取得があるあいだだけ、受信機風に右下へ出す。
+    @ViewBuilder
+    private func bmlReceivingOverlay(scale: CGFloat) -> some View {
+        let isReceiving =
+            playerState.bmlContentVisible
+            && playerState.dataBroadcastSession?.isReceiving == true
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                if isReceiving {
+                    Text("データ取得中...")
+                        .font(.system(size: 21 * scale, weight: .medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 15 * scale)
+                        .padding(.vertical, 8 * scale)
+                        .background(
+                            RoundedRectangle(cornerRadius: 3 * scale)
+                                .fill(.black.opacity(0.7))
+                        )
+                        .padding(.trailing, 24 * scale)
+                        .padding(.bottom, 24 * scale)
+                        .transition(.opacity)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeInOut(duration: 0.15), value: isReceiving)
+        .allowsHitTesting(false)
+    }
+
+    /// The rect (in `videoGeo`-local points) the video should occupy. BML's
+    /// `videochanged` rect is reported in the same point space as the BML
+    /// WKWebView, which is itself sized to fill `videoGeo` 1:1 - so it's
+    /// usable here without any extra scaling. Falls back to full-bleed when
+    /// there's no active plane rect (overlay hidden, `invisible` state, or
+    /// no session).
+    private func bmlVideoFrame(in size: CGSize) -> CGRect {
+        let fullFrame = CGRect(origin: .zero, size: size)
+        guard playerState.bmlContentVisible,
+            let session = playerState.dataBroadcastSession,
+            let rect = session.videoRect
+        else {
+            return fullFrame
+        }
+        return rect
+    }
+
+    private func syncBMLKeyMonitor() {
+        bmlKeyMonitor?.stop()
+        bmlKeyMonitor = nil
+        // Navigation keys route to the content only while it presents itself;
+        // the dボタン itself goes through the native button/shortcut
+        // (pressBMLDataButton) and works regardless of this monitor.
+        guard playerState.bmlContentVisible,
+            let session = playerState.dataBroadcastSession
+        else { return }
+        let monitor = BMLKeyMonitor(session: session, targetWindow: { playerWindow })
+        monitor.start()
+        bmlKeyMonitor = monitor
     }
 
     private func controlScale(for containerSize: CGSize) -> CGFloat {
