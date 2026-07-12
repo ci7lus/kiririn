@@ -37,7 +37,10 @@ curl -sL "https://github.com/vivid-lapin/rounded-mplus-wadalab-mix/releases/down
 
 # BML (データ放送) Webバンドル
 echo "Building BML web bundle..."
-git submodule update --init web/web-bml
+git submodule update --init --force web/web-bml
+for patch in web/patches/*.patch; do
+  git -C web/web-bml apply "../../$patch"
+done
 if ! command -v npm >/dev/null 2>&1; then
   echo "npm is required to build the BML web bundle (see web/bml)." >&2
   exit 1
