@@ -24,29 +24,23 @@ const stage = document.getElementById("stage")!;
 const mediaElement = document.createElement("div");
 const postalCodeStorageKey = "nvram_prefix=receiverinfo%2Fzipcode";
 
-function storedPostalCode(value: string | null): string | null {
-    if (value == null) return null;
-    try {
-        const postalCode = window.atob(value);
-        return /^[0-9]{7}$/.test(postalCode) ? postalCode : null;
-    } catch {
-        return null;
-    }
-}
-
+// kiririn-bmlスキームのオリジンではWebKitがlocalStorageをディスクへ永続化
+// しないので、web-bmlの書き込み(NVRAM・放送局DB)を全部ネイティブへミラー
+// する。起動時はネイティブがWKUserScript(atDocumentStart、このバンドルより
+// 先に実行される=ここのフックを経由しない)でミラー内容をシードし直す。
 const originalSetItem = Storage.prototype.setItem;
 Storage.prototype.setItem = function (key: string, value: string): void {
     originalSetItem.call(this, key, value);
-    if (this === localStorage && key === postalCodeStorageKey) {
-        postToNative({ type: "postalCodeChanged", postalCode: storedPostalCode(value) });
+    if (this === localStorage) {
+        postToNative({ type: "storageChanged", key, value });
     }
 };
 
 const originalRemoveItem = Storage.prototype.removeItem;
 Storage.prototype.removeItem = function (key: string): void {
     originalRemoveItem.call(this, key);
-    if (this === localStorage && key === postalCodeStorageKey) {
-        postToNative({ type: "postalCodeChanged", postalCode: null });
+    if (this === localStorage) {
+        postToNative({ type: "storageChanged", key, value: null });
     }
 };
 

@@ -36,7 +36,7 @@ export type WebToNativeMessage =
     | { type: "receiving"; value: boolean }
     | { type: "networking"; value: boolean }
     | { type: "usedKeyList"; groups: string[] }
-    | { type: "postalCodeChanged"; postalCode: string | null }
+    | { type: "storageChanged"; key: string; value: string | null }
     | {
           type: "inputRequest";
           requestId: number;

@@ -34,6 +34,56 @@ struct StoreBehaviorTests {
         #expect(DataBroadcastSettings.validatedPostalCode("1234567") == "1234567")
     }
 
+    @Test func dataBroadcastWebStorageMirrorsSetAndRemove() {
+        let (defaults, suiteName) = makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        DataBroadcastSettings.setWebStorageItem(
+            key: "nvram_local_web=1.2.3", value: "QUJD", in: defaults)
+        DataBroadcastSettings.setWebStorageItem(
+            key: "broadcasters_7", value: #"{"a":1}"#, in: defaults)
+        #expect(
+            DataBroadcastSettings.webStorage(in: defaults) == [
+                "nvram_local_web=1.2.3": "QUJD",
+                "broadcasters_7": #"{"a":1}"#,
+            ])
+
+        DataBroadcastSettings.setWebStorageItem(
+            key: "nvram_local_web=1.2.3", value: nil, in: defaults)
+        #expect(
+            DataBroadcastSettings.webStorage(in: defaults) == ["broadcasters_7": #"{"a":1}"#])
+    }
+
+    @Test func dataBroadcastWebStorageSyncsPostalCodeSetting() {
+        let (defaults, suiteName) = makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let zipcodeKey = DataBroadcastSettings.postalCodeStorageKey
+
+        // "1500002"のbase64
+        DataBroadcastSettings.setWebStorageItem(
+            key: zipcodeKey, value: "MTUwMDAwMg==", in: defaults)
+        #expect(DataBroadcastSettings.postalCode(in: defaults) == "1500002")
+
+        // 復号できない・7桁数字でない値は郵便番号なし扱い
+        DataBroadcastSettings.setWebStorageItem(key: zipcodeKey, value: "!!!", in: defaults)
+        #expect(DataBroadcastSettings.postalCode(in: defaults) == nil)
+
+        DataBroadcastSettings.setWebStorageItem(
+            key: zipcodeKey, value: "MTUwMDAwMg==", in: defaults)
+        DataBroadcastSettings.setWebStorageItem(key: zipcodeKey, value: nil, in: defaults)
+        #expect(DataBroadcastSettings.postalCode(in: defaults) == nil)
+    }
+
+    @Test @MainActor func dataBroadcastStorageSeedScriptEmbedsSnapshotAsJSON() {
+        let script = DataBroadcastSession.storageSeedScript(snapshot: [
+            #"key"with"quotes"#: "line1\nline2\\end"
+        ])
+
+        #expect(script.contains("localStorage.clear()"))
+        #expect(script.contains(#""key\"with\"quotes""#))
+        #expect(script.contains(#""line1\nline2\\end""#))
+    }
+
     @Test func bmlTuneRequestRequiresCompleteValidIdentifiers() {
         let request = BMLTuneRequest(bridgeMessage: [
             "originalNetworkId": 0x7880,

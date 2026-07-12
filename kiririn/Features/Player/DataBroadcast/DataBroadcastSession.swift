@@ -588,8 +588,12 @@ final class DataBroadcastSession {
         case "usedKeyList":
             usedKeyGroups = Set((body["groups"] as? [String]) ?? [])
             logger.info("BML usedKeyList: \(usedKeyGroups.sorted())")
-        case "postalCodeChanged":
-            DataBroadcastSettings.setPostalCode(body["postalCode"] as? String)
+        case "storageChanged":
+            guard let key = body["key"] as? String else {
+                logger.warning("invalid BML storageChanged message")
+                return
+            }
+            DataBroadcastSettings.setWebStorageItem(key: key, value: body["value"] as? String)
         case "inputRequest":
             guard let requestId = body["requestId"] as? Int,
                 let characterType = body["characterType"] as? String,
@@ -651,6 +655,15 @@ final class DataBroadcastSession {
                 source: "window.kiririnBMLConfig = { internetAccess: \(allowsInternetAccess) };",
                 injectionTime: .atDocumentStart,
                 forMainFrameOnly: true))
+        // kiririn-bml://オリジンのlocalStorageはWebKitがディスク永続化しない
+        // ため、ネイティブ側ミラー(dataBroadcast.webStorage)が正。バンドル
+        // スクリプトより先(atDocumentStart)にミラー内容でシードし直す。
+        contentController.addUserScript(
+            WKUserScript(
+                source: Self.storageSeedScript(
+                    snapshot: DataBroadcastSettings.webStorage()),
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true))
         config.userContentController = contentController
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.isInspectable = true
@@ -663,6 +676,25 @@ final class DataBroadcastSession {
             webView.scrollView.isScrollEnabled = false
         #endif
         return webView
+    }
+
+    /// ミラーの内容でlocalStorageを丸ごと置き換えるスクリプト。clear()して
+    /// から書き戻すことで、WebKit側にセッション内で残った値とミラーの不整合
+    /// (削除済みキーの復活など)を防ぎ、ミラーを単一の正とする。
+    /// JSONはES2019以降JavaScriptの完全なサブセットなのでリテラル埋め込みで安全。
+    static func storageSeedScript(snapshot: [String: String]) -> String {
+        let entriesJSON: String =
+            (try? JSONSerialization.data(withJSONObject: snapshot))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        return """
+            try {
+                localStorage.clear();
+                const entries = \(entriesJSON);
+                for (const key of Object.keys(entries)) {
+                    localStorage.setItem(key, entries[key]);
+                }
+            } catch (e) {}
+            """
     }
 
     private func loadContent() {
