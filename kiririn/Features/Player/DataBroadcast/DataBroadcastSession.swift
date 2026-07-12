@@ -37,6 +37,7 @@ final class DataBroadcastSession {
     let webView: WKWebView
 
     private let endpoint: DataBroadcastEndpoint
+    private let postalCode: String?
     private let programInfoProvider: () -> BMLProgramInfoPayload?
     private let sseClient = SSEClient()
     private let logger = Logger(label: "DataBroadcastSession")
@@ -76,9 +77,11 @@ final class DataBroadcastSession {
     private let scriptMessageProxy: LeakAversionBMLMessageHandler
 
     init(
-        endpoint: DataBroadcastEndpoint, programInfoProvider: @escaping () -> BMLProgramInfoPayload?
+        endpoint: DataBroadcastEndpoint, postalCode: String?,
+        programInfoProvider: @escaping () -> BMLProgramInfoPayload?
     ) {
         self.endpoint = endpoint
+        self.postalCode = DataBroadcastSettings.validatedPostalCode(postalCode)
         self.programInfoProvider = programInfoProvider
         let proxy = LeakAversionBMLMessageHandler()
         self.scriptMessageProxy = proxy
@@ -359,7 +362,10 @@ final class DataBroadcastSession {
         let payload = programInfoProvider()
         let programInfoJSON = payload.flatMap { try? Self.jsonText(for: $0) } ?? "null"
         if asInit {
-            post(#"{"type":"init","programInfo":\#(programInfoJSON)}"#)
+            let postalCodeJSON = postalCode.map(Self.jsonEscapedString) ?? "null"
+            post(
+                #"{"type":"init","programInfo":\#(programInfoJSON),"postalCode":\#(postalCodeJSON)}"#
+            )
         } else {
             post(#"{"type":"programInfo","programInfo":\#(programInfoJSON)}"#)
         }
@@ -466,6 +472,8 @@ final class DataBroadcastSession {
         case "usedKeyList":
             usedKeyGroups = Set((body["groups"] as? [String]) ?? [])
             logger.info("BML usedKeyList: \(usedKeyGroups.sorted())")
+        case "postalCodeChanged":
+            DataBroadcastSettings.setPostalCode(body["postalCode"] as? String)
         case "error":
             logger.warning("BML error: \(body["message"] as? String ?? "unknown")")
         case "log":
@@ -487,6 +495,7 @@ final class DataBroadcastSession {
     // creating the web view (same order as PluginOverlayView).
     private static func makeWebView(messageHandler: WKScriptMessageHandler) -> WKWebView {
         let config = WKWebViewConfiguration()
+        config.setURLSchemeHandler(BMLURLSchemeHandler(), forURLScheme: BMLURLSchemeHandler.scheme)
         let contentController = WKUserContentController()
         contentController.add(messageHandler, name: "bml")
         config.userContentController = contentController
@@ -504,23 +513,14 @@ final class DataBroadcastSession {
     }
 
     private func loadContent() {
-        guard let htmlURL = Self.locateBundledHTML() else {
+        guard let url = BMLURLSchemeHandler.contentURL,
+            BMLURLSchemeHandler.resourceURL(for: url) != nil
+        else {
             logger.error("BML web bundle not found in app bundle (run setup.sh)")
             status = .failed("Webバンドルが見つかりません")
             return
         }
-        webView.loadFileURL(htmlURL, allowingReadAccessTo: htmlURL.deletingLastPathComponent())
-    }
-
-    private static func locateBundledHTML() -> URL? {
-        let bundle = Bundle.main
-        if let url = bundle.url(
-            forResource: "bml", withExtension: "html",
-            subdirectory: "Features/Player/DataBroadcast/Web/dist")
-        {
-            return url
-        }
-        return bundle.url(forResource: "bml", withExtension: "html")
+        webView.load(URLRequest(url: url))
     }
 }
 

@@ -2,7 +2,7 @@ import { ProgramInfoMessage } from "../../web-bml/server/ws_api";
 
 // Swift -> JS (window.kiririnBML.onNativeMessage)
 export type NativeToWebMessage =
-    | { type: "init"; programInfo: ProgramInfoMessage | null }
+    | { type: "init"; programInfo: ProgramInfoMessage | null; postalCode: string | null }
     | { type: "sse"; event: string; data: unknown }
     | {
           type: "moduleData";
@@ -25,5 +25,6 @@ export type WebToNativeMessage =
     | { type: "invisible"; value: boolean }
     | { type: "receiving"; value: boolean }
     | { type: "usedKeyList"; groups: string[] }
+    | { type: "postalCodeChanged"; postalCode: string | null }
     | { type: "error"; message: string; code?: string }
     | { type: "log"; level: "debug" | "info" | "warn" | "error"; message: string };

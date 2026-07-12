@@ -6,6 +6,25 @@ import Testing
 
 struct StoreBehaviorTests {
 
+    @Test func dataBroadcastSettingsPersistsValidPostalCode() {
+        let (defaults, suiteName) = makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        DataBroadcastSettings.setPostalCode("0123456", in: defaults)
+
+        #expect(DataBroadcastSettings.postalCode(in: defaults) == "0123456")
+    }
+
+    @Test func dataBroadcastSettingsRejectsInvalidPostalCodes() {
+        #expect(DataBroadcastSettings.validatedPostalCode(nil) == nil)
+        #expect(DataBroadcastSettings.validatedPostalCode("") == nil)
+        #expect(DataBroadcastSettings.validatedPostalCode("123456") == nil)
+        #expect(DataBroadcastSettings.validatedPostalCode("12345678") == nil)
+        #expect(DataBroadcastSettings.validatedPostalCode("123-4567") == nil)
+        #expect(DataBroadcastSettings.validatedPostalCode("１２３４５６７") == nil)
+        #expect(DataBroadcastSettings.validatedPostalCode("1234567") == "1234567")
+    }
+
     @Test func serverConfigStorePersistsConfigurationsAndEnabledStates() {
         let (defaults, suiteName) = makeIsolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }

@@ -1162,13 +1162,11 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     /// データ放送(BML)対応。実験的機能につき既定はオフ - see
     /// kiririn/Features/Settings/DataBroadcastSettingsView.swift for the
     /// toggle backing this key.
-    private static let dataBroadcastEnabledDefaultsKey = "dataBroadcast.enabled"
-
     private func setupDataBroadcastSessionIfNeeded() {
         dataBroadcastSession?.stop()
         dataBroadcastSession = nil
 
-        guard UserDefaults.standard.bool(forKey: Self.dataBroadcastEnabledDefaultsKey) else {
+        guard UserDefaults.standard.bool(forKey: DataBroadcastSettings.enabledKey) else {
             return
         }
         guard case .liveService = currentPlayable?.source else { return }
@@ -1178,7 +1176,10 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             let endpoint = provider.dataBroadcastEndpoint(for: service)
         else { return }
 
-        dataBroadcastSession = DataBroadcastSession(endpoint: endpoint) { [weak self] in
+        dataBroadcastSession = DataBroadcastSession(
+            endpoint: endpoint,
+            postalCode: DataBroadcastSettings.postalCode()
+        ) { [weak self] in
             self?.makeBMLProgramInfoPayload()
         }
     }

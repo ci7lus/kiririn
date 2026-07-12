@@ -15,6 +15,33 @@ const stage = document.getElementById("stage")!;
 // `videochanged` event). Real video is rendered natively by VLC outside this
 // WKWebView; this exists purely to satisfy BMLBrowserOptions.
 const mediaElement = document.createElement("div");
+const postalCodeStorageKey = "nvram_prefix=receiverinfo%2Fzipcode";
+
+function storedPostalCode(value: string | null): string | null {
+    if (value == null) return null;
+    try {
+        const postalCode = window.atob(value);
+        return /^[0-9]{7}$/.test(postalCode) ? postalCode : null;
+    } catch {
+        return null;
+    }
+}
+
+const originalSetItem = Storage.prototype.setItem;
+Storage.prototype.setItem = function (key: string, value: string): void {
+    originalSetItem.call(this, key, value);
+    if (this === localStorage && key === postalCodeStorageKey) {
+        postToNative({ type: "postalCodeChanged", postalCode: storedPostalCode(value) });
+    }
+};
+
+const originalRemoveItem = Storage.prototype.removeItem;
+Storage.prototype.removeItem = function (key: string): void {
+    originalRemoveItem.call(this, key);
+    if (this === localStorage && key === postalCodeStorageKey) {
+        postToNative({ type: "postalCodeChanged", postalCode: null });
+    }
+};
 
 const roundGothic: BMLBrowserFontFace = { source: `url(${roundGothicRegularUrl})` };
 const boldRoundGothic: BMLBrowserFontFace = { source: `url(${roundGothicBoldUrl})` };
@@ -129,6 +156,11 @@ window.kiririnBML = {
         const message = raw as NativeToWebMessage;
         switch (message.type) {
             case "init":
+                if (message.postalCode == null) {
+                    localStorage.removeItem(postalCodeStorageKey);
+                } else {
+                    localStorage.setItem(postalCodeStorageKey, window.btoa(message.postalCode));
+                }
                 if (message.programInfo != null) {
                     bmlBrowser.emitMessage(message.programInfo);
                 }
