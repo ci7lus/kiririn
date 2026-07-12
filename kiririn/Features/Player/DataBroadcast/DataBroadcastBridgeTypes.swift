@@ -4,6 +4,11 @@ nonisolated struct BMLTuneRequest: Equatable, Sendable {
     let originalNetworkId: Int
     let transportStreamId: Int
     let serviceId: Int
+    /// epgTuneToComponent由来(別サービス宛て)のみ: 選局先で提示すべきデータ
+    /// コンポーネントのタグ。同一サービス宛てはweb-bml内部で起動文書launchに
+    /// 変換されるためここへは来ない。現状サービス選局のみ行い、新セッションは
+    /// 既定のエントリコンポーネントから起動する(ログ用途)。
+    let componentTag: Int?
 
     init?(bridgeMessage: [String: Any]) {
         guard let originalNetworkId = bridgeMessage["originalNetworkId"] as? Int,
@@ -17,12 +22,32 @@ nonisolated struct BMLTuneRequest: Equatable, Sendable {
         self.originalNetworkId = originalNetworkId
         self.transportStreamId = transportStreamId
         self.serviceId = serviceId
+        self.componentTag = bridgeMessage["componentTag"] as? Int
     }
 
     func matches(_ service: TVService) -> Bool {
         service.networkId == originalNetworkId
             && service.transportStreamId == transportStreamId
             && service.serviceId == serviceId
+    }
+}
+
+/// BMLコンテンツからの音声ES切替 (object.setMainAudioStream)。JS側が最新PMT
+/// からコンポーネントタグを解決したPID(VLCのTrackId照合用)と、PMT内の音声ES
+/// 中での序数(TrackId形式が想定外だったときのフォールバック)を添えてくる。
+nonisolated struct BMLAudioStreamRequest: Equatable, Sendable {
+    let componentId: Int
+    /// デュアルモノの音声チャンネル指定 (TR-B14: 1=主, 2=副, 3=主+副)。
+    let channelId: Int?
+    let pid: Int?
+    let audioIndex: Int?
+
+    init?(bridgeMessage: [String: Any]) {
+        guard let componentId = bridgeMessage["componentId"] as? Int else { return nil }
+        self.componentId = componentId
+        self.channelId = bridgeMessage["channelId"] as? Int
+        self.pid = bridgeMessage["pid"] as? Int
+        self.audioIndex = bridgeMessage["audioIndex"] as? Int
     }
 }
 

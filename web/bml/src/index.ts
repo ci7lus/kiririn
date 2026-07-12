@@ -6,6 +6,7 @@ import {
     InputCancelReason,
 } from "../../web-bml/client/bml_browser";
 import { AribKeyCode } from "../../web-bml/client/content";
+import { ComponentPMT, ResponseMessage } from "../../web-bml/server/ws_api";
 import { postToNative, log } from "./bridge";
 import { createIP } from "./ip";
 import { MahironAdapter } from "./mahiron";
@@ -123,6 +124,35 @@ class KiririnInputApplication implements InputApplication {
 
 const inputApplication = new KiririnInputApplication();
 
+// 最新PMTのES一覧 (componentTag↔PID対応)。setMainAudioStreamでコンポーネント
+// タグをネイティブプレイヤーの音声トラック指定へ変換するのに使う。PIDはVLCの
+// TrackId照合用、序数はPMT内の同種ES中の並び順(TrackIdの形式が期待と違った
+// ときのフォールバック)。
+let lastPMTComponents: ComponentPMT[] | null = null;
+const audioStreamTypes = new Set([0x03, 0x04, 0x0f, 0x11]); // MPEG-1/2 / AAC ADTS / LATM
+
+function findPMTComponent(
+    componentId: number,
+    streamTypes: Set<number>,
+): { pid: number; index: number } | null {
+    if (lastPMTComponents == null) {
+        return null;
+    }
+    const sameKind = lastPMTComponents.filter((c) => streamTypes.has(c.streamType));
+    const index = sameKind.findIndex((c) => c.componentId === componentId);
+    if (index < 0) {
+        return null;
+    }
+    return { pid: sameKind[index].pid, index };
+}
+
+function emitToBrowser(message: ResponseMessage): void {
+    if (message.type === "pmt") {
+        lastPMTComponents = message.components;
+    }
+    bmlBrowser.emitMessage(message);
+}
+
 const bmlBrowser = new BMLBrowser({
     containerElement: stage,
     mediaElement,
@@ -137,6 +167,44 @@ const bmlBrowser = new BMLBrowser({
             postToNative({ type: "tune", originalNetworkId, transportStreamId, serviceId });
             return true;
         },
+        // 同一サービス宛てのepgTuneToComponentはweb-bml側(es2_binding/
+        // js_interpreter)が指定データコンポーネントの起動文書launchで完結させる
+        // ため、ここへ来るのは別サービス宛てのみ。選局後は新サービスの既定
+        // エントリコンポーネント(0x40)から起動する(コンポーネント指定までは
+        // 追従しない)。
+        tuneToComponent(originalNetworkId, transportStreamId, serviceId, component) {
+            const componentTag = Number.parseInt(component, 16);
+            if (!Number.isInteger(componentTag)) {
+                return false;
+            }
+            postToNative({
+                type: "tune",
+                originalNetworkId,
+                transportStreamId,
+                serviceId,
+                componentTag,
+            });
+            return true;
+        },
+    },
+    // BMLからの音声ES切替 (object.setMainAudioStream)。VLC側のトラック切替に
+    // つなぐ。bmlBrowser.setMainAudioStreamの呼び出しで内部状態を更新し
+    // MainAudioStreamChangedイベントを発火させる(eventQueue経由なので再入安全)。
+    setMainAudioStreamCallback: (componentId, channelId) => {
+        const resolved = findPMTComponent(componentId, audioStreamTypes);
+        if (lastPMTComponents != null && resolved == null) {
+            // PMT既知でそのcomponentTagの音声ESが存在しない: 失敗
+            return false;
+        }
+        postToNative({
+            type: "setMainAudioStream",
+            componentId,
+            channelId: channelId ?? null,
+            pid: resolved?.pid ?? null,
+            audioIndex: resolved?.index ?? null,
+        });
+        bmlBrowser.setMainAudioStream(componentId, channelId);
+        return true;
     },
     // 設定でインターネット接続が無効のときはipごと渡さない: web-bmlは
     // ip.get等のnullチェックで通信コンテンツ対応/非対応を判定するので、
@@ -166,7 +234,7 @@ const bmlBrowser = new BMLBrowser({
     },
 });
 
-let adapter = new MahironAdapter((message) => bmlBrowser.emitMessage(message));
+let adapter = new MahironAdapter(emitToBrowser);
 
 function applyStageScale(width: number, height: number): void {
     stage.style.width = `${width}px`;
@@ -292,7 +360,8 @@ window.kiririnBML = {
                 inputApplication.dismiss(message.requestId);
                 break;
             case "reset":
-                adapter = new MahironAdapter((m) => bmlBrowser.emitMessage(m));
+                lastPMTComponents = null;
+                adapter = new MahironAdapter(emitToBrowser);
                 break;
             default:
                 log("warn", `unhandled native message: ${JSON.stringify(message)}`);

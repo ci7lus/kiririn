@@ -1185,6 +1185,9 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             },
             tuneHandler: { [weak self] request in
                 self?.handleBMLTuneRequest(request)
+            },
+            audioStreamHandler: { [weak self] request in
+                self?.handleBMLAudioStreamRequest(request)
             }
         )
         session.setAudioOutput(volume: volume, isMuted: isMuted)
@@ -1195,19 +1198,28 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         let expectedPlayableID = currentPlayable?.id
         Task { @MainActor [weak self] in
             guard let self, let expectedPlayableID,
-                self.currentPlayable?.id == expectedPlayableID,
-                let manager = self.manager,
-                let service = manager.bmlTuneService(
-                    for: request, preferredServerId: self.currentPlayable?.serverId)
-            else {
-                self?.logger.warning("BML tune target is unavailable")
-                return
-            }
+                self.currentPlayable?.id == expectedPlayableID
+            else { return }
 
             if let currentService = self.currentPlayable?.displayService,
                 request.matches(currentService)
             {
                 return
+            }
+
+            guard let manager = self.manager,
+                let service = manager.bmlTuneService(
+                    for: request, preferredServerId: self.currentPlayable?.serverId)
+            else {
+                self.logger.warning("BML tune target is unavailable")
+                return
+            }
+
+            if let componentTag = request.componentTag {
+                // epgTuneToComponent由来: サービス選局のみ行い、新セッションは
+                // 既定のエントリコンポーネントから起動する。
+                self.logger.info(
+                    "BML tuneToComponent: selecting service only (componentTag=\(componentTag))")
             }
 
             guard let provider = manager.liveProvider(for: service.serverId) else { return }
@@ -1222,6 +1234,65 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
                 self.logger.warning("BML tune failed: \(error)")
             }
         }
+    }
+
+    /// BMLコンテンツからの音声ES切替 (object.setMainAudioStream)。VLCの音声
+    /// トラックをPID(または序数フォールバック)で選び、デュアルモノの主/副は
+    /// ステレオモード(左右チャンネル)へマップする。
+    private func handleBMLAudioStreamRequest(_ request: BMLAudioStreamRequest) {
+        guard let player else { return }
+        let tracks = player.audioTracks
+        guard
+            let index = Self.bmlTrackIndex(
+                trackIds: tracks.map { $0.trackId },
+                pid: request.pid, ordinal: request.audioIndex)
+        else {
+            logger.warning(
+                "BML setMainAudioStream: no matching audio track (componentId=\(request.componentId) pid=\(String(describing: request.pid)) trackIds=\(tracks.map { $0.trackId }))"
+            )
+            return
+        }
+        logger.info(
+            "BML setMainAudioStream: selecting audio track \(index) (trackId=\(tracks[index].trackId) channelId=\(String(describing: request.channelId)))"
+        )
+        player.selectTrack(at: index, type: .audio)
+        selectedAudioTrackID = tracks[index].trackId
+        selectedAudioTrack = availableAudioTracks.first(where: { $0.id == tracks[index].trackId })
+
+        // TR-B14の音声チャンネルID: 1=主(デュアルモノ左), 2=副(右), 3=主+副
+        switch request.channelId {
+        case 1:
+            selectAudioStereoMode(.left)
+        case 2:
+            selectAudioStereoMode(.right)
+        case 3:
+            selectAudioStereoMode(.stereo)
+        default:
+            // チャンネル指定なし: 以前のBML切替で左右に振っていた場合のみ戻す
+            // (ユーザーが選んだその他のモードには触らない)。
+            if selectedAudioStereoMode == .left || selectedAudioStereoMode == .right {
+                selectAudioStereoMode(.unset)
+            }
+        }
+    }
+
+    /// VLC 4のTrackIdはTS demuxではESのID(=PID)由来の安定ID ("audio/362"の
+    /// ような形式)。まずPIDの一致で照合し、TrackIdの形式が想定と違った場合は
+    /// PMT内の同種ES序数で照合する。テスト容易性のためnonisolated static。
+    nonisolated static func bmlTrackIndex(trackIds: [String], pid: Int?, ordinal: Int?) -> Int? {
+        if let pid {
+            let pidString = String(pid)
+            if let index = trackIds.firstIndex(where: { trackId in
+                trackId == pidString
+                    || trackId.split(separator: "/").last.map(String.init) == pidString
+            }) {
+                return index
+            }
+        }
+        if let ordinal, trackIds.indices.contains(ordinal) {
+            return ordinal
+        }
+        return nil
     }
 
     private func makeBMLProgramInfoPayload() -> BMLProgramInfoPayload? {

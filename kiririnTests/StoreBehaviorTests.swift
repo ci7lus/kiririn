@@ -103,6 +103,57 @@ struct StoreBehaviorTests {
             ]) == nil)
     }
 
+    @Test func bmlTuneRequestParsesOptionalComponentTag() throws {
+        let plain = try #require(
+            BMLTuneRequest(bridgeMessage: [
+                "originalNetworkId": 1, "transportStreamId": 2, "serviceId": 3,
+            ]))
+        #expect(plain.componentTag == nil)
+
+        let withComponent = try #require(
+            BMLTuneRequest(bridgeMessage: [
+                "originalNetworkId": 1, "transportStreamId": 2, "serviceId": 3,
+                "componentTag": 0x41,
+            ]))
+        #expect(withComponent.componentTag == 0x41)
+    }
+
+    @Test func bmlAudioStreamRequestParsesNullableFields() throws {
+        // JSON nullはWKScriptMessageのbodyではNSNullで届く
+        let request = try #require(
+            BMLAudioStreamRequest(bridgeMessage: [
+                "componentId": 0x11, "channelId": NSNull(), "pid": 0x0112, "audioIndex": 1,
+            ]))
+        #expect(request.componentId == 0x11)
+        #expect(request.channelId == nil)
+        #expect(request.pid == 0x0112)
+        #expect(request.audioIndex == 1)
+
+        #expect(BMLAudioStreamRequest(bridgeMessage: ["channelId": 1]) == nil)
+    }
+
+    @Test func bmlTrackIndexPrefersPidOverOrdinalAndFallsBack() {
+        // VLC 4のTS demuxはTrackIdが "audio/<PID>" 形式
+        #expect(
+            PlayerState.bmlTrackIndex(
+                trackIds: ["audio/273", "audio/274"], pid: 274, ordinal: 0) == 1)
+        // PIDそのものの形式にも一致する
+        #expect(
+            PlayerState.bmlTrackIndex(trackIds: ["273", "274"], pid: 274, ordinal: 0) == 1)
+        // 末尾セグメントの完全一致のみ ("1274"に部分一致しない)
+        #expect(
+            PlayerState.bmlTrackIndex(
+                trackIds: ["audio/1274", "audio/274"], pid: 274, ordinal: nil) == 1)
+        // TrackIdがPIDと照合できない形式なら序数フォールバック
+        #expect(
+            PlayerState.bmlTrackIndex(
+                trackIds: ["Track1", "Track2"], pid: 274, ordinal: 1) == 1)
+        // 序数も範囲外なら不一致
+        #expect(
+            PlayerState.bmlTrackIndex(trackIds: ["Track1"], pid: 274, ordinal: 5) == nil)
+        #expect(PlayerState.bmlTrackIndex(trackIds: [], pid: nil, ordinal: nil) == nil)
+    }
+
     @Test func bmlTuneRequestMatchesAllThreeServiceIdentifiers() throws {
         let request = try #require(
             BMLTuneRequest(bridgeMessage: [

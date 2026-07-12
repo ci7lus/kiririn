@@ -29,6 +29,18 @@ export type WebToNativeMessage =
           originalNetworkId: number;
           transportStreamId: number;
           serviceId: number;
+          // epgTuneToComponent由来(別サービス宛て)のみ: 選局先で提示すべき
+          // データコンポーネントのタグ。現状ネイティブはサービス選局のみ行い、
+          // 新セッションは既定のエントリコンポーネントから起動する。
+          componentTag?: number;
+      }
+    | {
+          type: "setMainAudioStream";
+          componentId: number;
+          channelId: number | null;
+          // 最新PMTで解決した音声ESのPID/音声ES中での序数(見つからなければnull)
+          pid: number | null;
+          audioIndex: number | null;
       }
     | { type: "loaded"; width: number; height: number; profile: string }
     | { type: "videoRect"; x: number; y: number; width: number; height: number }

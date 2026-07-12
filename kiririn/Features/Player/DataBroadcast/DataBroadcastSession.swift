@@ -107,6 +107,7 @@ final class DataBroadcastSession {
     private let postalCode: String?
     private let programInfoProvider: () -> BMLProgramInfoPayload?
     private let tuneHandler: (BMLTuneRequest) -> Void
+    private let audioStreamHandler: (BMLAudioStreamRequest) -> Void
     private let sseClient = SSEClient()
     private let logger = Logger(label: "DataBroadcastSession")
 
@@ -147,12 +148,14 @@ final class DataBroadcastSession {
     init(
         endpoint: DataBroadcastEndpoint, postalCode: String?,
         programInfoProvider: @escaping () -> BMLProgramInfoPayload?,
-        tuneHandler: @escaping (BMLTuneRequest) -> Void
+        tuneHandler: @escaping (BMLTuneRequest) -> Void,
+        audioStreamHandler: @escaping (BMLAudioStreamRequest) -> Void
     ) {
         self.endpoint = endpoint
         self.postalCode = DataBroadcastSettings.validatedPostalCode(postalCode)
         self.programInfoProvider = programInfoProvider
         self.tuneHandler = tuneHandler
+        self.audioStreamHandler = audioStreamHandler
         let proxy = LeakAversionBMLMessageHandler()
         self.scriptMessageProxy = proxy
         self.webView = Self.makeWebView(
@@ -540,6 +543,15 @@ final class DataBroadcastSession {
                 return
             }
             tuneHandler(request)
+        case "setMainAudioStream":
+            guard let request = BMLAudioStreamRequest(bridgeMessage: body) else {
+                logger.warning("invalid BML setMainAudioStream request")
+                return
+            }
+            logger.info(
+                "BML setMainAudioStream: componentId=\(request.componentId) channelId=\(String(describing: request.channelId)) pid=\(String(describing: request.pid)) index=\(String(describing: request.audioIndex))"
+            )
+            audioStreamHandler(request)
         case "videoRect":
             if let x = body["x"] as? Double, let y = body["y"] as? Double,
                 let width = body["width"] as? Double, let height = body["height"] as? Double
