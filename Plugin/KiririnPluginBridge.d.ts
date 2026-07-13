@@ -123,7 +123,10 @@ export interface KiririnPluginBridge {
     play(playerID?: string): void;
     pause(playerID?: string): void;
     togglePlayPause(playerID?: string): void;
+    /** 0〜1の再生位置へ移動します。バイト数ベースのシークです。 */
     seek(position: number, playerID?: string): void;
+    /** 指定した再生時刻（秒）へ移動します。リモートファイルでの精度は保証されません。 */
+    seekToTime(time: number, playerID?: string): void;
 
     getCaptureBlob(captureID: string, variant: CaptureVariant): Promise<Blob | null>;
 

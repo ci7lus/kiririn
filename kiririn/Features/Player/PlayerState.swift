@@ -221,6 +221,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     var player: VLCMediaPlayer?
     var isPlaying = false
     var isPlaybackLoading = false
+    var isSeeking = false
     var showControls = true
     var playbackRate: Float = 1.0
     var volume: Float = 100
@@ -244,9 +245,9 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     var pluginReloadToken = 0
     var perPluginReloadTokens: [String: Int] = [:]
     var playbackErrorMessage: String?
-    var isSeeking = false {
+    var isScrubbing = false {
         didSet {
-            if !isSeeking && showControls {
+            if !isScrubbing && showControls {
                 startControlsAutoHide()
             }
         }
@@ -305,7 +306,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     var isActive: Bool { currentPlayable != nil }
 
     var showsPlaybackLoadingIndicator: Bool {
-        player == nil || isPlaybackLoading
+        player == nil || isPlaybackLoading || isSeeking
     }
 
     private var pendingCapturePath: URL?
@@ -574,6 +575,14 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         guard let player, player.isSeekable else { return }
         player.position = Double(position)
         playbackStatus.position = position
+    }
+
+    func seek(toTime time: Double) {
+        guard let player, player.isSeekable, time.isFinite else { return }
+        let clampedTime = max(0, time)
+        let milliseconds = min((clampedTime * 1000).rounded(), Double(Int32.max))
+        player.time = VLCTime(int: Int32(milliseconds))
+        playbackStatus.time = milliseconds / 1000
     }
 
     func setVolume(_ value: Float) {
@@ -1059,7 +1068,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         controlsTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                if self.isSeeking {
+                if self.isScrubbing {
                     self.startControlsAutoHide()
                     return
                 }
@@ -1084,6 +1093,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     func stop() {
         player?.stop()
         isPlaybackLoading = false
+        isSeeking = false
         playbackStatus = .init(
             playerID: self.id, playableID: nil, isPlaying: false, time: 0, position: 0,
             rate: playbackRate)
@@ -1114,6 +1124,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
         isPlaying = false
         isPlaybackLoading = false
+        isSeeking = false
         isPipEnabled = false
         isPipAvailable = false
         availableAudioTracks = []
@@ -1442,6 +1453,12 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         }
     }
 
+    private func setSeekingIfChanged(_ value: Bool) {
+        if isSeeking != value {
+            isSeeking = value
+        }
+    }
+
     private func setPlayingIfChanged(_ value: Bool) {
         if isPlaying != value {
             isPlaying = value
@@ -1533,8 +1550,14 @@ extension PlayerState {
                     playbackStatus.time = time
                 }
             }
+            logger.debug(
+                "playback time changed: position=\(player.position), time=\(time), duration=\(duration)"
+            )
             let position = Float(player.position)
-            if position.isFinite {
+            if position == -1.0 {
+                setSeekingIfChanged(true)
+            } else if position.isFinite {
+                setSeekingIfChanged(false)
                 let clampedPosition = min(max(position, 0), 1)
                 if playbackStatus.position != clampedPosition {
                     playbackStatus.position = clampedPosition
