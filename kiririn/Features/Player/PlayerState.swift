@@ -1215,13 +1215,6 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
                 return
             }
 
-            if let componentTag = request.componentTag {
-                // epgTuneToComponent由来: サービス選局のみ行い、新セッションは
-                // 既定のエントリコンポーネントから起動する。
-                self.logger.info(
-                    "BML tuneToComponent: selecting service only (componentTag=\(componentTag))")
-            }
-
             guard let provider = manager.liveProvider(for: service.serverId) else { return }
             let currentProgram = await manager.currentProgram(for: service)
             guard self.currentPlayable?.id == expectedPlayableID else { return }

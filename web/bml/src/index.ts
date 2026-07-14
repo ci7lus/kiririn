@@ -167,25 +167,6 @@ const bmlBrowser = new BMLBrowser({
             postToNative({ type: "tune", originalNetworkId, transportStreamId, serviceId });
             return true;
         },
-        // 同一サービス宛てのepgTuneToComponentはweb-bml側(es2_binding/
-        // js_interpreter)が指定データコンポーネントの起動文書launchで完結させる
-        // ため、ここへ来るのは別サービス宛てのみ。選局後は新サービスの既定
-        // エントリコンポーネント(0x40)から起動する(コンポーネント指定までは
-        // 追従しない)。
-        tuneToComponent(originalNetworkId, transportStreamId, serviceId, component) {
-            const componentTag = Number.parseInt(component, 16);
-            if (!Number.isInteger(componentTag)) {
-                return false;
-            }
-            postToNative({
-                type: "tune",
-                originalNetworkId,
-                transportStreamId,
-                serviceId,
-                componentTag,
-            });
-            return true;
-        },
     },
     // BMLからの音声ES切替 (object.setMainAudioStream)。VLC側のトラック切替に
     // つなぐ。bmlBrowser.setMainAudioStreamの呼び出しで内部状態を更新し

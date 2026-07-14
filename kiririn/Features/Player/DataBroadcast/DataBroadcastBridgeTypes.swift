@@ -4,11 +4,6 @@ nonisolated struct BMLTuneRequest: Equatable, Sendable {
     let originalNetworkId: Int
     let transportStreamId: Int
     let serviceId: Int
-    /// epgTuneToComponent由来(別サービス宛て)のみ: 選局先で提示すべきデータ
-    /// コンポーネントのタグ。同一サービス宛てはweb-bml内部で起動文書launchに
-    /// 変換されるためここへは来ない。現状サービス選局のみ行い、新セッションは
-    /// 既定のエントリコンポーネントから起動する(ログ用途)。
-    let componentTag: Int?
 
     init?(bridgeMessage: [String: Any]) {
         guard let originalNetworkId = bridgeMessage["originalNetworkId"] as? Int,
@@ -22,7 +17,6 @@ nonisolated struct BMLTuneRequest: Equatable, Sendable {
         self.originalNetworkId = originalNetworkId
         self.transportStreamId = transportStreamId
         self.serviceId = serviceId
-        self.componentTag = bridgeMessage["componentTag"] as? Int
     }
 
     func matches(_ service: TVService) -> Bool {

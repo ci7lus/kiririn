@@ -103,21 +103,6 @@ struct StoreBehaviorTests {
             ]) == nil)
     }
 
-    @Test func bmlTuneRequestParsesOptionalComponentTag() throws {
-        let plain = try #require(
-            BMLTuneRequest(bridgeMessage: [
-                "originalNetworkId": 1, "transportStreamId": 2, "serviceId": 3,
-            ]))
-        #expect(plain.componentTag == nil)
-
-        let withComponent = try #require(
-            BMLTuneRequest(bridgeMessage: [
-                "originalNetworkId": 1, "transportStreamId": 2, "serviceId": 3,
-                "componentTag": 0x41,
-            ]))
-        #expect(withComponent.componentTag == 0x41)
-    }
-
     @Test func bmlAudioStreamRequestParsesNullableFields() throws {
         // JSON nullはWKScriptMessageのbodyではNSNullで届く
         let request = try #require(
