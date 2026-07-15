@@ -91,7 +91,7 @@ struct PlayerOverlayView_iOS: View {
             displayDuration > 0
         {
             let delta = Double(pos - initPos)
-            return initTime + delta * displayDuration
+            return min(max(0, initTime + delta * displayDuration), displayDuration)
         }
         return playerState.playbackStatus.time
     }
@@ -1954,7 +1954,7 @@ struct PlayerOverlayView_iOS: View {
 
     private func seekToBeginning() {
         guard isSeekActionAvailable else { return }
-        playerState.seek(to: 0)
+        playerState.seek(toTime: 0)
     }
 
     private func updateScrub(relativeX: CGFloat, availableWidth: CGFloat) {
@@ -1987,8 +1987,8 @@ struct PlayerOverlayView_iOS: View {
     }
 
     private func finishScrub() {
-        if playerState.isScrubbing, let scrub = scrubPosition {
-            seekToPosition(scrub)
+        if playerState.isScrubbing, scrubPosition != nil {
+            playerState.seek(toTime: displayTime)
         }
         playerState.isScrubbing = false
         scrubPosition = nil
@@ -2367,11 +2367,11 @@ struct PlayerOverlayView_iOS: View {
     }
 
     private func seek(to seconds: Double) {
-        guard isSeekActionAvailable, let player = playerState.player else { return }
+        guard isSeekActionAvailable else { return }
         let current = playerState.playbackStatus.time
         let delta = seconds - current
         let clamped = min(max(0, seconds), max(displayDuration, 0))
-        player.time = VLCTime(int: Int32((clamped * 1000).rounded()))
+        playerState.seek(toTime: clamped)
         showSeekFeedback(for: delta)
     }
 
@@ -2379,10 +2379,6 @@ struct PlayerOverlayView_iOS: View {
         guard isSeekActionAvailable, let player = playerState.player else { return }
         player.jump(withOffset: Int32(seconds) * 1000)
         showSeekFeedback(for: seconds)
-    }
-
-    private func seekToPosition(_ position: Float) {
-        playerState.seek(to: position)
     }
 
     private func showVolumeFeedback() {
