@@ -21,6 +21,9 @@
             context.coordinator.isEnabled = isEnabled
             context.coordinator.onLiveScale = onLiveScale
             context.coordinator.onScaleCommit = onScaleCommit
+            if !isEnabled {
+                context.coordinator.invalidatePendingZoom()
+            }
         }
 
         static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
@@ -32,6 +35,10 @@
             var isEnabled: Bool
             var onLiveScale: (CGFloat, UnitPoint) -> Void
             var onScaleCommit: (CGFloat, UnitPoint) -> Void
+
+            private static let preciseSensitivity: CGFloat = 0.006
+            private static let coarseSensitivity: CGFloat = 0.08
+            private static let debounceDelay: TimeInterval = 0.3
 
             private weak var view: NSView?
             private var eventMonitor: Any?
@@ -50,6 +57,7 @@
             }
 
             func startMonitoring(view: NSView) {
+                guard eventMonitor == nil else { return }
                 self.view = view
                 eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) {
                     [weak self] event in
@@ -62,6 +70,12 @@
                 NSEvent.removeMonitor(eventMonitor)
                 self.eventMonitor = nil
                 debounceWorkItem?.cancel()
+            }
+
+            func invalidatePendingZoom() {
+                debounceWorkItem?.cancel()
+                debounceWorkItem = nil
+                accumulatedFactor = 1.0
             }
 
             private func handleScrollEvent(_ event: NSEvent) -> NSEvent? {
@@ -84,7 +98,9 @@
                     ? event.scrollingDeltaY : event.scrollingDeltaX
                 guard delta != 0 else { return event }
 
-                let sensitivity: CGFloat = event.hasPreciseScrollingDeltas ? 0.006 : 0.08
+                let sensitivity: CGFloat =
+                    event.hasPreciseScrollingDeltas
+                    ? Self.preciseSensitivity : Self.coarseSensitivity
                 let factor = min(max(1 + delta * sensitivity, 0.8), 1.2)
                 accumulatedFactor *= factor
 
@@ -104,7 +120,8 @@
                     self.accumulatedFactor = 1.0
                 }
                 debounceWorkItem = workItem
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
+                DispatchQueue.main.asyncAfter(
+                    deadline: .now() + Self.debounceDelay, execute: workItem)
 
                 return nil
             }

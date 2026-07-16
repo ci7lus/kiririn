@@ -28,7 +28,7 @@ struct ProgramGuideView: View {
     @State private var viewportHeight: CGFloat = 600
     @State private var viewportWidth: CGFloat = 0
     @State private var verticalScrollOffset: CGFloat = 0
-    @State private var minuteHeight: CGFloat = 2.5  // defaultMinuteHeight と同期
+    @State private var minuteHeight: CGFloat
     @State private var offsetTracker = HorizontalOffsetTracker()
     @State private var horizontalScrollResetToken = 0
     @State private var horizontalScrollController = ProgramGuideHorizontalScrollController()
@@ -40,6 +40,7 @@ struct ProgramGuideView: View {
 
     private let channelColumnWidth: CGFloat = 220
     private let timeRulerWidth: CGFloat = 45
+    private let sectionHeaderHeight: CGFloat = 52
     private let minimumMinuteHeight: CGFloat = 2.5
     private let maximumMinuteHeight: CGFloat = 9
     private let defaultMinuteHeight: CGFloat = 2.5
@@ -114,6 +115,7 @@ struct ProgramGuideView: View {
     init(manager: ServerManager, playerState: PlayerState) {
         self.manager = manager
         self._playerState = State(initialValue: playerState)
+        self._minuteHeight = State(initialValue: defaultMinuteHeight)
     }
 
     var body: some View {
@@ -190,7 +192,6 @@ struct ProgramGuideView: View {
             },
             onResetZoom: {
                 guard minuteHeight != defaultMinuteHeight else { return }
-                let sectionHeaderHeight: CGFloat = 52
                 let previousTimelineHeight = CGFloat(timelineHours * 60) * minuteHeight
                 let visibleContentY =
                     verticalScrollOffset + (viewportHeight - sectionHeaderHeight) / 2
@@ -307,7 +308,7 @@ struct ProgramGuideView: View {
             // 左上角：「時刻」ラベル（水平方向のみ固定、垂直方向は Sticky）
             Rectangle()
                 .fill(Color.kiririnSecondarySystemBackground)
-                .frame(width: timeRulerWidth, height: 52)
+                .frame(width: timeRulerWidth, height: sectionHeaderHeight)
                 .overlay {
                     Text("時刻").font(.caption).foregroundStyle(.secondary)
                 }
@@ -329,7 +330,7 @@ struct ProgramGuideView: View {
             }
             // チャンネル数がビューポートを埋めない場合の右側余白
             Color.kiririnSecondarySystemBackground
-                .frame(width: max(0, viewportWidth - contentWidth), height: 52)
+                .frame(width: max(0, viewportWidth - contentWidth), height: sectionHeaderHeight)
         }
         .background(Color.kiririnSecondarySystemBackground)
     }
@@ -424,7 +425,7 @@ struct ProgramGuideView: View {
                 }
             #endif
         }
-        .frame(height: 52)
+        .frame(height: sectionHeaderHeight)
         .background(.ultraThinMaterial)
     }
 
@@ -515,7 +516,6 @@ struct ProgramGuideView: View {
             }
         }
 
-        let sectionHeaderHeight: CGFloat = 52
         if now >= timelineStart && now < timelineEnd {
             let targetY = max(0, sectionHeaderHeight + yOffset(for: now) - viewportHeight * 0.2)
             if animated {
@@ -549,7 +549,6 @@ struct ProgramGuideView: View {
             max(previousMinuteHeight * factor, minimumMinuteHeight), maximumMinuteHeight)
         guard updatedMinuteHeight != previousMinuteHeight else { return }
 
-        let sectionHeaderHeight: CGFloat = 52
         let previousTimelineHeight = CGFloat(timelineHours * 60) * previousMinuteHeight
         let anchoredTimelineY = min(
             max(previousTimelineHeight * anchor.y, 0),
@@ -687,7 +686,7 @@ struct ProgramGuideView: View {
             favoriteButton(for: service)
         }
         .padding(.horizontal, 10)
-        .frame(width: channelColumnWidth, height: 52, alignment: .leading)
+        .frame(width: channelColumnWidth, height: sectionHeaderHeight, alignment: .leading)
         .background(Color.kiririnSecondarySystemBackground)
         .overlay(alignment: .leading) {
             Rectangle()
