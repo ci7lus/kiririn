@@ -1,6 +1,29 @@
 import Foundation
 import WebKit
 
+private final class BMLProxySessionDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
+    func urlSession(
+        _ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+        completionHandler:
+            @escaping @Sendable (
+                URLSession.AuthChallengeDisposition, URLCredential?
+            ) -> Void
+    ) {
+        guard
+            challenge.protectionSpace.authenticationMethod
+                == NSURLAuthenticationMethodServerTrust,
+            let serverTrust = challenge.protectionSpace.serverTrust
+        else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
+        // 放送局の通信コンテンツには古い証明書設備が残っているため、
+        // web-bmlのHTTPプロキシと同様に専用セッション内では接続を許可する。
+        completionHandler(.useCredential, URLCredential(trust: serverTrust))
+    }
+}
+
 final class BMLURLSchemeHandler: NSObject, WKURLSchemeHandler {
     static let scheme = "kiririn-bml"
     static let host = "app"
@@ -22,7 +45,8 @@ final class BMLURLSchemeHandler: NSObject, WKURLSchemeHandler {
         configuration.timeoutIntervalForRequest = 15
         configuration.httpCookieAcceptPolicy = .never
         configuration.httpShouldSetCookies = false
-        return URLSession(configuration: configuration)
+        return URLSession(
+            configuration: configuration, delegate: BMLProxySessionDelegate(), delegateQueue: nil)
     }()
 
     init(allowsInternetAccess: Bool = false) {
