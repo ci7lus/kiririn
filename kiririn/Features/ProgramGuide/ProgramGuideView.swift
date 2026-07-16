@@ -27,6 +27,8 @@ struct ProgramGuideView: View {
     @State private var scrollPosition = ScrollPosition()
     @State private var viewportHeight: CGFloat = 600
     @State private var viewportWidth: CGFloat = 0
+    @State private var verticalScrollOffset: CGFloat = 0
+    @State private var minuteHeight: CGFloat = 2.5  // defaultMinuteHeight と同期
     @State private var offsetTracker = HorizontalOffsetTracker()
     @State private var horizontalScrollResetToken = 0
     @State private var horizontalScrollController = ProgramGuideHorizontalScrollController()
@@ -38,7 +40,9 @@ struct ProgramGuideView: View {
 
     private let channelColumnWidth: CGFloat = 220
     private let timeRulerWidth: CGFloat = 45
-    private let minuteHeight: CGFloat = 2.5
+    private let minimumMinuteHeight: CGFloat = 2.5
+    private let maximumMinuteHeight: CGFloat = 9
+    private let defaultMinuteHeight: CGFloat = 2.5
     private let timelineHours = 24
     private let minimumPastDays = -1
     private let maximumFutureDays = 7
@@ -184,6 +188,18 @@ struct ProgramGuideView: View {
             onScrollToNow: {
                 scrollToNow(animated: true)
             },
+            onResetZoom: {
+                guard minuteHeight != defaultMinuteHeight else { return }
+                let sectionHeaderHeight: CGFloat = 52
+                let previousTimelineHeight = CGFloat(timelineHours * 60) * minuteHeight
+                let visibleContentY =
+                    verticalScrollOffset + (viewportHeight - sectionHeaderHeight) / 2
+                let anchorY = min(max(visibleContentY / previousTimelineHeight, 0), 1)
+                let factor = defaultMinuteHeight / minuteHeight
+                scaleTimeline(by: factor, around: UnitPoint(x: 0.5, y: anchorY))
+            },
+            selectedBroadcastType: $selectedBroadcastType,
+            broadcastFilterOptions: broadcastFilterOptions,
             glassNamespace: glassNamespace
         )
         .sheet(
@@ -246,6 +262,13 @@ struct ProgramGuideView: View {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
                         Section {
                             gridSectionContent
+                                .programGuideVerticalScale(
+                                    currentMinuteHeight: minuteHeight,
+                                    minuteHeightRange:
+                                        minimumMinuteHeight...maximumMinuteHeight
+                                ) { factor, anchor in
+                                    scaleTimeline(by: factor, around: anchor)
+                                }
                         } header: {
                             headerSectionContent
                         }
@@ -264,6 +287,11 @@ struct ProgramGuideView: View {
                     geo.contentOffset.x
                 } action: { _, new in
                     offsetTracker.horizontalOffset = new
+                }
+                .onScrollGeometryChange(for: CGFloat.self) { geo in
+                    geo.contentOffset.y
+                } action: { _, new in
+                    verticalScrollOffset = new
                 }
                 .onChange(of: horizontalScrollResetToken) { _, _ in
                     resetHorizontalScrollPosition(proxy: proxy)
@@ -374,25 +402,27 @@ struct ProgramGuideView: View {
                 }
             }
 
-            Divider()
-                .padding(.vertical, 10)
+            #if os(iOS)
+                Divider()
+                    .padding(.vertical, 10)
 
-            Picker("絞り込み", selection: $selectedBroadcastType) {
-                ForEach(broadcastFilterOptions, id: \.id) { option in
-                    Text(option.name).tag(option.id)
+                Picker("絞り込み", selection: $selectedBroadcastType) {
+                    ForEach(broadcastFilterOptions, id: \.id) { option in
+                        Text(option.name).tag(option.id)
+                    }
                 }
-            }
-            .labelsHidden()
-            .fixedSize()
-            .padding(.horizontal, 8)
-            .help("放送種別を絞り込む")
+                .labelsHidden()
+                .fixedSize()
+                .padding(.horizontal, 8)
+                .help("放送種別を絞り込む")
 
-            programGuideCurrentTimeControl(timelineOffsetHours: timelineOffsetHours) {
-                if timelineOffsetHours != 0 {
-                    timelineOffsetHours = 0
+                programGuideCurrentTimeControl(timelineOffsetHours: timelineOffsetHours) {
+                    if timelineOffsetHours != 0 {
+                        timelineOffsetHours = 0
+                    }
+                    scrollToNow(animated: true)
                 }
-                scrollToNow(animated: true)
-            }
+            #endif
         }
         .frame(height: 52)
         .background(.ultraThinMaterial)
@@ -511,6 +541,51 @@ struct ProgramGuideView: View {
                 proxy.scrollTo(horizontalScrollLeadingAnchorID)
             }
         #endif
+    }
+
+    private func scaleTimeline(by factor: CGFloat, around anchor: UnitPoint) {
+        let previousMinuteHeight = minuteHeight
+        let updatedMinuteHeight = min(
+            max(previousMinuteHeight * factor, minimumMinuteHeight), maximumMinuteHeight)
+        guard updatedMinuteHeight != previousMinuteHeight else { return }
+
+        let sectionHeaderHeight: CGFloat = 52
+        let previousTimelineHeight = CGFloat(timelineHours * 60) * previousMinuteHeight
+        let anchoredTimelineY = min(
+            max(previousTimelineHeight * anchor.y, 0),
+            previousTimelineHeight
+        )
+        let anchorViewportY = min(
+            max(
+                sectionHeaderHeight + anchoredTimelineY - verticalScrollOffset,
+                sectionHeaderHeight
+            ),
+            viewportHeight
+        )
+        let scale = updatedMinuteHeight / previousMinuteHeight
+        let updatedTimelineHeight = CGFloat(timelineHours * 60) * updatedMinuteHeight
+        let maximumVerticalOffset = max(
+            sectionHeaderHeight + updatedTimelineHeight - viewportHeight,
+            0
+        )
+        let updatedVerticalOffset = min(
+            max(sectionHeaderHeight + anchoredTimelineY * scale - anchorViewportY, 0),
+            maximumVerticalOffset
+        )
+
+        minuteHeight = updatedMinuteHeight
+        verticalScrollOffset = updatedVerticalOffset
+
+        let maximumHorizontalOffset = max(contentWidth - viewportWidth, 0)
+        let horizontalOffset = min(
+            max(offsetTracker.horizontalOffset, 0),
+            maximumHorizontalOffset
+        )
+        if maximumHorizontalOffset > 0 {
+            scrollPosition = ScrollPosition(x: horizontalOffset, y: updatedVerticalOffset)
+        } else {
+            scrollPosition = ScrollPosition(y: updatedVerticalOffset)
+        }
     }
 
     private func updateDisplayChannels() {
