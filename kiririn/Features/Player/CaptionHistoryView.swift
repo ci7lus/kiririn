@@ -35,7 +35,7 @@ struct CaptionHistoryView: View {
                     .frame(minWidth: 52, alignment: .leading)
 
                 Text(item.text)
-                    .font(.body)
+                    .font(.systemWithARIBFallback(.body))
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -55,7 +55,7 @@ struct CaptionHistoryView: View {
                 .buttonStyle(.plain)
 
                 Text(item.text)
-                    .font(.body)
+                    .font(.systemWithARIBFallback(.body))
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)

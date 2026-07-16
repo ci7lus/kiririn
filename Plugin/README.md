@@ -107,7 +107,7 @@ MyPlugin/
 - `window.kiririn.getRuntimeInfo()`
 - `window.kiririn.onDeeplinkOpened(...)`
 - `window.kiririn.onCaptureTaken(...)`
-- `window.kiririn.play()` / `pause()` / `togglePlayPause()` / `seek()`
+- `window.kiririn.play()` / `pause()` / `togglePlayPause()` / `seek()` / `seekToTime()`
 - `window.kiririn.getCaptureBlob(...)`
 - `window.kiririn.sendMessage(...)`
 

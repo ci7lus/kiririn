@@ -7,10 +7,15 @@ enum PlayerPlaybackOptionCatalog {
         return "\(String(format: "%g", rate))x"
     }
 
-    static func audioTrackLabel(index: Int, track: PlayerAudioTrack) -> String {
+    static func audioTrackLabel(
+        index: Int,
+        selection: PlayerAudioTrackSelection
+    ) -> String {
+        let track = selection.track
         let base = "トラック\(index + 1)"
-        guard track.channels > 0 else { return base }
-        return "\(base)（\(track.channels)ch）"
+        let channelLabel = track.channels > 0 ? "\(base)（\(track.channels)ch）" : base
+        guard let role = selection.dualMonoRole else { return channelLabel }
+        return "\(channelLabel)\(role.displayName)"
     }
 
     static func videoTrackLabel(index: Int, track: PlayerVideoTrack) -> String {
@@ -85,16 +90,27 @@ struct PlayerPlaybackOptionMenuEntries: View {
         Menu {
             Picker(
                 "音声トラック",
-                selection: Binding(
-                    get: { playerState.selectedAudioTrack },
-                    set: { if let track = $0 { playerState.selectAudioTrack(track) } }
+                selection: Binding<PlayerAudioTrackSelection?>(
+                    get: { playerState.selectedAudioTrackSelection },
+                    set: { playerState.selectAudioTrack($0) }
                 )
             ) {
-                Text("トラックなし").tag(PlayerAudioTrack?.none).disabled(true).selectionDisabled()
+                Text("トラックなし")
+                    .tag(PlayerAudioTrackSelection?.none)
+                    .disabled(true)
+                    .selectionDisabled()
                 ForEach(Array(playerState.availableAudioTracks.enumerated()), id: \.element.id) {
                     index, track in
-                    Text(PlayerPlaybackOptionCatalog.audioTrackLabel(index: index, track: track))
-                        .tag(PlayerAudioTrack?.some(track))
+                    ForEach(PlayerAudioTrackSelection.options(for: track), id: \.self) {
+                        selection in
+                        Text(
+                            PlayerPlaybackOptionCatalog.audioTrackLabel(
+                                index: index,
+                                selection: selection
+                            )
+                        )
+                        .tag(PlayerAudioTrackSelection?.some(selection))
+                    }
                 }
             }
             .labelsHidden()

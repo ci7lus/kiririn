@@ -84,14 +84,14 @@ struct PlayerOverlayView_iOS: View {
     }
 
     private var displayTime: Double {
-        if playerState.isSeeking,
+        if playerState.isScrubbing,
             let pos = scrubPosition,
             let initPos = initialScrubPosition,
             let initTime = initialScrubTime,
             displayDuration > 0
         {
             let delta = Double(pos - initPos)
-            return initTime + delta * displayDuration
+            return min(max(0, initTime + delta * displayDuration), displayDuration)
         }
         return playerState.playbackStatus.time
     }
@@ -105,7 +105,7 @@ struct PlayerOverlayView_iOS: View {
     }
 
     private var displayProgress: Double {
-        if playerState.isSeeking, let scrub = scrubPosition {
+        if playerState.isScrubbing, let scrub = scrubPosition {
             return Double(scrub)
         }
         return Double(playerState.playbackStatus.position)
@@ -1954,16 +1954,16 @@ struct PlayerOverlayView_iOS: View {
 
     private func seekToBeginning() {
         guard isSeekActionAvailable else { return }
-        playerState.seek(to: 0)
+        playerState.seek(toTime: 0)
     }
 
     private func updateScrub(relativeX: CGFloat, availableWidth: CGFloat) {
         guard availableWidth > 0 else { return }
-        if !playerState.isSeeking {
+        if !playerState.isScrubbing {
             initialScrubPosition = playerState.playbackStatus.position
             initialScrubTime = playerState.playbackStatus.time
         }
-        playerState.isSeeking = true
+        playerState.isScrubbing = true
         let newProgress = min(max(0, relativeX / availableWidth), 1)
         scrubPosition = Float(newProgress)
     }
@@ -1971,7 +1971,7 @@ struct PlayerOverlayView_iOS: View {
     private func updateScrubFromThumbDrag(translationX: CGFloat, availableWidth: CGFloat) {
         guard availableWidth > 0 else { return }
         let baseProgress: Float
-        if !playerState.isSeeking {
+        if !playerState.isScrubbing {
             baseProgress = playerState.playbackStatus.position
             initialScrubPosition = baseProgress
             initialScrubTime = playerState.playbackStatus.time
@@ -1981,16 +1981,16 @@ struct PlayerOverlayView_iOS: View {
                 ?? scrubPosition
                 ?? playerState.playbackStatus.position
         }
-        playerState.isSeeking = true
+        playerState.isScrubbing = true
         let newProgress = min(max(0, CGFloat(baseProgress) + translationX / availableWidth), 1)
         scrubPosition = Float(newProgress)
     }
 
     private func finishScrub() {
-        if playerState.isSeeking, let scrub = scrubPosition {
-            seekToPosition(scrub)
+        if playerState.isScrubbing, scrubPosition != nil {
+            playerState.seek(toTime: displayTime)
         }
-        playerState.isSeeking = false
+        playerState.isScrubbing = false
         scrubPosition = nil
         initialScrubPosition = nil
         initialScrubTime = nil
@@ -2142,7 +2142,7 @@ struct PlayerOverlayView_iOS: View {
         VStack(spacing: 10) {
             if isSeekActionAvailable {
                 GeometryReader { geo in
-                    let trackHeight: CGFloat = playerState.isSeeking ? 10 : 5
+                    let trackHeight: CGFloat = playerState.isScrubbing ? 10 : 5
                     let interactionHeight: CGFloat = 24
                     let progress = CGFloat(displayProgress)
                     let availableWidth = geo.size.width - horizontalPadding * 2
@@ -2186,7 +2186,7 @@ struct PlayerOverlayView_iOS: View {
                     .frame(height: 44)
                     .animation(
                         .spring(response: 0.2, dampingFraction: 0.75),
-                        value: playerState.isSeeking)
+                        value: playerState.isScrubbing)
                 }
                 .frame(height: 44)
             }
@@ -2243,7 +2243,7 @@ struct PlayerOverlayView_iOS: View {
                         .frame(width: 52, alignment: .leading)
                 }
 
-                glassSeekTrack(trackHeight: playerState.isSeeking ? 8 : 6, showsThumb: false)
+                glassSeekTrack(trackHeight: playerState.isScrubbing ? 8 : 6, showsThumb: false)
 
                 if displayDuration > 0 {
                     Text("-\(max(0, displayDuration - displayTime).playerTimeString)")
@@ -2310,7 +2310,7 @@ struct PlayerOverlayView_iOS: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .animation(
                 .spring(response: 0.2, dampingFraction: 0.75),
-                value: playerState.isSeeking)
+                value: playerState.isScrubbing)
         }
         .frame(height: 30)
     }
@@ -2367,11 +2367,11 @@ struct PlayerOverlayView_iOS: View {
     }
 
     private func seek(to seconds: Double) {
-        guard isSeekActionAvailable, let player = playerState.player else { return }
+        guard isSeekActionAvailable else { return }
         let current = playerState.playbackStatus.time
         let delta = seconds - current
         let clamped = min(max(0, seconds), max(displayDuration, 0))
-        player.time = VLCTime(int: Int32((clamped * 1000).rounded()))
+        playerState.seek(toTime: clamped)
         showSeekFeedback(for: delta)
     }
 
@@ -2379,10 +2379,6 @@ struct PlayerOverlayView_iOS: View {
         guard isSeekActionAvailable, let player = playerState.player else { return }
         player.jump(withOffset: Int32(seconds) * 1000)
         showSeekFeedback(for: seconds)
-    }
-
-    private func seekToPosition(_ position: Float) {
-        playerState.seek(to: position)
     }
 
     private func showVolumeFeedback() {

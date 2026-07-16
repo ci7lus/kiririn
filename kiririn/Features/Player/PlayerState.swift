@@ -22,6 +22,7 @@ nonisolated struct PlayerAudioTrack: Identifiable, Hashable, Sendable {
     let id: String
     let name: String
     let channels: Int
+    let isDualMono: Bool
 }
 
 nonisolated struct PlayerVideoTrack: Identifiable, Hashable, Sendable {
@@ -221,6 +222,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     var player: VLCMediaPlayer?
     var isPlaying = false
     var isPlaybackLoading = false
+    var isPlaybackSeeking = false
     var showControls = true
     var playbackRate: Float = 1.0
     var volume: Float = 100
@@ -230,6 +232,13 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     var isPipAvailable = false
     var availableAudioTracks: [PlayerAudioTrack] = []
     var selectedAudioTrack: PlayerAudioTrack?
+    var selectedAudioTrackSelection: PlayerAudioTrackSelection? {
+        guard let selectedAudioTrack else { return nil }
+        return .current(
+            track: selectedAudioTrack,
+            stereoMode: selectedAudioStereoMode
+        )
+    }
     var availableVideoTracks: [PlayerVideoTrack] = []
     var selectedVideoTrack: PlayerVideoTrack?
     var selectedAudioStereoMode: PlayerAudioStereoMode = .unset
@@ -244,9 +253,9 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     var pluginReloadToken = 0
     var perPluginReloadTokens: [String: Int] = [:]
     var playbackErrorMessage: String?
-    var isSeeking = false {
+    var isScrubbing = false {
         didSet {
-            if !isSeeking && showControls {
+            if !isScrubbing && showControls {
                 startControlsAutoHide()
             }
         }
@@ -305,7 +314,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     var isActive: Bool { currentPlayable != nil }
 
     var showsPlaybackLoadingIndicator: Bool {
-        player == nil || isPlaybackLoading
+        player == nil || isPlaybackLoading || isPlaybackSeeking
     }
 
     private var pendingCapturePath: URL?
@@ -576,6 +585,22 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         playbackStatus.position = position
     }
 
+    func seek(toTime time: Double) {
+        guard let player, player.isSeekable, time.isFinite else { return }
+        let duration = currentPlayable?.length ?? 0
+        let clampedTime =
+            duration.isFinite && duration > 0
+            ? min(max(0, time), duration)
+            : max(0, time)
+        let milliseconds = min((clampedTime * 1000).rounded(), Double(Int32.max))
+        let appliedTime = milliseconds / 1000
+        player.time = VLCTime(int: Int32(milliseconds))
+        playbackStatus.time = appliedTime
+        if duration.isFinite && duration > 0 {
+            playbackStatus.position = Float(min(max(0, appliedTime / duration), 1))
+        }
+    }
+
     func setVolume(_ value: Float) {
         volume = min(max(0, value), 200)
         applyAudioOutput()
@@ -586,15 +611,21 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         applyAudioOutput()
     }
 
-    func selectAudioTrack(_ option: PlayerAudioTrack?) {
+    func selectAudioTrack(_ selection: PlayerAudioTrackSelection?) {
         guard let player else { return }
 
-        if let option,
-            let index = player.audioTracks.firstIndex(where: { $0.trackId == option.id })
-        {
-            player.selectTrack(at: index, type: .audio)
-            selectedAudioTrack = option
-            selectedAudioTrackID = option.id
+        if let selection {
+            let track = selection.track
+            if selectedAudioTrackID != track.id {
+                guard let index = player.audioTracks.firstIndex(where: { $0.trackId == track.id })
+                else { return }
+                player.selectTrack(at: index, type: .audio)
+            }
+            selectedAudioTrack = track
+            selectedAudioTrackID = track.id
+            if let stereoMode = selection.stereoMode {
+                selectAudioStereoMode(stereoMode)
+            }
             return
         }
 
@@ -645,14 +676,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
         let tracks = player.audioTracks
             .filter { !$0.trackId.isEmpty }
-            .map { track -> PlayerAudioTrack in
-                let channels = track.audio.map { Int($0.channelsNumber) } ?? 0
-                return PlayerAudioTrack(
-                    id: track.trackId,
-                    name: track.trackName,
-                    channels: channels
-                )
-            }
+            .map(makeAudioTrack)
         // トラック更新イベントは高頻度で発火するため、変化時のみ書き込む
         // （@Observable は同値でも代入のたびに通知し、メニュー等の UI を作り直してしまう）
         if availableAudioTracks != tracks {
@@ -663,6 +687,44 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         if selectedAudioTrack != selected {
             selectedAudioTrack = selected
         }
+    }
+
+    private func makeAudioTrack(_ track: VLCMediaPlayer.Track) -> PlayerAudioTrack {
+        let audio = track.audio
+        return PlayerAudioTrack(
+            id: track.trackId,
+            name: track.trackName,
+            channels: audio.map { Int($0.channelsNumber) } ?? 0,
+            isDualMono: audio?.isDualMono ?? false
+        )
+    }
+
+    private func updateAudioTrack(withID trackID: String) {
+        guard let player,
+            let track = player.audioTracks.first(where: { $0.trackId == trackID }),
+            let index = availableAudioTracks.firstIndex(where: { $0.id == trackID })
+        else {
+            loadAudioTracks()
+            return
+        }
+
+        let updatedTrack = makeAudioTrack(track)
+        if availableAudioTracks[index] != updatedTrack {
+            availableAudioTracks[index] = updatedTrack
+        }
+        if selectedAudioTrackID == trackID, selectedAudioTrack != updatedTrack {
+            selectedAudioTrack = updatedTrack
+        }
+    }
+
+    private func refreshAudioTrackState(updatedTrackID: String? = nil) {
+        if let updatedTrackID {
+            updateAudioTrack(withID: updatedTrackID)
+        } else {
+            loadAudioTracks()
+        }
+        syncAudioModesFromVLC()
+        applyAudioOutput()
     }
 
     private func loadVideoTracks() {
@@ -1059,7 +1121,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         controlsTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                if self.isSeeking {
+                if self.isScrubbing {
                     self.startControlsAutoHide()
                     return
                 }
@@ -1084,6 +1146,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     func stop() {
         player?.stop()
         isPlaybackLoading = false
+        isPlaybackSeeking = false
         playbackStatus = .init(
             playerID: self.id, playableID: nil, isPlaying: false, time: 0, position: 0,
             rate: playbackRate)
@@ -1114,6 +1177,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
         isPlaying = false
         isPlaybackLoading = false
+        isPlaybackSeeking = false
         isPipEnabled = false
         isPipAvailable = false
         availableAudioTracks = []
@@ -1442,6 +1506,12 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         }
     }
 
+    private func setPlaybackSeekingIfChanged(_ value: Bool) {
+        if isPlaybackSeeking != value {
+            isPlaybackSeeking = value
+        }
+    }
+
     private func setPlayingIfChanged(_ value: Bool) {
         if isPlaying != value {
             isPlaying = value
@@ -1533,8 +1603,14 @@ extension PlayerState {
                     playbackStatus.time = time
                 }
             }
+            logger.debug(
+                "playback time changed: position=\(player.position), time=\(time), duration=\(duration)"
+            )
             let position = Float(player.position)
-            if position.isFinite {
+            if position == -1.0 {
+                setPlaybackSeekingIfChanged(true)
+            } else if position.isFinite {
+                setPlaybackSeekingIfChanged(false)
                 let clampedPosition = min(max(position, 0), 1)
                 if playbackStatus.position != clampedPosition {
                     playbackStatus.position = clampedPosition
@@ -1556,9 +1632,7 @@ extension PlayerState {
     nonisolated func mediaPlayerTrackAdded(_ trackId: String, with trackType: VLCMedia.TrackType) {
         Task { @MainActor in
             if trackType == .audio {
-                loadAudioTracks()
-                syncAudioModesFromVLC()
-                applyAudioOutput()
+                refreshAudioTrackState()
             } else if trackType == .video {
                 loadVideoTracks()
             } else if trackType == .text {
@@ -1572,9 +1646,7 @@ extension PlayerState {
     {
         Task { @MainActor in
             if trackType == .audio {
-                loadAudioTracks()
-                syncAudioModesFromVLC()
-                applyAudioOutput()
+                refreshAudioTrackState()
             } else if trackType == .video {
                 loadVideoTracks()
             } else if trackType == .text {
@@ -1591,8 +1663,7 @@ extension PlayerState {
                 refreshSubtitleTrack()
                 applySubtitleSelection()
             } else if trackType == .audio {
-                syncAudioModesFromVLC()
-                applyAudioOutput()
+                refreshAudioTrackState(updatedTrackID: trackId)
             }
         }
     }
@@ -1605,9 +1676,7 @@ extension PlayerState {
         Task { @MainActor in
             if trackType == .audio {
                 selectedAudioTrackID = selectedId
-                loadAudioTracks()
-                syncAudioModesFromVLC()
-                applyAudioOutput()
+                refreshAudioTrackState()
             } else if trackType == .text {
                 selectedTextTrackID = selectedId.isEmpty ? nil : selectedId
                 if selectedId.isEmpty && !unselectedId.isEmpty {
