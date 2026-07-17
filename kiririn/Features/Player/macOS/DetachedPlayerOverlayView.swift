@@ -930,7 +930,7 @@
 
         private func finishSeek() {
             if isSeeking {
-                playerState.seek(to: Float(seekValue))
+                playerState.seek(toTime: displayTime)
             }
             isSeeking = false
         }
@@ -1036,13 +1036,18 @@
             noAudioItem.state = playerState.selectedAudioTrack == nil ? .on : .off
             audioMenu.addItem(noAudioItem)
             for (index, track) in playerState.availableAudioTracks.enumerated() {
-                let item = ClosureMenuItem(
-                    title: PlayerPlaybackOptionCatalog.audioTrackLabel(index: index, track: track)
-                ) { [playerState] in
-                    playerState.selectAudioTrack(track)
+                for selection in PlayerAudioTrackSelection.options(for: track) {
+                    let item = ClosureMenuItem(
+                        title: PlayerPlaybackOptionCatalog.audioTrackLabel(
+                            index: index,
+                            selection: selection
+                        )
+                    ) { [playerState] in
+                        playerState.selectAudioTrack(selection)
+                    }
+                    item.state = playerState.selectedAudioTrackSelection == selection ? .on : .off
+                    audioMenu.addItem(item)
                 }
-                item.state = playerState.selectedAudioTrack == track ? .on : .off
-                audioMenu.addItem(item)
             }
             menu.addItem(submenuItem(title: "音声トラック", submenu: audioMenu))
 

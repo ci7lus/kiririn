@@ -846,7 +846,7 @@ private struct PluginWebView: PluginWebViewRepresentable {
             "appVersion": appVersion ?? NSNull(),
             "buildVersion": buildVersion,
             "bundleIdentifier": bundle.bundleIdentifier ?? NSNull(),
-            "bridgeVersion": 2,
+            "bridgeVersion": 3,
             "displayAreaType": displayArea.rawValue,
             "playerID": runtimePlayerID,
         ]
@@ -1107,6 +1107,10 @@ private struct PluginWebView: PluginWebViewRepresentable {
                     window.webkit.messageHandlers.kiririn.postMessage({type: 'player:seek', data: {position: position, playerID: playerID || null}});
                 },
 
+                seekToTime: function(time, playerID) {
+                    window.webkit.messageHandlers.kiririn.postMessage({type: 'player:seekToTime', data: {time: time, playerID: playerID || null}});
+                },
+
                 getCaptureBlob: function(captureID, variant) {
                     return this._performCaptureBlobRequest(captureID, variant);
                 },
@@ -1231,6 +1235,7 @@ private struct PluginWebView: PluginWebViewRepresentable {
                     await handleCaptureBlobRequest(data)
                 } else if type == "player:play" || type == "player:pause"
                     || type == "player:togglePlayPause" || type == "player:seek"
+                    || type == "player:seekToTime"
                 {
                     let data = body["data"] as? [String: Any]
                     let requestedPlayerID = data?["playerID"] as? String
@@ -1254,6 +1259,10 @@ private struct PluginWebView: PluginWebViewRepresentable {
                     case "player:seek":
                         if let rawPosition = data?["position"] as? Double {
                             target.seek(to: Float(max(0.0, min(1.0, rawPosition))))
+                        }
+                    case "player:seekToTime":
+                        if let time = data?["time"] as? Double {
+                            target.seek(toTime: time)
                         }
                     default:
                         break

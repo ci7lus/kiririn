@@ -12,6 +12,55 @@ import Testing
 
 struct KiririnTests {
 
+    @Test func audioTrackLabelShowsDualMonoRoles() {
+        let track = PlayerAudioTrack(
+            id: "audio-1",
+            name: "Audio 1",
+            channels: 2,
+            isDualMono: true
+        )
+        let selections = PlayerAudioTrackSelection.options(for: track)
+        let labels = selections.map {
+            PlayerPlaybackOptionCatalog.audioTrackLabel(index: 0, selection: $0)
+        }
+
+        #expect(labels == ["トラック1（2ch）主音声", "トラック1（2ch）副音声"])
+    }
+
+    @Test func audioTrackLabelDoesNotAddRoleToRegularTrack() {
+        let track = PlayerAudioTrack(
+            id: "audio-1",
+            name: "Audio 1",
+            channels: 2,
+            isDualMono: false
+        )
+        let labels = PlayerAudioTrackSelection.options(for: track).map {
+            PlayerPlaybackOptionCatalog.audioTrackLabel(index: 0, selection: $0)
+        }
+
+        #expect(labels == ["トラック1（2ch）"])
+    }
+
+    @Test func dualMonoSelectionTracksLeftAndRightStereoModes() {
+        let track = PlayerAudioTrack(
+            id: "audio-1",
+            name: "Audio 1",
+            channels: 2,
+            isDualMono: true
+        )
+        let options = PlayerAudioTrackSelection.options(for: track)
+        let selectedOptions = [PlayerAudioStereoMode.left, .right].map {
+            PlayerAudioTrackSelection.current(track: track, stereoMode: $0)
+        }
+        let fallbackSelection = PlayerAudioTrackSelection.current(
+            track: track,
+            stereoMode: .stereo
+        )
+
+        #expect(selectedOptions == options)
+        #expect(fallbackSelection == options.first)
+    }
+
     @Test func replacingARIBEnclosedGlyphsForDisplayMapsKnownBroadcastMarks() {
         let source = "🈑字幕🈔音声🆞🆧⚿㊙🈀🆬"
 
