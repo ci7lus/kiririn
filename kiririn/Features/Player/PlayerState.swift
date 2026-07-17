@@ -1248,8 +1248,8 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             return
         }
 
-        // 前回timeから10秒以上進んでいればローテーション
-        guard time - lastRotationTime >= 10 else { return }
+        // 前回timeから10秒以上変化していればローテーション
+        guard abs(time - lastRotationTime) >= 10 else { return }
 
         // 古いposを復元位置として記録する
         let staleBuffer = playbackPositionActiveBuffer == 0 ? 1 : 0
