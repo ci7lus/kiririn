@@ -1216,7 +1216,18 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             return
         }
         let liveBytePosition = player.map { Float($0.bytePosition) } ?? 0
-        let basePosition = liveBytePosition > 0 ? liveBytePosition : playbackStatus.bytePosition
+        let basePosition: Float = {
+            // 採用順
+            // player.bytePosition > 0 (MPEG-TS のみ)
+            // playbackStatus.bytePosition > 0 (MPEG-TS のみ)
+            // player.position > 0
+            // playbackStatus.position > 0
+            if liveBytePosition > 0 { return liveBytePosition }
+            if playbackStatus.bytePosition > 0 { return playbackStatus.bytePosition }
+            let livePosition = player.map { Float($0.position) } ?? 0
+            if livePosition > 0 { return livePosition }
+            return playbackStatus.position
+        }()
         let position = min(max(basePosition, 0), 1)
         guard position > 0 else { return }
 
@@ -1325,25 +1336,16 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             logger.info("no playback position found: id=\(playableID)")
             return
         }
-        guard position > 0, position < 0.985 else {
+        guard position > 0, position < 1 else {
             logger.info(
                 "playback position skipped by range: id=\(playableID), position=\(position)")
             return
         }
         guard currentPlayable?.id == playableID, let player else { return }
-        let before = Float(player.bytePosition)
         player.position = Double(position)
-        let applied = Float(player.bytePosition)
-        if applied > 0.001 {
-            playbackStatus.bytePosition = applied
-            logger.info(
-                "restored playback position: id=\(playableID), requested=\(position), applied=\(applied)"
-            )
-        } else {
-            logger.warning(
-                "playback restore did not apply: id=\(playableID), requested=\(position), before=\(before), applied=\(applied)"
-            )
-        }
+        logger.info(
+            "restored playback position: id=\(playableID), requested=\(position)"
+        )
     }
 
     func adoptSecurityScopedPlaybackURL(_ url: URL?) {
@@ -1651,7 +1653,7 @@ extension PlayerState {
                 }
             }
             let position = Float(player.position)
-            if position == -1.0 {
+            if position < 0 {
                 setPlaybackSeekingIfChanged(true)
             } else if position.isFinite {
                 setPlaybackSeekingIfChanged(false)
