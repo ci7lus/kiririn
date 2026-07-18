@@ -246,6 +246,25 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     var selectedAudioMixMode: PlayerAudioMixMode = .unset
     var showingPluginOverlay = true
     var plugins: [PluginDefinition] = []
+    var dataBroadcastSession: DataBroadcastSession?
+    var bmlAvailable: Bool {
+        guard let session = dataBroadcastSession else { return false }
+        switch session.status {
+        case .unsupported, .failed:
+            return false
+        default:
+            return true
+        }
+    }
+    /// Whether the BML content is currently presenting itself. Visibility is
+    /// content-driven (ARIB receivers auto-start data broadcasting in an
+    /// invisible state; the content shows itself upon receiving the
+    /// DataButton key), so this mirrors web-bml's `invisible` state rather
+    /// than any native toggle.
+    var bmlContentVisible: Bool {
+        guard let session = dataBroadcastSession else { return false }
+        return session.status == .active && !session.isInvisible
+    }
     var isRecording = false
     var caption: String = ""
     var captionHistory: [CaptionHistoryItem] = []
@@ -322,6 +341,8 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
     private var pendingCapturePath: URL?
     private var pendingPluginOverlayTask: Task<CGImage?, Never>?
+    private var pendingDataBroadcastSnapshotTask: Task<DataBroadcastCaptureSnapshot?, Never>?
+    private var pendingDataBroadcastLayout: DataBroadcastCaptureLayout?
     private var pendingOverlayManifestIDs: [String] = []
     private let vlcLogForwarder = VLCLogForwarder()
 
@@ -368,6 +389,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         currentPlayable = playableForPlayback
         captionHistory = []
         nextProgram = nil
+        setupDataBroadcastSessionIfNeeded()
         startPeriodicRefresh()
         startProgramBootstrapRefreshLoop()
         Task { @MainActor [weak self] in
@@ -1078,6 +1100,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             let current = await manager.currentProgram(for: resolvedService)
             guard currentPlayable?.id == expectedPlayableID else { return }
             currentPlayable?.program = current
+            dataBroadcastSession?.refreshProgramInfo()
 
             let next = await manager.nextProgram(for: resolvedService, currentProgram: current)
             guard currentPlayable?.id == expectedPlayableID else { return }
@@ -1158,6 +1181,8 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     }
 
     func cleanup(releasePlayer: Bool = false, releaseSecurityScope: Bool = false) {
+        dataBroadcastSession?.stop()
+        dataBroadcastSession = nil
         savePlaybackPositionIfNeeded()
         restoreAfterPlayingTask?.cancel()
         restoreAfterPlayingTask = nil
@@ -1206,6 +1231,159 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         if releaseSecurityScope {
             releaseSecurityScopedPlaybackURL()
         }
+    }
+
+    /// データ放送(BML)対応。実験的機能につき既定はオフ - see
+    /// kiririn/Features/Settings/DataBroadcastSettingsView.swift for the
+    /// toggle backing this key.
+    private func setupDataBroadcastSessionIfNeeded() {
+        dataBroadcastSession?.stop()
+        dataBroadcastSession = nil
+
+        guard UserDefaults.standard.bool(forKey: DataBroadcastSettings.enabledKey) else {
+            return
+        }
+        guard case .liveService = currentPlayable?.source else { return }
+        guard let serverId = currentPlayable?.serverId,
+            let provider = manager?.providers[serverId] as? (any DataBroadcastProviding),
+            let service = currentPlayable?.displayService,
+            let endpoint = provider.dataBroadcastEndpoint(for: service)
+        else { return }
+
+        let session = DataBroadcastSession(
+            endpoint: endpoint,
+            postalCode: DataBroadcastSettings.postalCode(),
+            programInfoProvider: { [weak self] in
+                self?.makeBMLProgramInfoPayload()
+            },
+            tuneHandler: { [weak self] request in
+                self?.handleBMLTuneRequest(request)
+            },
+            audioStreamHandler: { [weak self] request in
+                self?.handleBMLAudioStreamRequest(request)
+            }
+        )
+        session.setAudioOutput(volume: volume, isMuted: isMuted)
+        dataBroadcastSession = session
+    }
+
+    private func handleBMLTuneRequest(_ request: BMLTuneRequest) {
+        let expectedPlayableID = currentPlayable?.id
+        Task { @MainActor [weak self] in
+            guard let self, let expectedPlayableID,
+                self.currentPlayable?.id == expectedPlayableID
+            else { return }
+
+            if let currentService = self.currentPlayable?.displayService,
+                request.matches(currentService)
+            {
+                return
+            }
+
+            guard let manager = self.manager,
+                let service = manager.bmlTuneService(
+                    for: request, preferredServerId: self.currentPlayable?.serverId)
+            else {
+                self.logger.warning("BML tune target is unavailable")
+                return
+            }
+
+            guard let provider = manager.liveProvider(for: service.serverId) else { return }
+            let currentProgram = await manager.currentProgram(for: service)
+            guard self.currentPlayable?.id == expectedPlayableID else { return }
+
+            do {
+                let playable = try provider.buildLiveStreamPlayable(
+                    service: service, currentProgram: currentProgram)
+                self.play(playable: playable)
+            } catch {
+                self.logger.warning("BML tune failed: \(error)")
+            }
+        }
+    }
+
+    /// BMLコンテンツからの音声ES切替 (object.setMainAudioStream)。VLCの音声
+    /// トラックをPID(または序数フォールバック)で選び、デュアルモノの主/副は
+    /// ステレオモード(左右チャンネル)へマップする。
+    private func handleBMLAudioStreamRequest(_ request: BMLAudioStreamRequest) {
+        guard let player else { return }
+        let tracks = player.audioTracks
+        guard
+            let index = Self.bmlTrackIndex(
+                trackIds: tracks.map { $0.trackId },
+                pid: request.pid, ordinal: request.audioIndex)
+        else {
+            logger.warning(
+                "BML setMainAudioStream: no matching audio track (componentId=\(request.componentId) pid=\(String(describing: request.pid)) trackIds=\(tracks.map { $0.trackId }))"
+            )
+            return
+        }
+        logger.info(
+            "BML setMainAudioStream: selecting audio track \(index) (trackId=\(tracks[index].trackId) channelId=\(String(describing: request.channelId)))"
+        )
+        player.selectTrack(at: index, type: .audio)
+        selectedAudioTrackID = tracks[index].trackId
+        selectedAudioTrack = availableAudioTracks.first(where: { $0.id == tracks[index].trackId })
+
+        // TR-B14の音声チャンネルID: 1=主(デュアルモノ左), 2=副(右), 3=主+副
+        switch request.channelId {
+        case 1:
+            selectAudioStereoMode(.left)
+        case 2:
+            selectAudioStereoMode(.right)
+        case 3:
+            selectAudioStereoMode(.stereo)
+        default:
+            // チャンネル指定なし: 以前のBML切替で左右に振っていた場合のみ戻す
+            // (ユーザーが選んだその他のモードには触らない)。
+            if selectedAudioStereoMode == .left || selectedAudioStereoMode == .right {
+                selectAudioStereoMode(.unset)
+            }
+        }
+    }
+
+    /// VLC 4のTrackIdはTS demuxではESのID(=PID)由来の安定ID ("audio/362"の
+    /// ような形式)。まずPIDの一致で照合し、TrackIdの形式が想定と違った場合は
+    /// PMT内の同種ES序数で照合する。テスト容易性のためnonisolated static。
+    nonisolated static func bmlTrackIndex(trackIds: [String], pid: Int?, ordinal: Int?) -> Int? {
+        if let pid {
+            let pidString = String(pid)
+            if let index = trackIds.firstIndex(where: { trackId in
+                trackId == pidString
+                    || trackId.split(separator: "/").last.map(String.init) == pidString
+            }) {
+                return index
+            }
+        }
+        if let ordinal, trackIds.indices.contains(ordinal) {
+            return ordinal
+        }
+        return nil
+    }
+
+    private func makeBMLProgramInfoPayload() -> BMLProgramInfoPayload? {
+        guard let service = currentPlayable?.displayService else { return nil }
+        let program = currentPlayable?.displayProgram
+        return BMLProgramInfoPayload(
+            originalNetworkId: service.networkId,
+            transportStreamId: service.transportStreamId,
+            serviceId: service.serviceId,
+            eventId: program?.eventId,
+            eventName: program?.name,
+            startTimeUnixMillis: program.map { $0.startAt.timeIntervalSince1970 * 1000 },
+            durationSeconds: program?.duration,
+            indefiniteDuration: false,
+            networkId: service.networkId
+        )
+    }
+
+    /// Forwards the dボタン to the BML content as an ARIB DataButton key
+    /// press. The content itself toggles between invisible/visible in
+    /// response (DataButtonPressed event), exactly like a hardware receiver.
+    func pressBMLDataButton() {
+        guard let session = dataBroadcastSession, session.status == .active else { return }
+        session.sendKey(down: true, aribKeyCode: 20)  // AribKeyCode.DataButton
+        session.sendKey(down: false, aribKeyCode: 20)
     }
 
     private func savePlaybackPositionIfNeeded() {
@@ -1377,18 +1555,35 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         )
         let snapshotWidth: Int32 = max(1, Int32(Double(snapshotHeight) * displayAspectRatio))
 
+        let dataBroadcastLayout: DataBroadcastCaptureLayout?
+        if bmlContentVisible, let session = dataBroadcastSession {
+            dataBroadcastLayout = session.captureLayout(outputHeight: CGFloat(snapshotHeight))
+            if let dataBroadcastLayout {
+                pendingDataBroadcastSnapshotTask = Task { @MainActor in
+                    await session.takeCaptureSnapshot(layout: dataBroadcastLayout)
+                }
+                pendingDataBroadcastLayout = dataBroadcastLayout
+            } else {
+                pendingDataBroadcastSnapshotTask = nil
+                pendingDataBroadcastLayout = nil
+            }
+        } else {
+            dataBroadcastLayout = nil
+            pendingDataBroadcastSnapshotTask = nil
+            pendingDataBroadcastLayout = nil
+        }
+
         if CaptureService.shared.shouldCompositePluginOverlay && !visibleOverlayPlugins.isEmpty {
             let playerID = self.id
             pendingOverlayManifestIDs = visibleOverlayPlugins.map(\.manifestID)
             let snapshotSize = CGSize(
-                width: CGFloat(snapshotWidth),
-                height: CGFloat(snapshotHeight)
-            )
+                width: CGFloat(snapshotWidth), height: CGFloat(snapshotHeight))
             pendingPluginOverlayTask = Task { @MainActor in
                 await PluginOverlaySnapshotRegistry.shared.takeCompositeSnapshot(
                     for: playerID,
                     targetSize: snapshotSize,
-                    targetAspectRatio: displayAspectRatio
+                    targetAspectRatio: displayAspectRatio,
+                    targetFrame: nil
                 )
             }
         } else {
@@ -1396,8 +1591,12 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             pendingOverlayManifestIDs = []
         }
 
+        // 常に通常サイズで動画スナップショットを取得する
+        let videoSnapshotWidth = snapshotWidth
+        let videoSnapshotHeight = snapshotHeight
+
         player.saveVideoSnapshot(
-            at: tempURL.path, withWidth: snapshotWidth, andHeight: snapshotHeight)
+            at: tempURL.path, withWidth: videoSnapshotWidth, andHeight: videoSnapshotHeight)
     }
 
     nonisolated private static func calculateDisplayAspectRatio(
@@ -1497,6 +1696,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     private func applyAudioOutput() {
         player?.audio?.volume = Int32(volume.rounded())
         player?.audio?.isMuted = isMuted
+        dataBroadcastSession?.setAudioOutput(volume: volume, isMuted: isMuted)
     }
 
     private func applyAudioStereoMode() {
@@ -1609,6 +1809,10 @@ extension PlayerState {
                 syncAudioModesFromVLC()
                 applyAudioOutput()
                 requestPlaybackRestoreIfPossible(trigger: "state.playing")
+                // SSE connects only after VLC actually starts pulling the
+                // stream, so it joins the tuner session `play()` created
+                // instead of racing it into creating a second one.
+                dataBroadcastSession?.startIfIdle()
             case .error:
                 setPlaybackLoadingIfChanged(false)
                 setPlayingIfChanged(false)
@@ -1806,6 +2010,18 @@ extension PlayerState {
                 }
                 let overlayManifestIDs = pendingOverlayManifestIDs
 
+                var dataBroadcastOverlayImage: CGImage?
+                var dataBroadcastLayout: DataBroadcastCaptureLayout? = nil
+                if CaptureService.shared.shouldCompositeDataBroadcast,
+                    let snapshotTask = pendingDataBroadcastSnapshotTask,
+                    let snapshot = await snapshotTask.value
+                {
+                    dataBroadcastOverlayImage = snapshot.image
+                    dataBroadcastLayout = snapshot.layout
+                }
+                pendingDataBroadcastSnapshotTask = nil
+                pendingDataBroadcastLayout = nil
+
                 try? await CaptureService.shared.saveCapture(
                     tempURL: path,
                     programName: currentPlayable?.title,
@@ -1814,7 +2030,9 @@ extension PlayerState {
                     caption: caption,
                     broadcastTime: broadcastTime,
                     overlayImage: overlayImage,
-                    overlayPluginManifestIDs: overlayManifestIDs
+                    overlayPluginManifestIDs: overlayManifestIDs,
+                    dataBroadcastOverlayImage: dataBroadcastOverlayImage,
+                    dataBroadcastLayout: dataBroadcastLayout
                 )
                 pendingCapturePath = nil
                 pendingOverlayManifestIDs = []

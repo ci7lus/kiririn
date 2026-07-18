@@ -63,6 +63,12 @@ final class CaptureService: ObservableObject {
             UserDefaults.standard.set(clipboardTarget.rawValue, forKey: clipboardTargetKey)
         }
     }
+    @Published var shouldCompositeDataBroadcast: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                shouldCompositeDataBroadcast, forKey: compositeDataBroadcastKey)
+        }
+    }
 
     let didAddCapture = PassthroughSubject<(playerID: String?, CaptureHistoryItem), Never>()
     let didUpdateCapture = PassthroughSubject<CaptureHistoryItem, Never>()
@@ -74,6 +80,7 @@ final class CaptureService: ObservableObject {
     private let copyCaptureToClipboardKey = "kiririn.capture.copy_to_clipboard"
     private let compositePluginOverlayKey = "kiririn.capture.composite_plugin_overlay"
     private let clipboardTargetKey = "kiririn.capture.clipboard_target"
+    private let compositeDataBroadcastKey = "kiririn.capture.composite_data_broadcast"
     private var cacheStore: CacheStore?
     private var activeScopedFolderURL: URL?
 
@@ -92,6 +99,8 @@ final class CaptureService: ObservableObject {
                 rawValue: UserDefaults.standard.string(forKey: "kiririn.capture.clipboard_target")
                     ?? ""
             ) ?? .original
+        self.shouldCompositeDataBroadcast = UserDefaults.standard.bool(
+            forKey: compositeDataBroadcastKey)
         loadCaptureFolder()
         updateiCloudBackupExclusion()
     }
@@ -108,7 +117,9 @@ final class CaptureService: ObservableObject {
         caption: String? = nil,
         broadcastTime: Date? = nil,
         overlayImage: CGImage? = nil,
-        overlayPluginManifestIDs: [String] = []
+        overlayPluginManifestIDs: [String] = [],
+        dataBroadcastOverlayImage: CGImage? = nil,
+        dataBroadcastLayout: DataBroadcastCaptureLayout? = nil
     ) async throws {
         applyMetadata(
             to: tempURL, programName: programName, serviceName: serviceName, caption: caption,
@@ -139,9 +150,15 @@ final class CaptureService: ObservableObject {
         var effectiveOverlayPluginManifestIDs: [String] = []
         var compositeURLForCopy: URL?
 
+        // 合成順: プラグイン → データ放送（表示順に合わせる）
+        // 両方有効な場合は、プラグイン合成結果に対してデータ放送を合成する
+        var currentBasePath = savedPath
+        var hasComposite = false
+
+        // 1. プラグイン合成
         if shouldCompositePluginOverlay, let overlay = overlayImage,
             let compositePath = try? await saveCompositedCapturePath(
-                savedPath: savedPath,
+                savedPath: currentBasePath,
                 overlayImage: overlay,
                 programName: programName,
                 serviceName: serviceName,
@@ -150,14 +167,37 @@ final class CaptureService: ObservableObject {
                 overlayPluginManifestIDs: overlayPluginManifestIDs
             )
         {
-            let updatedItem = item.withVariantPaths(item.variantPaths + [compositePath])
+            currentBasePath = compositePath
+            effectiveOverlayPluginManifestIDs = overlayPluginManifestIDs
+            hasComposite = true
+        }
+
+        // 2. データ放送合成（プラグイン合成結果に対して合成）
+        if let dataBroadcastOverlay = dataBroadcastOverlayImage,
+            let dataBroadcastLayout = dataBroadcastLayout,
+            let dataBroadcastPath = try? await saveCompositedCapturePath(
+                savedPath: currentBasePath,
+                overlayImage: dataBroadcastOverlay,
+                programName: programName,
+                serviceName: serviceName,
+                caption: caption,
+                broadcastTime: broadcastTime,
+                overlayPluginManifestIDs: [],
+                dataBroadcastLayout: dataBroadcastLayout
+            )
+        {
+            currentBasePath = dataBroadcastPath
+            hasComposite = true
+        }
+
+        if hasComposite {
+            let updatedItem = item.withVariantPaths(
+                item.variantPaths + [currentBasePath])
             await cacheStore?.updateCaptureHistoryItemVariantPaths(
                 id: updatedItem.id, variantPaths: updatedItem.variantPaths)
             didUpdateCapture.send(updatedItem)
             itemForPluginEvent = updatedItem
-            effectiveOverlayPluginManifestIDs = overlayPluginManifestIDs
             compositeURLForCopy = updatedItem.variantFileURL(at: 1)
-
         }
 
         if let playerID {
@@ -506,7 +546,8 @@ final class CaptureService: ObservableObject {
         serviceName: String?,
         caption: String?,
         broadcastTime: Date?,
-        overlayPluginManifestIDs: [String]
+        overlayPluginManifestIDs: [String],
+        dataBroadcastLayout: DataBroadcastCaptureLayout? = nil
     ) async throws -> String? {
         let baseURL: URL
         if savedPath.hasPrefix("/") {
@@ -522,10 +563,24 @@ final class CaptureService: ObservableObject {
                 priority: .userInitiated,
                 operation: { () -> URL? in
                     guard let baseSource = CGImageSourceCreateWithURL(baseURL as CFURL, nil),
-                        let baseImage = CGImageSourceCreateImageAtIndex(baseSource, 0, nil),
-                        let compositeImage = CaptureService.compositeImages(
-                            base: baseImage, overlay: overlayImage)
+                        let baseImage = CGImageSourceCreateImageAtIndex(baseSource, 0, nil)
                     else { return nil }
+
+                    let compositeImage: CGImage?
+                    if let layout = dataBroadcastLayout {
+                        // データ放送合成: canvasSize に videoFrame 位置に動画を配置し、データ放送を重ねる
+                        compositeImage = CaptureService.compositeDataBroadcast(
+                            video: baseImage,
+                            dataBroadcast: overlayImage,
+                            layout: layout
+                        )
+                    } else {
+                        // プラグイン合成: 通常合成
+                        compositeImage = CaptureService.compositeImages(
+                            base: baseImage, overlay: overlayImage)
+                    }
+
+                    guard let compositeImage else { return nil }
 
                     let tempDir = FileManager.default.temporaryDirectory
                     let tempURL = tempDir.appendingPathComponent(UUID().uuidString + ".jpg")
@@ -588,6 +643,43 @@ final class CaptureService: ObservableObject {
         else { return nil }
         context.draw(base, in: CGRect(x: 0, y: 0, width: width, height: height))
         context.draw(overlay, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
+    }
+
+    /// データ放送合成用: canvasSize のキャンバスに videoFrame 位置に動画を配置し、データ放送を重ねる
+    private nonisolated static func compositeDataBroadcast(
+        video: CGImage,
+        dataBroadcast: CGImage,
+        layout: DataBroadcastCaptureLayout
+    ) -> CGImage? {
+        let width = Int(layout.canvasSize.width.rounded())
+        let height = Int(layout.canvasSize.height.rounded())
+        guard width > 0, height > 0 else { return nil }
+        guard
+            let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        else { return nil }
+
+        // 背景を黒で塗りつぶし
+        context.setFillColor(CGColor(gray: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+        // videoFrame 位置に動画を配置
+        let videoFrame = CaptureImageGeometry.bitmapFrame(
+            fromTopLeft: layout.videoFrame,
+            canvasHeight: CGFloat(height)
+        )
+        context.draw(video, in: videoFrame)
+
+        // データ放送を全体に重ねる
+        context.draw(dataBroadcast, in: CGRect(x: 0, y: 0, width: width, height: height))
         return context.makeImage()
     }
 

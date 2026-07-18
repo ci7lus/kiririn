@@ -24,6 +24,7 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @State var playerState: PlayerState
+    @AppStorage(DataBroadcastSettings.enabledKey) private var isDataBroadcastEnabled = false
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
@@ -68,6 +69,9 @@ struct PlayerOverlayView_iOS: View {
     @State private var orientationButtonRotation: Double = 0
     @State private var orientationToggleTask: Task<Void, Never>?
     @State private var collapsedBarReservedBottomHeight: CGFloat = 96
+    @State private var isLandscapeBMLRemoteVisible = false
+    @State private var landscapeBMLRemoteOffset: CGSize = .zero
+    @State private var landscapeBMLRemoteDragOffset: CGSize = .zero
 
     init(
         playerState: PlayerState,
@@ -197,6 +201,12 @@ struct PlayerOverlayView_iOS: View {
                 }
 
                 floatingOrientationLockButton(geo: geo)
+
+                if isLandscapeBMLRemoteVisible {
+                    landscapeBMLRemoteOverlay(geo: geo)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .zIndex(20)
+                }
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.86), value: playerState.mode)
@@ -215,6 +225,16 @@ struct PlayerOverlayView_iOS: View {
         }
         .onChange(of: playerState.availablePanelPlugins.map(\.id)) {
             ensureLowerTabSelection()
+        }
+        .onChange(of: isDataBroadcastEnabled) {
+            ensureLowerTabSelection()
+        }
+        .onChange(of: verticalSizeClass) { _, newValue in
+            if newValue != .compact {
+                isLandscapeBMLRemoteVisible = false
+                landscapeBMLRemoteOffset = .zero
+                landscapeBMLRemoteDragOffset = .zero
+            }
         }
         .onChange(of: playerState.mode) { oldMode, newMode in
             isInfoSheetVisible = true
@@ -242,6 +262,23 @@ struct PlayerOverlayView_iOS: View {
                 showCaptureFeedback(text: "キャプチャを撮影しました", systemImage: "camera.fill")
             }
         }
+        .sheet(
+            item: Binding(
+                get: { playerState.dataBroadcastSession?.inputRequest },
+                set: { _ in }
+            )
+        ) { request in
+            BMLTextInputView(
+                request: request,
+                onSubmit: {
+                    playerState.dataBroadcastSession?.submitInput($0, requestId: request.id)
+                },
+                onCancel: {
+                    playerState.dataBroadcastSession?.cancelInput(requestId: request.id)
+                }
+            )
+            .presentationDetents([request.isMultiline ? .medium : .height(260)])
+        }
         .onChange(of: playerState.isRecording) { oldValue, newValue in
             if newValue {
                 showCaptureFeedback(text: "録画開始", systemImage: "record.circle.fill")
@@ -254,7 +291,8 @@ struct PlayerOverlayView_iOS: View {
     @ViewBuilder
     private func persistentPlayerView(geo: GeometryProxy) -> some View {
         if let player = playerState.player {
-            let frame = playerSurfaceFrame(in: geo)
+            let surfaceFrame = playerSurfaceFrame(in: geo)
+            let frame = bmlVideoFrame(in: surfaceFrame)
             ZStack {
                 Color.black
 
@@ -294,6 +332,34 @@ struct PlayerOverlayView_iOS: View {
             .position(x: frame.midX, y: frame.midY)
             .allowsHitTesting(false)
         }
+
+        if let session = playerState.dataBroadcastSession {
+            let frame = playerSurfaceFrame(in: geo)
+            BMLOverlayView_iOS(session: session)
+                .frame(width: frame.width, height: frame.height)
+                .clipShape(.rect(cornerRadius: playerState.mode == .mini ? 14 : 0))
+                .position(x: frame.midX, y: frame.midY)
+                .opacity(playerState.bmlContentVisible ? 1 : 0)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func bmlVideoFrame(in surfaceFrame: CGRect) -> CGRect {
+        guard playerState.bmlContentVisible,
+            let session = playerState.dataBroadcastSession,
+            let videoRect = session.videoRect,
+            session.webView.bounds.width > 0,
+            session.webView.bounds.height > 0
+        else { return surfaceFrame }
+
+        let scaleX = surfaceFrame.width / session.webView.bounds.width
+        let scaleY = surfaceFrame.height / session.webView.bounds.height
+        return CGRect(
+            x: surfaceFrame.minX + videoRect.minX * scaleX,
+            y: surfaceFrame.minY + videoRect.minY * scaleY,
+            width: videoRect.width * scaleX,
+            height: videoRect.height * scaleY
+        )
     }
 
     private func playerSurfaceFrame(in geo: GeometryProxy) -> CGRect {
@@ -571,6 +637,77 @@ struct PlayerOverlayView_iOS: View {
                     .animation(.easeInOut(duration: 0.2), value: playerState.showControls)
             }
         }
+    }
+
+    private func landscapeBMLRemoteOverlay(geo: GeometryProxy) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isLandscapeBMLRemoteVisible = false
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("データ放送コントローラを閉じる")
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(coordinateSpace: .global)
+                    .onChanged { value in
+                        landscapeBMLRemoteDragOffset = value.translation
+                    }
+                    .onEnded { value in
+                        let proposed = CGSize(
+                            width: landscapeBMLRemoteOffset.width + value.translation.width,
+                            height: landscapeBMLRemoteOffset.height + value.translation.height
+                        )
+                        landscapeBMLRemoteOffset = clampedLandscapeBMLRemoteOffset(
+                            proposed, in: geo)
+                        landscapeBMLRemoteDragOffset = .zero
+                    }
+            )
+
+            BMLRemoteControlView(playerState: playerState)
+        }
+        .frame(width: 220)
+        .foregroundStyle(.primary)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .position(landscapeBMLRemotePosition(in: geo))
+    }
+
+    private func landscapeBMLRemotePosition(in geo: GeometryProxy) -> CGPoint {
+        let proposed = CGSize(
+            width: landscapeBMLRemoteOffset.width + landscapeBMLRemoteDragOffset.width,
+            height: landscapeBMLRemoteOffset.height + landscapeBMLRemoteDragOffset.height
+        )
+        let offset = clampedLandscapeBMLRemoteOffset(proposed, in: geo)
+        return CGPoint(
+            x: geo.size.width - max(geo.safeAreaInsets.trailing, 12) - 110 + offset.width,
+            y: geo.size.height / 2 + offset.height
+        )
+    }
+
+    private func clampedLandscapeBMLRemoteOffset(
+        _ offset: CGSize, in geo: GeometryProxy
+    ) -> CGSize {
+        let margin: CGFloat = 8
+        let halfWidth: CGFloat = 110
+        let halfHeight = min(180, max(0, geo.size.height / 2 - margin))
+        let defaultX = geo.size.width - max(geo.safeAreaInsets.trailing, 12) - halfWidth
+        let defaultY = geo.size.height / 2
+        let minX = geo.safeAreaInsets.leading + margin + halfWidth
+        let maxX = geo.size.width - geo.safeAreaInsets.trailing - margin - halfWidth
+        let minY = geo.safeAreaInsets.top + margin + halfHeight
+        let maxY = geo.size.height - geo.safeAreaInsets.bottom - margin - halfHeight
+        return CGSize(
+            width: min(max(defaultX + offset.width, minX), maxX) - defaultX,
+            height: min(max(defaultY + offset.height, minY), maxY) - defaultY
+        )
     }
 
     @ViewBuilder
@@ -953,6 +1090,20 @@ struct PlayerOverlayView_iOS: View {
         action()
     }
 
+    @MainActor
+    func dIcon() -> UIImage? {
+        let renderer = ImageRenderer(
+            content:
+                Text("d")
+                .font(.system(size: 24))
+                .bold()
+                .italic()
+        )
+        renderer.scale = UIScreen.main.scale
+
+        return renderer.uiImage?.withRenderingMode(.alwaysTemplate)
+    }
+
     @ViewBuilder
     private var lowerContextView: some View {
         TabView(selection: $lowerTabSelection) {
@@ -962,6 +1113,37 @@ struct PlayerOverlayView_iOS: View {
             .tag("caption")
             .tabItem {
                 Label("字幕", systemImage: "captions.bubble")
+            }
+
+            if isDataBroadcastEnabled {
+                NavigationStack {
+                    if playerState.dataBroadcastSession != nil {
+                        BMLRemoteControlView(
+                            playerState: playerState,
+                            layout: .tab
+                        )
+                        .padding(.top, 24)
+                        .padding(.bottom, collapsedBarReservedBottomHeight)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .navigationBarTitleDisplayMode(.inline)
+                    } else {
+                        unavailableLowerContextView(
+                            title: "データ放送を利用できません",
+                            icon: { Text("d").italic().bold() },
+                            message: "データ放送に対応したライブ放送を再生してください"
+                        )
+                    }
+                }
+                .tag("dataBroadcast")
+                .tabItem {
+                    Label {
+                        Text("データ放送")
+                    } icon: {
+                        if let uiImage = dIcon() {
+                            Image(uiImage: uiImage)
+                        }
+                    }
+                }
             }
 
             NavigationStack {
@@ -985,7 +1167,10 @@ struct PlayerOverlayView_iOS: View {
     }
 
     private func ensureLowerTabSelection() {
-        let validTags = ["caption", "capture", "plugin"]
+        let validTags =
+            isDataBroadcastEnabled
+            ? ["caption", "dataBroadcast", "plugin"]
+            : ["caption", "plugin"]
         if !validTags.contains(lowerTabSelection) {
             lowerTabSelection = "caption"
         }
@@ -1032,14 +1217,18 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @ViewBuilder
-    private func unavailableLowerContextView(
-        title: String, systemImage: String, message: String
+    private func unavailableLowerContextView<Icon: View>(
+        title: String, @ViewBuilder icon: () -> Icon, message: String
     ) -> some View {
-        ContentUnavailableView(
-            title,
-            systemImage: systemImage,
-            description: Text(message)
-        )
+        ContentUnavailableView {
+            Label {
+                Text(title)
+            } icon: {
+                icon()
+            }
+        } description: {
+            Text(message)
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.kiririnSystemBackground)
     }
@@ -1838,6 +2027,26 @@ struct PlayerOverlayView_iOS: View {
             }
             .accessibilityLabel(
                 isFullscreen ? "フルスクリーンを終了" : "フルスクリーンにする"
+            )
+        }
+
+        if isFullscreen && playerState.dataBroadcastSession != nil {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isLandscapeBMLRemoteVisible.toggle()
+                }
+            } label: {
+                Text("d")
+                    .italic()
+                    .bold()
+                    .font(.system(size: iconSize))
+                    .foregroundStyle(.white)
+                    .frame(width: itemSize, height: itemSize)
+                    .contentShape(Rectangle())
+            }
+            .disabled(!playerState.bmlAvailable)
+            .accessibilityLabel(
+                "データ放送コントローラを表示"
             )
         }
 

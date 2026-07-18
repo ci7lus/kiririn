@@ -123,6 +123,16 @@ struct SettingsView: View {
                 }
 
                 NavigationLink {
+                    DataBroadcastSettingsView()
+                } label: {
+                    Label {
+                        Text("データ放送設定")
+                    } icon: {
+                        Text("d").italic().bold()
+                    }
+                }
+
+                NavigationLink {
                     AboutAppView()
                 } label: {
                     Label("このアプリについて", systemImage: "info.circle")

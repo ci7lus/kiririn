@@ -4,7 +4,158 @@ import Testing
 
 @testable import kiririn
 
+/// 各テストが他のテストや実アプリのUserDefaultsを汚さないよう、テストごとに
+/// 使い捨てのsuiteを払い出す(d26e7b7で消失していたヘルパーの復元)。
+private func makeIsolatedDefaults() -> (UserDefaults, String) {
+    let suiteName = "kiririn.tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defaults.removePersistentDomain(forName: suiteName)
+    return (defaults, suiteName)
+}
+
 struct StoreBehaviorTests {
+
+    @Test func dataBroadcastSettingsPersistsValidPostalCode() {
+        let (defaults, suiteName) = makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        DataBroadcastSettings.setPostalCode("0123456", in: defaults)
+
+        #expect(DataBroadcastSettings.postalCode(in: defaults) == "0123456")
+    }
+
+    @Test func dataBroadcastSettingsRejectsInvalidPostalCodes() {
+        #expect(DataBroadcastSettings.validatedPostalCode(nil) == nil)
+        #expect(DataBroadcastSettings.validatedPostalCode("") == nil)
+        #expect(DataBroadcastSettings.validatedPostalCode("123456") == nil)
+        #expect(DataBroadcastSettings.validatedPostalCode("12345678") == nil)
+        #expect(DataBroadcastSettings.validatedPostalCode("123-4567") == nil)
+        #expect(DataBroadcastSettings.validatedPostalCode("１２３４５６７") == nil)
+        #expect(DataBroadcastSettings.validatedPostalCode("1234567") == "1234567")
+    }
+
+    @Test func dataBroadcastWebStorageMirrorsSetAndRemove() {
+        let (defaults, suiteName) = makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        DataBroadcastSettings.setWebStorageItem(
+            key: "nvram_local_web=1.2.3", value: "QUJD", in: defaults)
+        DataBroadcastSettings.setWebStorageItem(
+            key: "broadcasters_7", value: #"{"a":1}"#, in: defaults)
+        #expect(
+            DataBroadcastSettings.webStorage(in: defaults) == [
+                "nvram_local_web=1.2.3": "QUJD",
+                "broadcasters_7": #"{"a":1}"#,
+            ])
+
+        DataBroadcastSettings.setWebStorageItem(
+            key: "nvram_local_web=1.2.3", value: nil, in: defaults)
+        #expect(
+            DataBroadcastSettings.webStorage(in: defaults) == ["broadcasters_7": #"{"a":1}"#])
+    }
+
+    @Test func dataBroadcastWebStorageSyncsPostalCodeSetting() {
+        let (defaults, suiteName) = makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let zipcodeKey = DataBroadcastSettings.postalCodeStorageKey
+
+        // "1500002"のbase64
+        DataBroadcastSettings.setWebStorageItem(
+            key: zipcodeKey, value: "MTUwMDAwMg==", in: defaults)
+        #expect(DataBroadcastSettings.postalCode(in: defaults) == "1500002")
+
+        // 復号できない・7桁数字でない値は郵便番号なし扱い
+        DataBroadcastSettings.setWebStorageItem(key: zipcodeKey, value: "!!!", in: defaults)
+        #expect(DataBroadcastSettings.postalCode(in: defaults) == nil)
+
+        DataBroadcastSettings.setWebStorageItem(
+            key: zipcodeKey, value: "MTUwMDAwMg==", in: defaults)
+        DataBroadcastSettings.setWebStorageItem(key: zipcodeKey, value: nil, in: defaults)
+        #expect(DataBroadcastSettings.postalCode(in: defaults) == nil)
+    }
+
+    @Test @MainActor func dataBroadcastStorageSeedScriptEmbedsSnapshotAsJSON() {
+        let script = DataBroadcastSession.storageSeedScript(snapshot: [
+            #"key"with"quotes"#: "line1\nline2\\end"
+        ])
+
+        #expect(script.contains("localStorage.clear()"))
+        #expect(script.contains(#""key\"with\"quotes""#))
+        #expect(script.contains(#""line1\nline2\\end""#))
+    }
+
+    @Test func bmlTuneRequestRequiresCompleteValidIdentifiers() {
+        let request = BMLTuneRequest(bridgeMessage: [
+            "originalNetworkId": 0x7880,
+            "transportStreamId": 0x7881,
+            "serviceId": 0x0400,
+        ])
+
+        #expect(request?.originalNetworkId == 0x7880)
+        #expect(request?.transportStreamId == 0x7881)
+        #expect(request?.serviceId == 0x0400)
+        #expect(BMLTuneRequest(bridgeMessage: ["originalNetworkId": 1]) == nil)
+        #expect(
+            BMLTuneRequest(bridgeMessage: [
+                "originalNetworkId": 1,
+                "transportStreamId": 2,
+                "serviceId": 65_536,
+            ]) == nil)
+    }
+
+    @Test func bmlAudioStreamRequestParsesNullableFields() throws {
+        // JSON nullはWKScriptMessageのbodyではNSNullで届く
+        let request = try #require(
+            BMLAudioStreamRequest(bridgeMessage: [
+                "componentId": 0x11, "channelId": NSNull(), "pid": 0x0112, "audioIndex": 1,
+            ]))
+        #expect(request.componentId == 0x11)
+        #expect(request.channelId == nil)
+        #expect(request.pid == 0x0112)
+        #expect(request.audioIndex == 1)
+
+        #expect(BMLAudioStreamRequest(bridgeMessage: ["channelId": 1]) == nil)
+    }
+
+    @Test func bmlTrackIndexPrefersPidOverOrdinalAndFallsBack() {
+        // VLC 4のTS demuxはTrackIdが "audio/<PID>" 形式
+        #expect(
+            PlayerState.bmlTrackIndex(
+                trackIds: ["audio/273", "audio/274"], pid: 274, ordinal: 0) == 1)
+        // PIDそのものの形式にも一致する
+        #expect(
+            PlayerState.bmlTrackIndex(trackIds: ["273", "274"], pid: 274, ordinal: 0) == 1)
+        // 末尾セグメントの完全一致のみ ("1274"に部分一致しない)
+        #expect(
+            PlayerState.bmlTrackIndex(
+                trackIds: ["audio/1274", "audio/274"], pid: 274, ordinal: nil) == 1)
+        // TrackIdがPIDと照合できない形式なら序数フォールバック
+        #expect(
+            PlayerState.bmlTrackIndex(
+                trackIds: ["Track1", "Track2"], pid: 274, ordinal: 1) == 1)
+        // 序数も範囲外なら不一致
+        #expect(
+            PlayerState.bmlTrackIndex(trackIds: ["Track1"], pid: 274, ordinal: 5) == nil)
+        #expect(PlayerState.bmlTrackIndex(trackIds: [], pid: nil, ordinal: nil) == nil)
+    }
+
+    @Test func bmlTuneRequestMatchesAllThreeServiceIdentifiers() throws {
+        let request = try #require(
+            BMLTuneRequest(bridgeMessage: [
+                "originalNetworkId": 1,
+                "transportStreamId": 2,
+                "serviceId": 3,
+            ]))
+        let exact = makeService(networkId: 1, transportStreamId: 2, serviceId: 3)
+        let missingTransportStream = makeService(
+            networkId: 1, transportStreamId: nil, serviceId: 3)
+        let differentTransportStream = makeService(
+            networkId: 1, transportStreamId: 4, serviceId: 3)
+
+        #expect(request.matches(exact))
+        #expect(!request.matches(missingTransportStream))
+        #expect(!request.matches(differentTransportStream))
+    }
 
     @Test func serverConfigStorePersistsConfigurationsAndEnabledStates() {
         let (defaults, suiteName) = makeIsolatedDefaults()
@@ -133,4 +284,20 @@ struct StoreBehaviorTests {
         #expect(favoriteByKey["1-101"]?.displayOrder == 1)
         #expect(favoriteByKey["1-102"]?.displayOrder == 0)
     }
+}
+
+private func makeService(networkId: Int, transportStreamId: Int?, serviceId: Int) -> TVService {
+    TVService(
+        id: "\(networkId)-\(transportStreamId ?? -1)-\(serviceId)",
+        providerIdentifier: nil,
+        serviceId: serviceId,
+        networkId: networkId,
+        transportStreamId: transportStreamId,
+        name: "Test",
+        type: .digitalTelevision,
+        remoteControlKeyId: nil,
+        hasLogoData: false,
+        channel: nil,
+        serverId: "server-1"
+    )
 }
