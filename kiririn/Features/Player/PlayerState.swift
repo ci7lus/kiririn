@@ -342,6 +342,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     private var pendingCapturePath: URL?
     private var pendingPluginOverlayTask: Task<CGImage?, Never>?
     private var pendingDataBroadcastSnapshotTask: Task<DataBroadcastCaptureSnapshot?, Never>?
+    private var pendingDataBroadcastLayout: DataBroadcastCaptureLayout?
     private var pendingOverlayManifestIDs: [String] = []
     private let vlcLogForwarder = VLCLogForwarder()
 
@@ -1561,30 +1562,28 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
                 pendingDataBroadcastSnapshotTask = Task { @MainActor in
                     await session.takeCaptureSnapshot(layout: dataBroadcastLayout)
                 }
+                pendingDataBroadcastLayout = dataBroadcastLayout
             } else {
                 pendingDataBroadcastSnapshotTask = nil
+                pendingDataBroadcastLayout = nil
             }
         } else {
             dataBroadcastLayout = nil
             pendingDataBroadcastSnapshotTask = nil
+            pendingDataBroadcastLayout = nil
         }
 
         if CaptureService.shared.shouldCompositePluginOverlay && !visibleOverlayPlugins.isEmpty {
             let playerID = self.id
             pendingOverlayManifestIDs = visibleOverlayPlugins.map(\.manifestID)
-            let snapshotSize =
-                dataBroadcastLayout?.canvasSize
-                ?? CGSize(width: CGFloat(snapshotWidth), height: CGFloat(snapshotHeight))
-            let pluginFrame = dataBroadcastLayout?.videoFrame
-            let pluginAspectRatio =
-                pluginFrame.map { Double($0.width / $0.height) }
-                ?? displayAspectRatio
+            let snapshotSize = CGSize(
+                width: CGFloat(snapshotWidth), height: CGFloat(snapshotHeight))
             pendingPluginOverlayTask = Task { @MainActor in
                 await PluginOverlaySnapshotRegistry.shared.takeCompositeSnapshot(
                     for: playerID,
                     targetSize: snapshotSize,
-                    targetAspectRatio: pluginAspectRatio,
-                    targetFrame: pluginFrame
+                    targetAspectRatio: displayAspectRatio,
+                    targetFrame: nil
                 )
             }
         } else {
@@ -1592,8 +1591,12 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             pendingOverlayManifestIDs = []
         }
 
+        // 常に通常サイズで動画スナップショットを取得する
+        let videoSnapshotWidth = snapshotWidth
+        let videoSnapshotHeight = snapshotHeight
+
         player.saveVideoSnapshot(
-            at: tempURL.path, withWidth: snapshotWidth, andHeight: snapshotHeight)
+            at: tempURL.path, withWidth: videoSnapshotWidth, andHeight: videoSnapshotHeight)
     }
 
     nonisolated private static func calculateDisplayAspectRatio(
@@ -2007,15 +2010,17 @@ extension PlayerState {
                 }
                 let overlayManifestIDs = pendingOverlayManifestIDs
 
-                if let snapshotTask = pendingDataBroadcastSnapshotTask,
+                var dataBroadcastOverlayImage: CGImage?
+                var dataBroadcastLayout: DataBroadcastCaptureLayout? = nil
+                if CaptureService.shared.shouldCompositeDataBroadcast,
+                    let snapshotTask = pendingDataBroadcastSnapshotTask,
                     let snapshot = await snapshotTask.value
                 {
-                    try? await CaptureService.shared.composeDataBroadcastCapture(
-                        at: path,
-                        snapshot: snapshot
-                    )
+                    dataBroadcastOverlayImage = snapshot.image
+                    dataBroadcastLayout = snapshot.layout
                 }
                 pendingDataBroadcastSnapshotTask = nil
+                pendingDataBroadcastLayout = nil
 
                 try? await CaptureService.shared.saveCapture(
                     tempURL: path,
@@ -2025,7 +2030,9 @@ extension PlayerState {
                     caption: caption,
                     broadcastTime: broadcastTime,
                     overlayImage: overlayImage,
-                    overlayPluginManifestIDs: overlayManifestIDs
+                    overlayPluginManifestIDs: overlayManifestIDs,
+                    dataBroadcastOverlayImage: dataBroadcastOverlayImage,
+                    dataBroadcastLayout: dataBroadcastLayout
                 )
                 pendingCapturePath = nil
                 pendingOverlayManifestIDs = []

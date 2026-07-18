@@ -43,6 +43,7 @@ struct CaptureSettingsView: View {
                     Toggle("iCloudバックアップに含める", isOn: $captureService.shouldIncludeIniCloudBackup)
                 #endif
                 Toggle("キャプチャをクリップボードにコピーする", isOn: $captureService.shouldCopyCaptureToClipboard)
+                Toggle("キャプチャにデータ放送領域を合成する", isOn: $captureService.shouldCompositeDataBroadcast)
                 Toggle("キャプチャにプラグイン領域を合成する", isOn: $captureService.shouldCompositePluginOverlay)
 
                 if captureService.shouldCopyCaptureToClipboard
