@@ -2180,8 +2180,12 @@ struct PlayerOverlayView_iOS: View {
     }
 
     private func finishScrub() {
-        if playerState.isScrubbing, scrubPosition != nil {
-            playerState.seek(toTime: displayTime)
+        if playerState.isScrubbing, let scrub = scrubPosition {
+            if displayDuration > 0 {
+                playerState.seek(toTime: displayTime)
+            } else {
+                playerState.seek(to: scrub)
+            }
         }
         playerState.isScrubbing = false
         scrubPosition = nil

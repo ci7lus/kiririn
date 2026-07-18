@@ -310,7 +310,12 @@ private struct AppCommands: Commands {
                 }
             }
 
-            CommandGroup(after: .windowArrangement) {
+            CommandGroup(replacing: .singleWindowList) {
+                Button("kiririn") {
+                    openWindow(id: AppWindowID.main.rawValue)
+                }
+                .keyboardShortcut("k", modifiers: .command)
+
                 Button("字幕履歴") {
                     openWindow(id: AppWindowID.caption.rawValue)
                 }

@@ -930,7 +930,11 @@
 
         private func finishSeek() {
             if isSeeking {
-                playerState.seek(toTime: displayTime)
+                if displayDuration > 0 {
+                    playerState.seek(toTime: displayTime)
+                } else {
+                    playerState.seek(to: Float(seekValue))
+                }
             }
             isSeeking = false
         }

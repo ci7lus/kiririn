@@ -108,6 +108,7 @@ nonisolated struct PlayerPlaybackStatus: Sendable, Codable, Equatable {
     var isPlaying: Bool
     var time: Double
     var position: Float
+    var bytePosition: Float = 0
     var rate: Float = 1.0
 }
 
@@ -295,7 +296,9 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     private var aribSubtitleTrackID: String?
     private var selectedTextTrackID: String?
     private var securityScopedPlaybackURL: URL?
-    private var lastSavedPlaybackPosition: Float = -1
+    private var playbackPositionBuffers: (Float, Float) = (-1, -1)
+    private var playbackPositionLastRotationTime: Double?
+    private var playbackPositionActiveBuffer: Int = 0
     private var didStartPlayback = false
     private var didApplyInitialPlaybackRestore = false
     private var didObservePlayingForRestore = false
@@ -393,7 +396,9 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         }
         playbackStatus.playableID = playableForPlayback.id
         playbackStatus.rate = playbackRate
-        lastSavedPlaybackPosition = -1
+        playbackPositionBuffers = (-1, -1)
+        playbackPositionLastRotationTime = nil
+        playbackPositionActiveBuffer = 0
         didApplyInitialPlaybackRestore = false
         didStartPlayback = false
         didObservePlayingForRestore = false
@@ -1155,7 +1160,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     }
 
     func close() {
-        savePlaybackPositionIfNeeded(force: true)
+        savePlaybackPositionIfNeeded()
         cleanup(releasePlayer: true, releaseSecurityScope: true)
         currentPlayable = nil
         nextProgram = nil
@@ -1175,14 +1180,17 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     }
 
     func cleanup(releasePlayer: Bool = false, releaseSecurityScope: Bool = false) {
-        savePlaybackPositionIfNeeded(force: true)
         dataBroadcastSession?.stop()
         dataBroadcastSession = nil
+        savePlaybackPositionIfNeeded()
         restoreAfterPlayingTask?.cancel()
         restoreAfterPlayingTask = nil
         didObservePlayingForRestore = false
         didStartPlayback = false
         didObservePlaybackProgressForRestore = false
+        playbackPositionBuffers = (-1, -1)
+        playbackPositionLastRotationTime = nil
+        playbackPositionActiveBuffer = 0
         refreshTimer?.invalidate()
         refreshTimer = nil
         programBootstrapRefreshTask?.cancel()
@@ -1377,25 +1385,63 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         session.sendKey(down: false, aribKeyCode: 20)
     }
 
-    private func savePlaybackPositionIfNeeded(force: Bool = false) {
+    private func savePlaybackPositionIfNeeded() {
         guard let playable = currentPlayable,
             playable.source.isRestorablePositionSource
         else { return }
         guard didApplyInitialPlaybackRestore else {
             return
         }
-        let livePosition = player.map { Float($0.position) } ?? 0
-        let basePosition = livePosition > 0 ? livePosition : playbackStatus.position
+        let liveBytePosition = player.map { Float($0.bytePosition) } ?? 0
+        let basePosition: Float = {
+            // 採用順
+            // player.bytePosition > 0 (MPEG-TS のみ)
+            // playbackStatus.bytePosition > 0 (MPEG-TS のみ)
+            // player.position > 0
+            // playbackStatus.position > 0
+            if liveBytePosition > 0 { return liveBytePosition }
+            if playbackStatus.bytePosition > 0 { return playbackStatus.bytePosition }
+            let livePosition = player.map { Float($0.position) } ?? 0
+            if livePosition > 0 { return livePosition }
+            return playbackStatus.position
+        }()
         let position = min(max(basePosition, 0), 1)
         guard position > 0 else { return }
 
-        if !force && abs(position - lastSavedPlaybackPosition) < 0.01 {
+        // timeが0の場合はバッファへの記録ごとスキップ
+        let time = playbackStatus.time
+        guard time > 0 else { return }
+
+        // 現在posをアクティブバッファに記録する
+        if playbackPositionActiveBuffer == 0 {
+            playbackPositionBuffers.0 = position
+        } else {
+            playbackPositionBuffers.1 = position
+        }
+
+        // 初回はtimeを記録して終了
+        guard let lastRotationTime = playbackPositionLastRotationTime else {
+            playbackPositionLastRotationTime = time
             return
         }
-        lastSavedPlaybackPosition = position
-        Task {
-            await cacheStore?.savePlaybackPosition(playableID: playable.id, position: position)
+
+        // 前回timeから10秒以上変化していればローテーション
+        guard abs(time - lastRotationTime) >= 10 else { return }
+
+        // 古いposを復元位置として記録する
+        let staleBuffer = playbackPositionActiveBuffer == 0 ? 1 : 0
+        let stalePosition =
+            staleBuffer == 0 ? playbackPositionBuffers.0 : playbackPositionBuffers.1
+        if stalePosition > 0 {
+            Task {
+                await cacheStore?.savePlaybackPosition(
+                    playableID: playable.id, position: stalePosition)
+            }
         }
+
+        // バッファをローテーション
+        playbackPositionActiveBuffer = staleBuffer
+        playbackPositionLastRotationTime = time
     }
 
     private func startProgramBootstrapRefreshLoop() {
@@ -1467,26 +1513,16 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             logger.info("no playback position found: id=\(playableID)")
             return
         }
-        guard position > 0, position < 0.985 else {
+        guard position > 0, position < 1 else {
             logger.info(
                 "playback position skipped by range: id=\(playableID), position=\(position)")
             return
         }
         guard currentPlayable?.id == playableID, let player else { return }
-        let before = Float(player.position)
         player.position = Double(position)
-        let applied = Float(player.position)
-        if applied > 0.001 {
-            playbackStatus.position = applied
-            lastSavedPlaybackPosition = applied
-            logger.info(
-                "restored playback position: id=\(playableID), requested=\(position), applied=\(applied)"
-            )
-        } else {
-            logger.warning(
-                "playback restore did not apply: id=\(playableID), requested=\(position), before=\(before), applied=\(applied)"
-            )
-        }
+        logger.info(
+            "restored playback position: id=\(playableID), requested=\(position)"
+        )
     }
 
     func adoptSecurityScopedPlaybackURL(_ url: URL?) {
@@ -1759,7 +1795,7 @@ extension PlayerState {
             // @Observable は同値でも代入のたびに通知するため、値が変わるときだけ書き込む。
             // （.buffering はライブ視聴中に高頻度で発火する）
             switch state {
-            case .opening, .buffering:
+            case .opening:
                 setPlaybackLoadingIfChanged(!didStartPlayback)
             case .playing:
                 didStartPlayback = true
@@ -1782,6 +1818,9 @@ extension PlayerState {
             case .paused, .stopped, .stopping:
                 setPlaybackLoadingIfChanged(false)
                 setPlayingIfChanged(false)
+                if state == .paused {
+                    savePlaybackPositionIfNeeded()
+                }
             default:
                 break
             }
@@ -1795,6 +1834,9 @@ extension PlayerState {
     nonisolated func mediaPlayerTimeChanged(_ notification: Notification) {
         Task { @MainActor in
             guard let player = player else { return }
+            logger.debug(
+                "playback time changed: position=\(player.position), bytePosition=\(player.bytePosition), time=\(player.time.intValue), duration=\(currentPlayable?.length ?? -1)"
+            )
             let time = max(0, Double(player.time.intValue) / 1000.0)
             let duration = max(0, currentPlayable?.length ?? 0)
             // @Observable は同値でも代入のたびに通知するため、値が変わるときだけ書き込む。
@@ -1804,11 +1846,15 @@ extension PlayerState {
                     playbackStatus.time = time
                 }
             }
-            logger.debug(
-                "playback time changed: position=\(player.position), time=\(time), duration=\(duration)"
-            )
+            let bytePosition = Float(player.bytePosition)
+            if bytePosition.isFinite {
+                let clampedBytePosition = min(max(bytePosition, 0), 1)
+                if playbackStatus.bytePosition != clampedBytePosition {
+                    playbackStatus.bytePosition = clampedBytePosition
+                }
+            }
             let position = Float(player.position)
-            if position == -1.0 {
+            if position < 0 {
                 setPlaybackSeekingIfChanged(true)
             } else if position.isFinite {
                 setPlaybackSeekingIfChanged(false)
@@ -1893,6 +1939,7 @@ extension PlayerState {
     }
 
     nonisolated func mediaPlayerLengthChanged(_ length: Int64) {
+        logger.debug("media player length changed: length=\(length)")
         Task { @MainActor in
             if length > 0 {
                 currentPlayable?.length = Double(length) / 1000.0
