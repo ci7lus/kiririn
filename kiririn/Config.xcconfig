@@ -1,0 +1,5 @@
+// デフォルト値
+DEVELOPMENT_TEAM = 4XKKKM86RN
+PRODUCT_BUNDLE_IDENTIFIER = jp.pronama.kiririn
+
+#include? "LocalSettings.xcconfig"
