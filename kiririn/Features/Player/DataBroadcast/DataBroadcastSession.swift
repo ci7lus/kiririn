@@ -64,6 +64,7 @@ final class DataBroadcastSession {
     private(set) var inputRequest: InputRequest?
     private var receivingClearTask: Task<Void, Never>?
     private var networkingClearTask: Task<Void, Never>?
+    private var invisibleUpdateTask: Task<Void, Never>?
 
     let webView: WKWebView
 
@@ -115,7 +116,7 @@ final class DataBroadcastSession {
     private var started = false
     private var isReady = false
     private var pendingMessages: [String] = []
-    private var didReconnectOnce = false
+    private var consecutiveFailures = 0
 
     // Module fetch scheduling.
     private struct FetchRequest {
@@ -190,7 +191,10 @@ final class DataBroadcastSession {
         networkingClearTask?.cancel()
         networkingClearTask = nil
         isNetworking = false
+        invisibleUpdateTask?.cancel()
+        invisibleUpdateTask = nil
         inputRequest = nil
+        consecutiveFailures = 0
         sseClient.cancelAll()
         // In-flight fetch Tasks capture `self` weakly and are cheap
         // no-ops if this session is deallocated before they complete.
@@ -226,14 +230,28 @@ final class DataBroadcastSession {
         sseTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
+                var receivedAnyEvent = false
                 for try await event in self.sseClient.events(
                     url: self.endpoint.eventsURL, headers: self.endpoint.headers)
                 {
                     guard !Task.isCancelled else { return }
+                    receivedAnyEvent = true
+                    // Connection is alive; reset backoff so the next drop
+                    // starts with a short delay again.
+                    self.consecutiveFailures = 0
                     self.handle(event)
                 }
-                // Stream ended cleanly (server closed it) - try once more.
-                self.maybeReconnect(reason: "stream ended")
+                // Stream ended cleanly (server closed it).
+                // If we never received any event, the server likely doesn't
+                // support this endpoint or has no data - don't reconnect.
+                if !receivedAnyEvent {
+                    self.logger.info(
+                        "data-broadcast stream ended without any events (server may not support it)"
+                    )
+                    self.status = .unsupported
+                } else {
+                    self.maybeReconnect(reason: "stream ended")
+                }
             } catch is CancellationError {
                 // Expected on stop()/teardown.
             } catch let SSEClientError.httpError(statusCode) where statusCode == 404 {
@@ -246,15 +264,24 @@ final class DataBroadcastSession {
         }
     }
 
+    /// Reconnect with exponential backoff (2s → 4s → 8s → … → 60s cap).
+    /// Gives up after too many consecutive failures without a successful
+    /// event in between. Servers that returned 404 are already marked
+    /// `.unsupported` and never reach here.
     private func maybeReconnect(reason: String) {
         guard started, status != .unsupported else { return }
-        guard !didReconnectOnce else {
+        consecutiveFailures += 1
+        let maxAttempts = 10
+        guard consecutiveFailures <= maxAttempts else {
             status = .failed(reason)
             return
         }
-        didReconnectOnce = true
+        let delay = min(pow(2.0, Double(consecutiveFailures)), 60.0)
+        logger.info(
+            "data-broadcast reconnecting in \(Int(delay))s (attempt \(consecutiveFailures)/\(maxAttempts)): \(reason)"
+        )
         Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .seconds(delay))
             guard let self, self.started else { return }
             self.connectSSE()
         }
@@ -567,8 +594,16 @@ final class DataBroadcastSession {
                 }
             }
         case "invisible":
-            isInvisible = (body["value"] as? Bool) ?? false
-            logger.info("BML invisible: \(isInvisible)")
+            let nextValue = (body["value"] as? Bool) ?? false
+            invisibleUpdateTask?.cancel()
+            invisibleUpdateTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled, let self else { return }
+                if self.isInvisible != nextValue {
+                    self.isInvisible = nextValue
+                    self.logger.info("BML invisible: \(nextValue)")
+                }
+            }
         case "receiving":
             receivingClearTask?.cancel()
             receivingClearTask = nil
