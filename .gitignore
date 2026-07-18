@@ -74,3 +74,5 @@ fastlane/test_output
 /web/bml/node_modules/
 /web/bml/dist/
 /kiririn/Features/Player/DataBroadcast/Web/dist/
+
+/kiririn/LocalSettings.xcconfig
