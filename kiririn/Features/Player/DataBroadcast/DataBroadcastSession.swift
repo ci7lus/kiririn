@@ -754,6 +754,14 @@ final class DataBroadcastSession {
         }
         webView.load(URLRequest(url: url))
     }
+    deinit {
+        let webView = self.webView
+        Task { @MainActor in
+            let contentController = webView.configuration.userContentController
+            contentController.removeScriptMessageHandler(forName: "bml")
+            contentController.removeAllUserScripts()
+        }
+    }
 }
 
 /// `WKUserContentController` retains its message handlers strongly; this
@@ -766,8 +774,8 @@ private final class LeakAversionBMLMessageHandler: NSObject, WKScriptMessageHand
     nonisolated func userContentController(
         _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
     ) {
-        Task { @MainActor in
-            guard let body = message.body as? [String: Any] else { return }
+        Task { @MainActor [weak self] in
+            guard let self, let body = message.body as? [String: Any] else { return }
             self.session?.handleBridgeMessage(body)
         }
     }
