@@ -16,7 +16,7 @@ struct DataBroadcastSettingsView: View {
                 Toggle("データ放送を有効にする", isOn: $isDataBroadcastEnabled)
             } footer: {
                 Text(
-                    "実験的機能です。Mahiron互換のデータ放送APIでのみ動作し、対応していないサーバーでは何も起こりません。"
+                    "利用には[Mahiron](https://github.com/rokoucha/Mahiron)のデータ放送用拡張APIが必要です。"
                 )
             }
             Section {

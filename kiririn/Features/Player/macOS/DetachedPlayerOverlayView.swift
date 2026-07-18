@@ -422,11 +422,10 @@
                         Button {
                             playerState.pressBMLDataButton()
                         } label: {
-                            Image(
-                                systemName:
-                                    "d.circle\(playerState.bmlContentVisible ? ".fill" : "")"
-                            )
-                            .frame(width: 20 * scale, height: 20 * scale)
+                            Text("d")
+                                .italic()
+                                .bold()
+                                .frame(width: 20 * scale, height: 20 * scale)
                         }
                         .disabled(!playerState.bmlAvailable)
                         .opacity(playerState.bmlAvailable ? 1 : 0.4)

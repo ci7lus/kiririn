@@ -202,9 +202,7 @@ struct PlayerOverlayView_iOS: View {
 
                 floatingOrientationLockButton(geo: geo)
 
-                if isLandscapeBMLRemoteVisible
-                    && expandedModeUsesFullscreenLayout(in: geo.size)
-                {
+                if isLandscapeBMLRemoteVisible {
                     landscapeBMLRemoteOverlay(geo: geo)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                         .zIndex(20)
@@ -339,6 +337,7 @@ struct PlayerOverlayView_iOS: View {
             let frame = playerSurfaceFrame(in: geo)
             BMLOverlayView_iOS(session: session)
                 .frame(width: frame.width, height: frame.height)
+                .clipShape(.rect(cornerRadius: playerState.mode == .mini ? 14 : 0))
                 .position(x: frame.midX, y: frame.midY)
                 .opacity(playerState.bmlContentVisible ? 1 : 0)
                 .allowsHitTesting(false)
@@ -643,9 +642,6 @@ struct PlayerOverlayView_iOS: View {
     private func landscapeBMLRemoteOverlay(geo: GeometryProxy) -> some View {
         VStack(spacing: 0) {
             HStack {
-                Text("データ放送")
-                    .font(.headline)
-                Spacer()
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         isLandscapeBMLRemoteVisible = false
@@ -1094,6 +1090,20 @@ struct PlayerOverlayView_iOS: View {
         action()
     }
 
+    @MainActor
+    func dIcon() -> UIImage? {
+        let renderer = ImageRenderer(
+            content:
+                Text("d")
+                .font(.system(size: 24))
+                .bold()
+                .italic()
+        )
+        renderer.scale = UIScreen.main.scale
+
+        return renderer.uiImage?.withRenderingMode(.alwaysTemplate)
+    }
+
     @ViewBuilder
     private var lowerContextView: some View {
         TabView(selection: $lowerTabSelection) {
@@ -1115,19 +1125,24 @@ struct PlayerOverlayView_iOS: View {
                         .padding(.top, 24)
                         .padding(.bottom, collapsedBarReservedBottomHeight)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .navigationTitle("データ放送")
                         .navigationBarTitleDisplayMode(.inline)
                     } else {
                         unavailableLowerContextView(
                             title: "データ放送を利用できません",
-                            systemImage: "d.circle",
+                            icon: { Text("d").italic().bold() },
                             message: "データ放送に対応したライブ放送を再生してください"
                         )
                     }
                 }
                 .tag("dataBroadcast")
                 .tabItem {
-                    Label("データ放送", systemImage: "d.circle")
+                    Label {
+                        Text("データ放送")
+                    } icon: {
+                        if let uiImage = dIcon() {
+                            Image(uiImage: uiImage)
+                        }
+                    }
                 }
             }
 
@@ -1202,14 +1217,18 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @ViewBuilder
-    private func unavailableLowerContextView(
-        title: String, systemImage: String, message: String
+    private func unavailableLowerContextView<Icon: View>(
+        title: String, @ViewBuilder icon: () -> Icon, message: String
     ) -> some View {
-        ContentUnavailableView(
-            title,
-            systemImage: systemImage,
-            description: Text(message)
-        )
+        ContentUnavailableView {
+            Label {
+                Text(title)
+            } icon: {
+                icon()
+            }
+        } description: {
+            Text(message)
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.kiririnSystemBackground)
     }
@@ -2011,26 +2030,23 @@ struct PlayerOverlayView_iOS: View {
             )
         }
 
-        if playerState.dataBroadcastSession != nil {
+        if isFullscreen && playerState.dataBroadcastSession != nil {
             Button {
-                if showsLowerContext && verticalSizeClass != .compact && !isFullscreen {
-                    lowerTabSelection = "dataBroadcast"
-                } else {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isLandscapeBMLRemoteVisible.toggle()
-                    }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isLandscapeBMLRemoteVisible.toggle()
                 }
             } label: {
-                Image(systemName: "d.circle\(playerState.bmlContentVisible ? ".fill" : "")")
-                    .font(.system(size: iconSize, weight: .semibold))
+                Text("d")
+                    .italic()
+                    .bold()
+                    .font(.system(size: iconSize))
                     .foregroundStyle(.white)
                     .frame(width: itemSize, height: itemSize)
                     .contentShape(Rectangle())
             }
             .disabled(!playerState.bmlAvailable)
             .accessibilityLabel(
-                showsLowerContext && verticalSizeClass != .compact && !isFullscreen
-                    ? "データ放送タブを表示" : "データ放送コントローラを表示"
+                "データ放送コントローラを表示"
             )
         }
 

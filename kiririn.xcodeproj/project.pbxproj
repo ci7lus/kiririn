@@ -70,6 +70,7 @@
 				AppShell/macOS/ProgramInfoWindowView.swift = (macos, );
 				Features/Capture/macOS/GlobalCaptureHotKeyManager.swift = (macos, );
 				Features/Capture/macOS/ShortcutRecorderView.swift = (macos, );
+				Features/Player/DataBroadcast/BMLKeyMonitor.swift = (macos, );
 				Features/Player/PlayerOverlayView.swift = (ios, );
 				Features/Player/macOS/BMLRemotePanelController.swift = (macos, );
 				Features/Player/macOS/DetachedPlayerOverlayView.swift = (macos, );

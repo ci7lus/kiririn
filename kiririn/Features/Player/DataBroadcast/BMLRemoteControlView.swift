@@ -52,8 +52,8 @@ struct BMLRemoteControlView: View {
                 remoteKey(enabled: playerState.bmlAvailable, help: "d") {
                     playerState.pressBMLDataButton()
                 } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "d.circle\(playerState.bmlContentVisible ? ".fill" : "")")
+                    HStack(spacing: 4) {
+                        Text("d").italic().bold()
                         Text("データ")
                     }
                 }

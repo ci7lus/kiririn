@@ -125,7 +125,11 @@ struct SettingsView: View {
                 NavigationLink {
                     DataBroadcastSettingsView()
                 } label: {
-                    Label("データ放送設定", systemImage: "d.circle")
+                    Label {
+                        Text("データ放送設定")
+                    } icon: {
+                        Text("d").italic().bold()
+                    }
                 }
 
                 NavigationLink {
