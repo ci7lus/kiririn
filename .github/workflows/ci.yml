@@ -59,8 +59,15 @@ jobs:
                   path: ${{ runner.temp }}/DerivedData/SourcePackages
                   key: spm-${{ hashFiles('kiririn.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
 
-            - name: Cache setup.sh
-              id: cache-setup
+            - name: Setup Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 22
+                  cache: npm
+                  cache-dependency-path: ./web/bml/
+
+            - name: Cache VLCKit
+              id: vlckit-cache
               uses: actions/cache@v6
               with:
                   path: |
@@ -68,10 +75,11 @@ jobs:
                       ./Packages/VLCKit/VLCKitAssets/LicenseNotices/
                       ./Packages/VLCKit/VLCKitAssets/dodeca_and_7channel_3DSL_HRTF.sofa
                       ./kiririn/rounded-mplus-1m-wadalab-comp-arib.ttf
-                  key: setup-${{ hashFiles('setup.sh') }}
+                  key: vlckit-${{ hashFiles('setup.sh') }}
 
             - name: Setup dependencies
-              if: steps.cache-setup.outputs.cache-hit != 'true'
+              env:
+                  VLCKIT_CACHE_HIT: ${{ steps.vlckit-cache.outputs.cache-hit }}
               run: ./setup.sh
 
             - name: Build archive
