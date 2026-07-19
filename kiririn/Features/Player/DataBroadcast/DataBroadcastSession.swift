@@ -9,8 +9,26 @@ import WebKit
 #endif
 
 struct DataBroadcastCaptureLayout {
+    let sourceFrame: CGRect
     let canvasSize: CGSize
     let videoFrame: CGRect
+
+    init?(sourceFrame: CGRect, videoFrame: CGRect, outputHeight: CGFloat) {
+        guard sourceFrame.width > 0, sourceFrame.height > 0,
+            videoFrame.width > 0, videoFrame.height > 0,
+            outputHeight > 0
+        else { return nil }
+
+        let scale = outputHeight / sourceFrame.height
+        self.sourceFrame = sourceFrame
+        self.canvasSize = CGSize(width: sourceFrame.width * scale, height: outputHeight)
+        self.videoFrame = CGRect(
+            x: (videoFrame.minX - sourceFrame.minX) * scale,
+            y: (videoFrame.minY - sourceFrame.minY) * scale,
+            width: videoFrame.width * scale,
+            height: videoFrame.height * scale
+        )
+    }
 }
 
 struct DataBroadcastCaptureSnapshot {
@@ -52,6 +70,7 @@ final class DataBroadcastSession {
     }
 
     private(set) var status: Status = .idle
+    private(set) var stageRect: CGRect?
     private(set) var videoRect: CGRect?
     private(set) var isInvisible = false
     /// 実機の「データ取得中...」に相当。コンテンツが待っているモジュール取得が
@@ -69,20 +88,11 @@ final class DataBroadcastSession {
     let webView: WKWebView
 
     func captureLayout(outputHeight: CGFloat) -> DataBroadcastCaptureLayout? {
-        let sourceSize = webView.bounds.size
-        guard sourceSize.width > 0, sourceSize.height > 0, outputHeight > 0,
-            let videoRect, videoRect.width > 0, videoRect.height > 0
-        else { return nil }
-
-        let scale = outputHeight / sourceSize.height
+        guard let stageRect, let videoRect else { return nil }
         return DataBroadcastCaptureLayout(
-            canvasSize: CGSize(width: sourceSize.width * scale, height: outputHeight),
-            videoFrame: CGRect(
-                x: videoRect.minX * scale,
-                y: videoRect.minY * scale,
-                width: videoRect.width * scale,
-                height: videoRect.height * scale
-            )
+            sourceFrame: stageRect,
+            videoFrame: videoRect,
+            outputHeight: outputHeight
         )
     }
 
@@ -90,7 +100,9 @@ final class DataBroadcastSession {
         -> DataBroadcastCaptureSnapshot?
     {
         await withCheckedContinuation { continuation in
-            webView.takeSnapshot(with: nil) { image, _ in
+            let configuration = WKSnapshotConfiguration()
+            configuration.rect = layout.sourceFrame
+            webView.takeSnapshot(with: configuration) { image, _ in
                 #if os(macOS)
                     let cgImage = image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
                 #else
@@ -579,18 +591,32 @@ final class DataBroadcastSession {
                 "BML setMainAudioStream: componentId=\(request.componentId) channelId=\(String(describing: request.channelId)) pid=\(String(describing: request.pid)) index=\(String(describing: request.audioIndex))"
             )
             audioStreamHandler(request)
-        case "videoRect":
-            if let x = body["x"] as? Double, let y = body["y"] as? Double,
-                let width = body["width"] as? Double, let height = body["height"] as? Double
+        case "layoutRects":
+            if let stageX = body["stageX"] as? Double,
+                let stageY = body["stageY"] as? Double,
+                let stageWidth = body["stageWidth"] as? Double,
+                let stageHeight = body["stageHeight"] as? Double,
+                let videoX = body["videoX"] as? Double,
+                let videoY = body["videoY"] as? Double,
+                let videoWidth = body["videoWidth"] as? Double,
+                let videoHeight = body["videoHeight"] as? Double
             {
-                // Zero size = the active document has no video object; show
-                // the video full-bleed rather than keeping a stale rect.
-                if width > 0, height > 0 {
-                    videoRect = CGRect(x: x, y: y, width: width, height: height)
-                    logger.info("BML videoRect: \(x),\(y) \(width)x\(height)")
+                if stageWidth > 0, stageHeight > 0 {
+                    stageRect = CGRect(
+                        x: stageX, y: stageY, width: stageWidth, height: stageHeight)
+                } else {
+                    stageRect = nil
+                }
+                // Zero video size means the active document has no video object.
+                if videoWidth > 0, videoHeight > 0 {
+                    videoRect = CGRect(
+                        x: videoX, y: videoY, width: videoWidth, height: videoHeight)
+                    logger.info(
+                        "BML layoutRects: stage=\(stageX),\(stageY) \(stageWidth)x\(stageHeight) video=\(videoX),\(videoY) \(videoWidth)x\(videoHeight)"
+                    )
                 } else {
                     videoRect = nil
-                    logger.info("BML videoRect cleared")
+                    logger.info("BML videoRect cleared by layoutRects")
                 }
             }
         case "invisible":
@@ -721,6 +747,7 @@ final class DataBroadcastSession {
             webView.backgroundColor = .clear
             webView.scrollView.backgroundColor = .clear
             webView.scrollView.isScrollEnabled = false
+            webView.scrollView.contentInsetAdjustmentBehavior = .never
         #endif
         return webView
     }

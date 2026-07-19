@@ -39,7 +39,17 @@ export type WebToNativeMessage =
           audioIndex: number | null;
       }
     | { type: "loaded"; width: number; height: number; profile: string }
-    | { type: "videoRect"; x: number; y: number; width: number; height: number }
+    | {
+          type: "layoutRects";
+          stageX: number;
+          stageY: number;
+          stageWidth: number;
+          stageHeight: number;
+          videoX: number;
+          videoY: number;
+          videoWidth: number;
+          videoHeight: number;
+      }
     | { type: "invisible"; value: boolean }
     | { type: "receiving"; value: boolean }
     | { type: "networking"; value: boolean }

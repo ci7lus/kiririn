@@ -1576,13 +1576,17 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         if CaptureService.shared.shouldCompositePluginOverlay && !visibleOverlayPlugins.isEmpty {
             let playerID = self.id
             pendingOverlayManifestIDs = visibleOverlayPlugins.map(\.manifestID)
-            let snapshotSize = CGSize(
-                width: CGFloat(snapshotWidth), height: CGFloat(snapshotHeight))
+            let compositedDataBroadcastLayout =
+                CaptureService.shared.shouldCompositeDataBroadcast ? dataBroadcastLayout : nil
+            let snapshotSize =
+                compositedDataBroadcastLayout?.canvasSize
+                ?? CGSize(width: CGFloat(snapshotWidth), height: CGFloat(snapshotHeight))
+            let snapshotAspectRatio = Double(snapshotSize.width / snapshotSize.height)
             pendingPluginOverlayTask = Task { @MainActor in
                 await PluginOverlaySnapshotRegistry.shared.takeCompositeSnapshot(
                     for: playerID,
                     targetSize: snapshotSize,
-                    targetAspectRatio: displayAspectRatio,
+                    targetAspectRatio: snapshotAspectRatio,
                     targetFrame: nil
                 )
             }
