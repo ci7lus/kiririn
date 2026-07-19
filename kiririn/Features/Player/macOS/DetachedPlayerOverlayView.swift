@@ -12,7 +12,7 @@
         let appModel: AppModel
         let pluginStore: PluginStore
         @Binding var isAlwaysOnTop: Bool
-        let playerWindow: NSWindow?
+        let playerWindowReference: WindowReference_macOS
         let onToggleFullscreen: () -> Void
         let onControlsVisibilityChanged: (Bool) -> Void
 
@@ -40,6 +40,10 @@
         @State private var playbackErrorAlertMessage = ""
         @State private var bmlKeyMonitor: BMLKeyMonitor?
         @State private var bmlRemotePanel: BMLRemotePanelController?
+
+        private var playerWindow: NSWindow? {
+            playerWindowReference.window
+        }
 
         private var displayDuration: Double { playerState.currentPlayable?.length ?? 0 }
         private var displayProgress: Double {
@@ -1207,7 +1211,7 @@
                 appModel: appModel,
                 pluginStore: appModel.pluginStore,
                 isAlwaysOnTop: $isAlwaysOnTop,
-                playerWindow: nil,
+                playerWindowReference: WindowReference_macOS(),
                 onToggleFullscreen: {},
                 onControlsVisibilityChanged: { _ in }
             )

@@ -1,23 +1,27 @@
+import AppKit
 import KppxKit
 import SwiftUI
 
 struct PluginWindowView_macOS: View {
-    let pluginID: UUID
     @Environment(AppModel.self) private var appModel
+    let pluginID: UUID
+    @State private var isAlwaysOnTop = false
+    @State private var windowReference = WindowReference_macOS()
 
     private var plugin: PluginDefinition? {
         appModel.pluginStore.plugins.first { $0.id == pluginID }
     }
 
-    @State private var isAlwaysOnTop = false
-    @State private var window: NSWindow?
+    private var window: NSWindow? {
+        windowReference.window
+    }
 
     var body: some View {
         Group {
             if let plugin {
                 ZStack {
                     WindowConfigurator_macOS { nsWindow in
-                        self.window = nsWindow
+                        windowReference.window = nsWindow
                         nsWindow.level = isAlwaysOnTop ? .floating : .normal
                     }
                     .frame(width: 0, height: 0)
@@ -45,6 +49,9 @@ struct PluginWindowView_macOS: View {
                             Text("最前面に固定")
                         }
                     }
+                }
+                .onDisappear {
+                    windowReference.window = nil
                 }
             } else {
                 ContentUnavailableView(

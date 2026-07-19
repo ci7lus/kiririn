@@ -80,6 +80,7 @@
 				Features/Plugin/macOS/PluginSelectionList.swift = (macos, );
 				Features/Plugin/macOS/PluginWindowView.swift = (macos, );
 				Shared/UI/macOS/WindowConfigurator.swift = (macos, );
+				Shared/UI/macOS/WindowReference.swift = (macos, );
 			};
 			target = 105FC5792E9EAD3100EA8BCF /* kiririn */;
 		};

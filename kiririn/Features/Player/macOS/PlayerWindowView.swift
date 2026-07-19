@@ -13,7 +13,7 @@
         @Environment(AppModel.self) private var appModel
         @Environment(\.dismiss) private var dismiss
         @State private var playerState = PlayerState()
-        @State private var playerWindow: NSWindow?
+        @State private var playerWindowReference = WindowReference_macOS()
         @State private var isAlwaysOnTop = false
         @State private var isOverlayVisible = true
         @State private var restorationWaitTask: Task<Void, Never>?
@@ -26,7 +26,7 @@
                         appModel: appModel,
                         pluginStore: appModel.pluginStore,
                         isAlwaysOnTop: $isAlwaysOnTop,
-                        playerWindow: playerWindow,
+                        playerWindowReference: playerWindowReference,
                         onToggleFullscreen: {
                             playerWindow?.toggleFullScreen(nil)
                         },
@@ -124,15 +124,20 @@
                 }
                 restorationWaitTask?.cancel()
                 restorationWaitTask = nil
+                playerWindowReference.window = nil
                 if playerState.currentPlayable != nil {
                     playerState.close()
                 }
             }
         }
 
+        private var playerWindow: NSWindow? {
+            playerWindowReference.window
+        }
+
         private func configureWindow(_ window: NSWindow) {
             if playerWindow !== window {
-                playerWindow = window
+                playerWindowReference.window = window
             }
             applyWindowTitle(window: window)
             applyWindowSizing(window: window)
