@@ -5,16 +5,31 @@ import WebKit
 final class PluginOverlaySnapshotRegistry {
     static let shared = PluginOverlaySnapshotRegistry()
 
-    private var registry: [String: WKWebView] = [:]
+    private struct SnapshotKey: Hashable {
+        let playerID: String
+        let pluginID: String
+    }
+
+    private final class WebViewReference {
+        weak var webView: WKWebView?
+
+        init(_ webView: WKWebView) {
+            self.webView = webView
+        }
+    }
+
+    private var registry: [SnapshotKey: WebViewReference] = [:]
 
     private init() {}
 
     func register(_ webView: WKWebView, playerID: String, pluginID: String) {
-        registry[registryKey(playerID: playerID, pluginID: pluginID)] = webView
+        registry[SnapshotKey(playerID: playerID, pluginID: pluginID)] = WebViewReference(webView)
     }
 
-    func unregister(playerID: String, pluginID: String) {
-        registry.removeValue(forKey: registryKey(playerID: playerID, pluginID: pluginID))
+    func unregister(_ webView: WKWebView, playerID: String, pluginID: String) {
+        let key = SnapshotKey(playerID: playerID, pluginID: pluginID)
+        guard registry[key]?.webView === webView else { return }
+        registry.removeValue(forKey: key)
     }
 
     func takeCompositeSnapshot(
@@ -23,10 +38,10 @@ final class PluginOverlaySnapshotRegistry {
         targetAspectRatio: Double,
         targetFrame: CGRect? = nil
     ) async -> CGImage? {
-        let webViews =
-            registry
-            .filter { $0.key.hasPrefix("\(playerID):") }
-            .values
+        registry = registry.filter { $0.value.webView != nil }
+        let webViews = registry.compactMap { key, reference in
+            key.playerID == playerID ? reference.webView : nil
+        }
         guard !webViews.isEmpty else { return nil }
 
         let normalizedAspectRatio =
@@ -110,9 +125,5 @@ final class PluginOverlaySnapshotRegistry {
         }
 
         return image.cropping(to: cropRect)
-    }
-
-    private func registryKey(playerID: String, pluginID: String) -> String {
-        "\(playerID):\(pluginID)"
     }
 }
