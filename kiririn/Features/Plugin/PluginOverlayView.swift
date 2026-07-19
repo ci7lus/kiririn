@@ -222,7 +222,6 @@ struct PluginOverlayView: View {
     private func handleExternalReload() {
         resetCrashState()
         releaseExtensionRuntime()
-        ExtensionPluginRuntimeRegistry.shared.invalidate(pluginID: pluginDefinition.id)
     }
 
     @MainActor

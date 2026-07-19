@@ -1,4 +1,5 @@
 import Foundation
+import KppxKit
 
 @MainActor
 final class ExtensionPluginRuntimeRegistry {
@@ -7,6 +8,7 @@ final class ExtensionPluginRuntimeRegistry {
     private struct PendingRuntimeLoad {
         let token: UUID
         let task: Task<ExtensionPluginRuntime, Error>
+        var waiterCount: Int
     }
 
     private struct RuntimeEntry {
@@ -17,15 +19,14 @@ final class ExtensionPluginRuntimeRegistry {
     private var runtimeEntries: [UUID: RuntimeEntry] = [:]
     private var pendingLoads: [UUID: PendingRuntimeLoad] = [:]
 
-    private func makeRuntime(for plugin: PluginDefinition, store: PluginStore) async throws
-        -> ExtensionPluginRuntime
-    {
-        if let entry = runtimeEntries[plugin.id] {
-            return entry.runtime
-        }
-
-        if let pendingLoad = pendingLoads[plugin.id] {
-            return try await resolvePendingLoad(pendingLoad, for: plugin)
+    private func pendingRuntimeLoad(
+        for plugin: PluginDefinition,
+        store: PluginStore
+    ) -> PendingRuntimeLoad {
+        if var pendingLoad = pendingLoads[plugin.id] {
+            pendingLoad.waiterCount += 1
+            pendingLoads[plugin.id] = pendingLoad
+            return pendingLoad
         }
 
         let pendingLoad = PendingRuntimeLoad(
@@ -42,23 +43,28 @@ final class ExtensionPluginRuntimeRegistry {
                     manifest: manifest,
                     resourceBaseURL: resourceBaseURL
                 )
-            }
+            },
+            waiterCount: 1
         )
         pendingLoads[plugin.id] = pendingLoad
-        return try await resolvePendingLoad(pendingLoad, for: plugin)
+        return pendingLoad
     }
 
     func acquireRuntime(for plugin: PluginDefinition, store: PluginStore) async throws
         -> ExtensionPluginRuntime
     {
-        let runtime = try await makeRuntime(for: plugin, store: store)
-        guard var entry = runtimeEntries[plugin.id], entry.runtime === runtime else {
-            runtime.invalidate()
-            throw CancellationError()
+        if var entry = runtimeEntries[plugin.id] {
+            entry.useCount += 1
+            runtimeEntries[plugin.id] = entry
+            return entry.runtime
         }
-        entry.useCount += 1
-        runtimeEntries[plugin.id] = entry
-        return runtime
+
+        let pendingLoad = pendingRuntimeLoad(for: plugin, store: store)
+        return try await resolvePendingLoad(
+            pendingLoad,
+            for: plugin,
+            store: store
+        )
     }
 
     func releaseRuntime(_ runtime: ExtensionPluginRuntime) {
@@ -66,8 +72,17 @@ final class ExtensionPluginRuntimeRegistry {
             return
         }
 
+        guard entry.useCount > 0 else { return }
+
         if entry.useCount > 1 {
             entry.useCount -= 1
+            runtimeEntries[runtime.pluginID] = entry
+            return
+        }
+
+        if runtime.manifest.isBackgroundExists {
+            // background content の実行期間は表示中の WebView の有無から独立させる。
+            entry.useCount = 0
             runtimeEntries[runtime.pluginID] = entry
             return
         }
@@ -96,36 +111,45 @@ final class ExtensionPluginRuntimeRegistry {
 
     private func resolvePendingLoad(
         _ pendingLoad: PendingRuntimeLoad,
-        for plugin: PluginDefinition
+        for plugin: PluginDefinition,
+        store: PluginStore
     ) async throws -> ExtensionPluginRuntime {
+        let runtime: ExtensionPluginRuntime
         do {
-            let runtime = try await pendingLoad.task.value
-
-            if let existingEntry = runtimeEntries[plugin.id], existingEntry.runtime === runtime {
-                return existingEntry.runtime
-            }
-
-            guard pendingLoads[plugin.id]?.token == pendingLoad.token else {
-                runtime.invalidate()
-                throw CancellationError()
-            }
-
-            pendingLoads[plugin.id] = nil
-
-            if let existingEntry = runtimeEntries[plugin.id] {
-                if existingEntry.runtime !== runtime {
-                    runtime.invalidate()
-                }
-                return existingEntry.runtime
-            }
-
-            runtimeEntries[plugin.id] = RuntimeEntry(runtime: runtime, useCount: 0)
-            return runtime
+            runtime = try await pendingLoad.task.value
         } catch {
             if pendingLoads[plugin.id]?.token == pendingLoad.token {
                 pendingLoads[plugin.id] = nil
             }
             throw error
         }
+
+        if var existingEntry = runtimeEntries[plugin.id] {
+            if existingEntry.runtime === runtime {
+                return existingEntry.runtime
+            }
+
+            runtime.invalidate()
+            try Task.checkCancellation()
+            existingEntry.useCount += 1
+            runtimeEntries[plugin.id] = existingEntry
+            return existingEntry.runtime
+        }
+
+        guard let currentPendingLoad = pendingLoads[plugin.id],
+            currentPendingLoad.token == pendingLoad.token
+        else {
+            runtime.invalidate()
+            try Task.checkCancellation()
+            return try await acquireRuntime(for: plugin, store: store)
+        }
+
+        pendingLoads[plugin.id] = nil
+        // 全待機者の利用権を先に予約し、先にキャンセルされた待機者の解放から保護する。
+        runtimeEntries[plugin.id] = RuntimeEntry(
+            runtime: runtime,
+            useCount: currentPendingLoad.waiterCount
+        )
+        return runtime
     }
 }
