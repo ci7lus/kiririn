@@ -16,6 +16,11 @@ final class ExtensionPluginRuntimeRegistry {
         var useCount: Int
     }
 
+    private struct PendingWaiterState {
+        let isCurrentGeneration: Bool
+        let hasRemainingWaiters: Bool
+    }
+
     private var runtimeEntries: [UUID: RuntimeEntry] = [:]
     private var pendingLoads: [UUID: PendingRuntimeLoad] = [:]
 
@@ -80,8 +85,8 @@ final class ExtensionPluginRuntimeRegistry {
             return
         }
 
-        if runtime.manifest.isBackgroundExists {
-            // background content の実行期間は表示中の WebView の有無から独立させる。
+        if runtime.manifest.isBackgroundExists || pendingLoads[runtime.pluginID] != nil {
+            // background content と未解決の待機者は表示中の WebView の有無から独立して保持する。
             entry.useCount = 0
             runtimeEntries[runtime.pluginID] = entry
             return
@@ -124,32 +129,62 @@ final class ExtensionPluginRuntimeRegistry {
             throw error
         }
 
+        let waiterState = finishPendingWaiter(pendingLoad, pluginID: plugin.id)
+        if Task.isCancelled {
+            if !waiterState.hasRemainingWaiters {
+                discardRuntimeIfUnused(runtime)
+            }
+            throw CancellationError()
+        }
+
         if var existingEntry = runtimeEntries[plugin.id] {
-            if existingEntry.runtime === runtime {
-                return existingEntry.runtime
+            if existingEntry.runtime !== runtime {
+                runtime.invalidate()
             }
 
-            runtime.invalidate()
-            try Task.checkCancellation()
             existingEntry.useCount += 1
             runtimeEntries[plugin.id] = existingEntry
             return existingEntry.runtime
         }
 
-        guard let currentPendingLoad = pendingLoads[plugin.id],
-            currentPendingLoad.token == pendingLoad.token
-        else {
+        guard waiterState.isCurrentGeneration else {
             runtime.invalidate()
-            try Task.checkCancellation()
             return try await acquireRuntime(for: plugin, store: store)
         }
 
-        pendingLoads[plugin.id] = nil
-        // 全待機者の利用権を先に予約し、先にキャンセルされた待機者の解放から保護する。
-        runtimeEntries[plugin.id] = RuntimeEntry(
-            runtime: runtime,
-            useCount: currentPendingLoad.waiterCount
-        )
+        runtimeEntries[plugin.id] = RuntimeEntry(runtime: runtime, useCount: 1)
         return runtime
+    }
+
+    private func finishPendingWaiter(
+        _ pendingLoad: PendingRuntimeLoad,
+        pluginID: UUID
+    ) -> PendingWaiterState {
+        guard var currentPendingLoad = pendingLoads[pluginID],
+            currentPendingLoad.token == pendingLoad.token
+        else {
+            return PendingWaiterState(
+                isCurrentGeneration: false,
+                hasRemainingWaiters: false
+            )
+        }
+
+        currentPendingLoad.waiterCount -= 1
+        let hasRemainingWaiters = currentPendingLoad.waiterCount > 0
+        pendingLoads[pluginID] = hasRemainingWaiters ? currentPendingLoad : nil
+        return PendingWaiterState(
+            isCurrentGeneration: true,
+            hasRemainingWaiters: hasRemainingWaiters
+        )
+    }
+
+    private func discardRuntimeIfUnused(_ runtime: ExtensionPluginRuntime) {
+        guard let entry = runtimeEntries[runtime.pluginID], entry.runtime === runtime else {
+            runtime.invalidate()
+            return
+        }
+        guard entry.useCount == 0, !runtime.manifest.isBackgroundExists else { return }
+        runtimeEntries[runtime.pluginID] = nil
+        runtime.invalidate()
     }
 }

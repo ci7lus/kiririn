@@ -138,8 +138,6 @@ struct PluginWebView: PluginWebViewRepresentable {
 
     private static func dismantlePlatformWebView(_ uiView: WKWebView, coordinator: Coordinator) {
         uiView.stopLoading()
-        uiView.configuration.userContentController.removeAllUserScripts()
-        uiView.configuration.userContentController.removeScriptMessageHandler(forName: "kiririn")
         uiView.uiDelegate = nil
         uiView.navigationDelegate = nil
 

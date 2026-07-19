@@ -207,6 +207,7 @@ struct PluginOverlayView: View {
     @MainActor
     private func replaceLoadedRuntime(with newRuntime: LoadedRuntime) {
         if loadedRuntime?.runtime === newRuntime.runtime {
+            // 同じ View が追加取得した分だけを解放し、既存の利用権は維持する。
             ExtensionPluginRuntimeRegistry.shared.releaseRuntime(newRuntime.runtime)
             return
         }
