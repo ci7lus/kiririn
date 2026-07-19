@@ -188,7 +188,7 @@ struct PluginWebView: PluginWebViewRepresentable {
             "appVersion": appVersion ?? NSNull(),
             "buildVersion": buildVersion,
             "bundleIdentifier": bundle.bundleIdentifier ?? NSNull(),
-            "bridgeVersion": 3,
+            "bridgeVersion": 4,
             "displayAreaType": displayArea.rawValue,
             "playerID": runtimePlayerID,
         ]
@@ -258,7 +258,7 @@ struct PluginWebView: PluginWebViewRepresentable {
                 "playableID": s.playableID ?? "",
                 "isPlaying": s.isPlaying,
                 "time": s.time,
-                "position": s.position,
+                "position": s.bytePosition > 0 ? s.bytePosition : s.position,
                 "rate": s.rate,
             ]
         }
@@ -311,7 +311,7 @@ struct PluginWebView: PluginWebViewRepresentable {
                 "playableID": s.playableID ?? "",
                 "isPlaying": s.isPlaying,
                 "time": s.time,
-                "position": s.position,
+                "position": s.bytePosition > 0 ? s.bytePosition : s.position,
                 "rate": s.rate,
             ]
         }
