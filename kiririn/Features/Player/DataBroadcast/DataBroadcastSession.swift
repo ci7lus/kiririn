@@ -51,6 +51,11 @@ struct DataBroadcastCaptureSnapshot {
 @MainActor
 @Observable
 final class DataBroadcastSession {
+    private struct LayoutRects {
+        let stage: CGRect?
+        let video: CGRect?
+    }
+
     struct InputRequest: Identifiable, Equatable {
         let id: Int
         let characterType: String
@@ -592,32 +597,16 @@ final class DataBroadcastSession {
             )
             audioStreamHandler(request)
         case "layoutRects":
-            if let stageX = body["stageX"] as? Double,
-                let stageY = body["stageY"] as? Double,
-                let stageWidth = body["stageWidth"] as? Double,
-                let stageHeight = body["stageHeight"] as? Double,
-                let videoX = body["videoX"] as? Double,
-                let videoY = body["videoY"] as? Double,
-                let videoWidth = body["videoWidth"] as? Double,
-                let videoHeight = body["videoHeight"] as? Double
-            {
-                if stageWidth > 0, stageHeight > 0 {
-                    stageRect = CGRect(
-                        x: stageX, y: stageY, width: stageWidth, height: stageHeight)
-                } else {
-                    stageRect = nil
-                }
-                // Zero video size means the active document has no video object.
-                if videoWidth > 0, videoHeight > 0 {
-                    videoRect = CGRect(
-                        x: videoX, y: videoY, width: videoWidth, height: videoHeight)
-                    logger.info(
-                        "BML layoutRects: stage=\(stageX),\(stageY) \(stageWidth)x\(stageHeight) video=\(videoX),\(videoY) \(videoWidth)x\(videoHeight)"
-                    )
-                } else {
-                    videoRect = nil
-                    logger.info("BML videoRect cleared by layoutRects")
-                }
+            guard let layoutRects = Self.parseLayoutRects(from: body) else {
+                logger.warning("invalid BML layoutRects message")
+                return
+            }
+            stageRect = layoutRects.stage
+            videoRect = layoutRects.video
+            if let stageRect, let videoRect {
+                logger.info("BML layoutRects: stage=\(stageRect) video=\(videoRect)")
+            } else {
+                logger.info("BML layout rect cleared by layoutRects")
             }
         case "invisible":
             let nextValue = (body["value"] as? Bool) ?? false
@@ -703,6 +692,34 @@ final class DataBroadcastSession {
         default:
             break
         }
+    }
+
+    private static func parseLayoutRects(from body: [String: Any]) -> LayoutRects? {
+        guard let stageX = body["stageX"] as? Double,
+            let stageY = body["stageY"] as? Double,
+            let stageWidth = body["stageWidth"] as? Double,
+            let stageHeight = body["stageHeight"] as? Double,
+            let videoX = body["videoX"] as? Double,
+            let videoY = body["videoY"] as? Double,
+            let videoWidth = body["videoWidth"] as? Double,
+            let videoHeight = body["videoHeight"] as? Double,
+            [
+                stageX, stageY, stageWidth, stageHeight,
+                videoX, videoY, videoWidth, videoHeight,
+            ].allSatisfy(\.isFinite)
+        else { return nil }
+
+        return LayoutRects(
+            stage: layoutRect(
+                x: stageX, y: stageY, width: stageWidth, height: stageHeight),
+            video: layoutRect(
+                x: videoX, y: videoY, width: videoWidth, height: videoHeight)
+        )
+    }
+
+    private static func layoutRect(x: Double, y: Double, width: Double, height: Double) -> CGRect? {
+        guard width > 0, height > 0 else { return nil }
+        return CGRect(x: x, y: y, width: width, height: height)
     }
 
     // MARK: - WebView construction

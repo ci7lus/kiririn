@@ -188,7 +188,7 @@ struct PluginWebView: PluginWebViewRepresentable {
             "appVersion": appVersion ?? NSNull(),
             "buildVersion": buildVersion,
             "bundleIdentifier": bundle.bundleIdentifier ?? NSNull(),
-            "bridgeVersion": 4,
+            "bridgeVersion": 5,
             "displayAreaType": displayArea.rawValue,
             "playerID": runtimePlayerID,
         ]
@@ -249,19 +249,7 @@ struct PluginWebView: PluginWebViewRepresentable {
     private func injectStatuses(
         into webView: WKWebView, coordinator: Coordinator, force: Bool = false
     ) {
-        let statuses = appModel.activePlayerStates.compactMap { state -> [String: Any]? in
-            guard let s = state.playbackStatus as PlayerPlaybackStatus?,
-                state.currentPlayable != nil
-            else { return nil }
-            return [
-                "playerID": state.id,
-                "playableID": s.playableID ?? "",
-                "isPlaying": s.isPlaying,
-                "time": s.time,
-                "position": s.bytePosition > 0 ? s.bytePosition : s.position,
-                "rate": s.rate,
-            ]
-        }
+        let statuses = appModel.activePlayerStates.compactMap(makePlayerStatusSchema)
         guard
             let data = try? JSONSerialization.data(
                 withJSONObject: statuses, options: [.sortedKeys]),
@@ -296,25 +284,59 @@ struct PluginWebView: PluginWebViewRepresentable {
         webView.evaluateJavaScript(js)
     }
 
+    private func makePlayerStatusSchema(_ state: PlayerState) -> [String: Any]? {
+        guard let status = state.playbackStatus as PlayerPlaybackStatus?,
+            state.currentPlayable != nil
+        else { return nil }
+
+        let displayRects = normalizedDisplayRects(for: state)
+        return [
+            "playerID": state.id,
+            "playableID": status.playableID ?? "",
+            "isPlaying": status.isPlaying,
+            "time": status.time,
+            "position": status.bytePosition > 0 ? status.bytePosition : status.position,
+            "rate": status.rate,
+            "televisionDisplayRect": displayRects.television,
+            "videoDisplayRect": displayRects.video,
+        ]
+    }
+
+    private func normalizedDisplayRects(for state: PlayerState) -> (
+        television: [String: Double], video: [String: Double]
+    ) {
+        let fullRect = ["x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0]
+        guard state.bmlContentVisible,
+            let session = state.dataBroadcastSession
+        else { return (fullRect, fullRect) }
+
+        let bounds = session.webView.bounds
+        return (
+            normalizedDisplayRect(session.stageRect, in: bounds) ?? fullRect,
+            normalizedDisplayRect(session.videoRect, in: bounds) ?? fullRect
+        )
+    }
+
+    private func normalizedDisplayRect(_ rect: CGRect?, in bounds: CGRect) -> [String: Double]? {
+        guard let rect, bounds.width > 0, bounds.height > 0 else { return nil }
+        let visibleRect = rect.intersection(bounds)
+        guard !visibleRect.isNull, visibleRect.width > 0, visibleRect.height > 0 else { return nil }
+
+        return [
+            "x": Double((visibleRect.minX - bounds.minX) / bounds.width),
+            "y": Double((visibleRect.minY - bounds.minY) / bounds.height),
+            "width": Double(visibleRect.width / bounds.width),
+            "height": Double(visibleRect.height / bounds.height),
+        ]
+    }
+
     private func makeBridgeJS() -> String {
         let playables = appModel.activePlayerStates.compactMap { state -> [String: Any]? in
             guard var schema = state.currentPlayable?.toPluginSchema() else { return nil }
             schema["playerID"] = state.id
             return schema
         }
-        let statuses = appModel.activePlayerStates.compactMap { state -> [String: Any]? in
-            guard let s = state.playbackStatus as PlayerPlaybackStatus?,
-                state.currentPlayable != nil
-            else { return nil }
-            return [
-                "playerID": state.id,
-                "playableID": s.playableID ?? "",
-                "isPlaying": s.isPlaying,
-                "time": s.time,
-                "position": s.bytePosition > 0 ? s.bytePosition : s.position,
-                "rate": s.rate,
-            ]
-        }
+        let statuses = appModel.activePlayerStates.compactMap(makePlayerStatusSchema)
         let activeIDs = Set(appModel.activePlayerStates.map(\.id))
         let focusedID = appModel.focusedPlayerID.flatMap { activeIDs.contains($0) ? $0 : nil } ?? ""
 
