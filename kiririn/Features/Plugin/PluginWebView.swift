@@ -20,6 +20,7 @@ import WebKit
 struct PluginWebView: PluginWebViewRepresentable {
     let pluginDefinition: PluginDefinition
     let extensionRuntime: ExtensionPluginRuntime
+    let webViewConfiguration: WKWebViewConfiguration
     let appModel: AppModel
     let reloadKey: PluginReloadKey
     let displayArea: PluginDisplayArea
@@ -34,7 +35,7 @@ struct PluginWebView: PluginWebViewRepresentable {
     }
 
     private func makePlatformWebView(context: Context) -> WKWebView {
-        let config = extensionRuntime.webViewConfiguration
+        let config = webViewConfiguration
         config.applicationNameForUserAgent = makeApplicationNameForUserAgent()
         let contentController = WKUserContentController()
 

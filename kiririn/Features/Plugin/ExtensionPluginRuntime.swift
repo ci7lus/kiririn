@@ -33,7 +33,6 @@ final class ExtensionPluginRuntime {
     let webExtension: WKWebExtension
     let context: WKWebExtensionContext
     let controller: WKWebExtensionController
-    let webViewConfiguration: WKWebViewConfiguration
     private let controllerDelegate: PluginExtensionControllerDelegate
     private let logger = Logger(label: "ExtensionPluginRuntime")
     private var isInvalidated = false
@@ -67,14 +66,18 @@ final class ExtensionPluginRuntime {
         let controller = WKWebExtensionController()
         controller.delegate = delegate
         try controller.load(context)
-        guard let webViewConfiguration = context.webViewConfiguration else {
-            do {
-                try controller.unload(context)
-            } catch {
-                Logger(label: "ExtensionPluginRuntime").error(
-                    "Failed to unload incomplete plugin runtime: \(error)"
-                )
-            }
+
+        self.pluginID = plugin.id
+        self.manifest = manifest
+        self.resourceBaseURL = normalizedResourceBaseURL
+        self.webExtension = webExtension
+        self.context = context
+        self.controllerDelegate = delegate
+        self.controller = controller
+    }
+
+    func makeWebViewConfiguration() throws -> WKWebViewConfiguration {
+        guard !isInvalidated, let configuration = context.webViewConfiguration else {
             throw NSError(
                 domain: "PluginRuntime",
                 code: 5,
@@ -84,15 +87,7 @@ final class ExtensionPluginRuntime {
                 ]
             )
         }
-
-        self.pluginID = plugin.id
-        self.manifest = manifest
-        self.resourceBaseURL = normalizedResourceBaseURL
-        self.webExtension = webExtension
-        self.context = context
-        self.controllerDelegate = delegate
-        self.controller = controller
-        self.webViewConfiguration = webViewConfiguration
+        return configuration
     }
 
     func pageURL(for area: PluginDisplayArea) -> URL? {

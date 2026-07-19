@@ -1,6 +1,7 @@
 import Combine
 import KppxKit
 import SwiftUI
+import WebKit
 
 extension PluginDisplayArea {
     var localizedName: String {
@@ -37,6 +38,11 @@ struct PluginOverlayView: View {
         let resourceBasePath: String
     }
 
+    private struct LoadedRuntime {
+        let runtime: ExtensionPluginRuntime
+        let webViewConfiguration: WKWebViewConfiguration
+    }
+
     let pluginDefinition: PluginDefinition
     let appModel: AppModel
     let reloadToken: Int
@@ -66,7 +72,7 @@ struct PluginOverlayView: View {
     @State private var pendingDeeplinkURL: URL?
     @State private var deeplinkToken = 0
     @State private var manualReloadToken = 0
-    @State private var extensionRuntime: ExtensionPluginRuntime?
+    @State private var loadedRuntime: LoadedRuntime?
 
     private var reloadKey: PluginReloadKey {
         PluginReloadKey(external: reloadToken, manual: manualReloadToken)
@@ -88,10 +94,11 @@ struct PluginOverlayView: View {
                 "\($0.id):\($0.currentPlayable?.id ?? "none"):\($0.playbackStatus.isPlaying):\($0.currentPlayable?.isSeekable ?? false)"
             }.joined(separator: "|") + (appModel.focusedPlayerID ?? "")
         ZStack {
-            if let extensionRuntime {
+            if let loadedRuntime {
                 PluginWebView(
                     pluginDefinition: pluginDefinition,
-                    extensionRuntime: extensionRuntime,
+                    extensionRuntime: loadedRuntime.runtime,
+                    webViewConfiguration: loadedRuntime.webViewConfiguration,
                     appModel: appModel,
                     reloadKey: reloadKey,
                     displayArea: displayArea,
@@ -161,11 +168,23 @@ struct PluginOverlayView: View {
                 for: pluginDefinition,
                 store: appModel.pluginStore
             )
+            let webViewConfiguration: WKWebViewConfiguration
+            do {
+                webViewConfiguration = try runtime.makeWebViewConfiguration()
+            } catch {
+                ExtensionPluginRuntimeRegistry.shared.releaseRuntime(runtime)
+                throw error
+            }
             guard !Task.isCancelled, runtimeLoadKey == expectedLoadKey else {
                 ExtensionPluginRuntimeRegistry.shared.releaseRuntime(runtime)
                 return
             }
-            replaceExtensionRuntime(with: runtime)
+            replaceLoadedRuntime(
+                with: LoadedRuntime(
+                    runtime: runtime,
+                    webViewConfiguration: webViewConfiguration
+                )
+            )
         } catch {
             guard !Task.isCancelled, runtimeLoadKey == expectedLoadKey else {
                 return
@@ -180,22 +199,22 @@ struct PluginOverlayView: View {
 
     @MainActor
     private func releaseExtensionRuntime() {
-        guard let runtime = extensionRuntime else { return }
-        extensionRuntime = nil
-        ExtensionPluginRuntimeRegistry.shared.releaseRuntime(runtime)
+        guard let loadedRuntime else { return }
+        self.loadedRuntime = nil
+        ExtensionPluginRuntimeRegistry.shared.releaseRuntime(loadedRuntime.runtime)
     }
 
     @MainActor
-    private func replaceExtensionRuntime(with runtime: ExtensionPluginRuntime) {
-        if extensionRuntime === runtime {
-            ExtensionPluginRuntimeRegistry.shared.releaseRuntime(runtime)
+    private func replaceLoadedRuntime(with newRuntime: LoadedRuntime) {
+        if loadedRuntime?.runtime === newRuntime.runtime {
+            ExtensionPluginRuntimeRegistry.shared.releaseRuntime(newRuntime.runtime)
             return
         }
 
-        let previousRuntime = extensionRuntime
-        extensionRuntime = runtime
+        let previousRuntime = loadedRuntime
+        loadedRuntime = newRuntime
         if let previousRuntime {
-            ExtensionPluginRuntimeRegistry.shared.releaseRuntime(previousRuntime)
+            ExtensionPluginRuntimeRegistry.shared.releaseRuntime(previousRuntime.runtime)
         }
     }
 
