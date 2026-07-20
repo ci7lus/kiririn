@@ -445,6 +445,7 @@ private enum ServerAuthMethod: String, CaseIterable, Identifiable {
     case none
     case basic
     case bearer
+    case cookie
 
     var id: String { rawValue }
 
@@ -453,6 +454,7 @@ private enum ServerAuthMethod: String, CaseIterable, Identifiable {
         case .none: return "なし"
         case .basic: return "Basic"
         case .bearer: return "Bearer"
+        case .cookie: return "Cookie"
         }
     }
 }
@@ -463,6 +465,7 @@ private struct ServerAuthEditor: View {
     @State private var username: String = ""
     @State private var password: String = ""
     @State private var token: String = ""
+    @State private var cookie: String = ""
 
     var body: some View {
         Section("認証") {
@@ -491,6 +494,13 @@ private struct ServerAuthEditor: View {
                     .textContentType(.password)
                     .onChange(of: token) { _, _ in updateAuth() }
             }
+
+            if method == .cookie {
+                TextField("Cookie", text: $cookie)
+                    .autocorrectionDisabled()
+                    .kiririnPlainTextInputModifiers()
+                    .onChange(of: cookie) { _, _ in updateAuth() }
+            }
         }
         .onAppear {
             switch auth {
@@ -501,6 +511,9 @@ private struct ServerAuthEditor: View {
             case .bearer(let token):
                 method = .bearer
                 self.token = token
+            case .cookie(let cookie):
+                method = .cookie
+                self.cookie = cookie
             default:
                 method = .none
             }
@@ -522,6 +535,12 @@ private struct ServerAuthEditor: View {
                 auth = .none
             } else {
                 auth = .bearer(token: token)
+            }
+        case .cookie:
+            if cookie.isEmpty {
+                auth = .none
+            } else {
+                auth = .cookie(cookie: cookie)
             }
         }
     }
