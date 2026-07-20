@@ -88,10 +88,20 @@ struct PluginOverlayView: View {
 
     var body: some View {
         // アクティブな全プレイヤーの状態を追跡するハッシュを生成し、これを元に再描画と同期をトリガーさせる。
-        // 再生位置(time)は頻繁すぎるため除外するが、番組変更や再生/停止、シーク可否の変化は網羅する。
+        // 再生位置(time)は頻繁すぎるため除外するが、番組変更や再生/停止、シーク可否、映像表示領域の変化は網羅する。
         let stateHash =
             appModel.activePlayerStates.map {
-                "\($0.id):\($0.currentPlayable?.id ?? "none"):\($0.playbackStatus.isPlaying):\($0.currentPlayable?.isSeekable ?? false)"
+                let stageRect = $0.dataBroadcastSession?.stageRect
+                let videoRect = $0.dataBroadcastSession?.videoRect
+                return [
+                    $0.id,
+                    $0.currentPlayable?.id ?? "none",
+                    String($0.playbackStatus.isPlaying),
+                    String($0.currentPlayable?.isSeekable ?? false),
+                    String($0.bmlContentVisible),
+                    String(describing: stageRect),
+                    String(describing: videoRect),
+                ].joined(separator: ":")
             }.joined(separator: "|") + (appModel.focusedPlayerID ?? "")
         ZStack {
             if let loadedRuntime {

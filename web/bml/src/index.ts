@@ -231,28 +231,35 @@ function reapplyStageScale(): void {
     if (lastResolution != null) {
         applyStageScale(lastResolution.width, lastResolution.height);
     }
-    postVideoRect();
+    postLayoutRects();
 }
 window.addEventListener("resize", reapplyStageScale);
 // The WKWebView may still be zero-sized (or resize without a window resize
 // event) around document load; ResizeObserver catches every geometry change.
 new ResizeObserver(reapplyStageScale).observe(document.documentElement);
 
-// Always measure the video plane fresh instead of trusting videochanged's
+// Always measure the stage and video plane fresh instead of trusting videochanged's
 // payload: web-bml fires videochanged during document load, BEFORE the stage
 // transform for the new document is applied (the load event comes after),
 // and it doesn't re-fire when only the transform changes. Re-measuring here
 // (and re-posting on load/resize) keeps the native rect in real WKWebView
 // points. A document without a video object clears the rect (native side
 // then shows the video full-bleed).
-function postVideoRect(): void {
+function postLayoutRects(): void {
+    const stageRect = stage.getBoundingClientRect();
     const videoElement = bmlBrowser.getVideoElement();
-    if (videoElement == null) {
-        postToNative({ type: "videoRect", x: 0, y: 0, width: 0, height: 0 });
-        return;
-    }
-    const rect = videoElement.getBoundingClientRect();
-    postToNative({ type: "videoRect", x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+    const videoRect = videoElement?.getBoundingClientRect();
+    postToNative({
+        type: "layoutRects",
+        stageX: stageRect.x,
+        stageY: stageRect.y,
+        stageWidth: stageRect.width,
+        stageHeight: stageRect.height,
+        videoX: videoRect?.x ?? 0,
+        videoY: videoRect?.y ?? 0,
+        videoWidth: videoRect?.width ?? 0,
+        videoHeight: videoRect?.height ?? 0,
+    });
 }
 
 bmlBrowser.addEventListener("load", (evt) => {
@@ -266,7 +273,7 @@ bmlBrowser.addEventListener("load", (evt) => {
     // The transform for this document was just (re)applied; re-measure the
     // video plane so any videochanged fired mid-load (pre-transform) is
     // corrected, and documents without a video object clear the stale rect.
-    postVideoRect();
+    postLayoutRects();
     postToNative({
         type: "loaded",
         width: evt.detail.resolution.width,
@@ -280,7 +287,7 @@ bmlBrowser.addEventListener("videochanged", (evt) => {
     console.info(
         `[kiririn-bml] videochanged: ${rect.x},${rect.y} ${rect.width}x${rect.height}`,
     );
-    postVideoRect();
+    postLayoutRects();
 });
 
 bmlBrowser.addEventListener("invisible", (evt) => {

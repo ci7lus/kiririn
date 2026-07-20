@@ -311,21 +311,6 @@ struct PlayerOverlayView_iOS: View {
                         }
                     }
                 )
-
-                ForEach(playerState.availableOverlayPlugins) { plugin in
-                    PluginOverlayView(
-                        pluginDefinition: plugin,
-                        appModel: appModel,
-                        reloadToken: playerState.pluginReloadToken
-                            + playerState.perPluginReloadTokens[
-                                plugin.id.uuidString, default: 0],
-                        displayArea: .overlay,
-                        playerID: playerState.id
-                    )
-                    .id(plugin.id)
-                    .opacity(playerState.showingPluginOverlay ? 1 : 0)
-                    .allowsHitTesting(false)
-                }
             }
             .frame(width: frame.width, height: frame.height)
             .clipShape(.rect(cornerRadius: playerState.mode == .mini ? 14 : 0))
@@ -341,6 +326,29 @@ struct PlayerOverlayView_iOS: View {
                 .position(x: frame.midX, y: frame.midY)
                 .opacity(playerState.bmlContentVisible ? 1 : 0)
                 .allowsHitTesting(false)
+                .ignoresSafeArea(edges: verticalSizeClass == .compact ? .bottom : [])
+        }
+
+        if playerState.player != nil {
+            let frame = playerSurfaceFrame(in: geo)
+            ForEach(playerState.availableOverlayPlugins) { plugin in
+                PluginOverlayView(
+                    pluginDefinition: plugin,
+                    appModel: appModel,
+                    reloadToken: playerState.pluginReloadToken
+                        + playerState.perPluginReloadTokens[
+                            plugin.id.uuidString, default: 0],
+                    displayArea: .overlay,
+                    playerID: playerState.id
+                )
+                .id(plugin.id)
+                .frame(width: frame.width, height: frame.height)
+                .clipShape(.rect(cornerRadius: playerState.mode == .mini ? 14 : 0))
+                .position(x: frame.midX, y: frame.midY)
+                .opacity(playerState.showingPluginOverlay ? 1 : 0)
+                .allowsHitTesting(false)
+                .ignoresSafeArea(edges: verticalSizeClass == .compact ? .bottom : [])
+            }
         }
     }
 

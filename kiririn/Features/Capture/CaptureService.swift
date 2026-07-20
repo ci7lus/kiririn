@@ -150,29 +150,11 @@ final class CaptureService: ObservableObject {
         var effectiveOverlayPluginManifestIDs: [String] = []
         var compositeURLForCopy: URL?
 
-        // 合成順: プラグイン → データ放送（表示順に合わせる）
-        // 両方有効な場合は、プラグイン合成結果に対してデータ放送を合成する
+        // 合成順: データ放送 → プラグイン（表示順に合わせる）
         var currentBasePath = savedPath
         var hasComposite = false
 
-        // 1. プラグイン合成
-        if shouldCompositePluginOverlay, let overlay = overlayImage,
-            let compositePath = try? await saveCompositedCapturePath(
-                savedPath: currentBasePath,
-                overlayImage: overlay,
-                programName: programName,
-                serviceName: serviceName,
-                caption: caption,
-                broadcastTime: broadcastTime,
-                overlayPluginManifestIDs: overlayPluginManifestIDs
-            )
-        {
-            currentBasePath = compositePath
-            effectiveOverlayPluginManifestIDs = overlayPluginManifestIDs
-            hasComposite = true
-        }
-
-        // 2. データ放送合成（プラグイン合成結果に対して合成）
+        // 1. データ放送合成
         if let dataBroadcastOverlay = dataBroadcastOverlayImage,
             let dataBroadcastLayout = dataBroadcastLayout,
             let dataBroadcastPath = try? await saveCompositedCapturePath(
@@ -187,6 +169,23 @@ final class CaptureService: ObservableObject {
             )
         {
             currentBasePath = dataBroadcastPath
+            hasComposite = true
+        }
+
+        // 2. プラグイン合成（データ放送を含む画面全体に対して合成）
+        if shouldCompositePluginOverlay, let overlay = overlayImage,
+            let compositePath = try? await saveCompositedCapturePath(
+                savedPath: currentBasePath,
+                overlayImage: overlay,
+                programName: programName,
+                serviceName: serviceName,
+                caption: caption,
+                broadcastTime: broadcastTime,
+                overlayPluginManifestIDs: overlayPluginManifestIDs
+            )
+        {
+            currentBasePath = compositePath
+            effectiveOverlayPluginManifestIDs = overlayPluginManifestIDs
             hasComposite = true
         }
 

@@ -86,25 +86,6 @@
                                 Color.black
                             }
 
-                            if !playerState.availableOverlayPlugins.isEmpty {
-                                ForEach(playerState.availableOverlayPlugins) { plugin in
-                                    PluginOverlayView(
-                                        pluginDefinition: plugin,
-                                        appModel: appModel,
-                                        reloadToken: playerState.pluginReloadToken
-                                            + playerState.perPluginReloadTokens[
-                                                plugin.id.uuidString, default: 0],
-                                        displayArea: .overlay,
-                                        playerID: playerState.id
-                                    )
-                                    .id(plugin.id)
-                                    .frame(width: videoFrame.width, height: videoFrame.height)
-                                    .position(x: videoFrame.midX, y: videoFrame.midY)
-                                    .opacity(playerState.showingPluginOverlay ? 1 : 0)
-                                    .allowsHitTesting(false)
-                                }
-                            }
-
                             if let session = playerState.dataBroadcastSession {
                                 // Visibility is content-driven (ARIB invisible state):
                                 // the content shows itself on DataButton. Mouse input
@@ -114,6 +95,23 @@
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                                     .opacity(playerState.bmlContentVisible ? 1 : 0)
                                     .allowsHitTesting(false)
+                            }
+
+                            ForEach(playerState.availableOverlayPlugins) { plugin in
+                                PluginOverlayView(
+                                    pluginDefinition: plugin,
+                                    appModel: appModel,
+                                    reloadToken: playerState.pluginReloadToken
+                                        + playerState.perPluginReloadTokens[
+                                            plugin.id.uuidString, default: 0],
+                                    displayArea: .overlay,
+                                    playerID: playerState.id
+                                )
+                                .id(plugin.id)
+                                .frame(width: videoGeo.size.width, height: videoGeo.size.height)
+                                .position(x: videoGeo.size.width / 2, y: videoGeo.size.height / 2)
+                                .opacity(playerState.showingPluginOverlay ? 1 : 0)
+                                .allowsHitTesting(false)
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)

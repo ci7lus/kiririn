@@ -33,16 +33,17 @@ private struct CacheRecoverySectionContent: View {
                     .font(.headline)
                     .foregroundStyle(.yellow)
 
-                Text("キャッシュの破損を検知しました")
+                Text("一部キャッシュの読み込みに失敗しています")
                     .font(.headline)
             }
 
             Text(
-                "キャッシュの一部データの読み込みに失敗しています。キャッシュを削除しますか？\n削除すると、再生位置履歴・キャプチャ履歴（元ファイル除く）などが削除されます。"
+                "読み込みの失敗は、アプリの二重起動でも起こることがあります。その場合は閉じて開き直すことで解消します。\n繰り返し読み込みに失敗する場合は、キャッシュの削除を行ってください。\n削除すると、再生位置履歴・キャプチャ履歴（元ファイル除く）などが削除されます。"
             )
             .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+            .lineSpacing(4)
 
             Button(role: .destructive, action: onDelete) {
                 Label(

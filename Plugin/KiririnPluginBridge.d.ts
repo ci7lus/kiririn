@@ -49,6 +49,17 @@ export interface Service {
     channel?: Channel;
 }
 
+export interface PlayerDisplayRect {
+    /** プレイヤー表示領域の幅を1とした左端座標。 */
+    x: number;
+    /** プレイヤー表示領域の高さを1とした上端座標。 */
+    y: number;
+    /** プレイヤー表示領域の幅を1とした表示幅。 */
+    width: number;
+    /** プレイヤー表示領域の高さを1とした表示高さ。 */
+    height: number;
+}
+
 export interface PlayerPlaybackState {
     playerID: string;
     playableID: string;
@@ -56,6 +67,16 @@ export interface PlayerPlaybackState {
     time: number;
     position: number;
     rate: number;
+    /**
+     * プレイヤー領域内でテレビ画面として使われる描画領域の正規化座標です。
+     * データ放送表示中はデータ放送コンテンツの描画領域、それ以外は全面を示します。
+     */
+    televisionDisplayRect: PlayerDisplayRect;
+    /**
+     * プレイヤー領域内で映像が実際に表示されている領域の正規化座標です。
+     * データ放送に映像プレーンがない場合を含め、映像が全面表示されるときは全面を示します。
+     */
+    videoDisplayRect: PlayerDisplayRect;
 }
 
 export interface Playable {
