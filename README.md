@@ -1,6 +1,6 @@
 # kiririn
 
-kiririn は macOS/iOS 上で日本のデジタル放送を視聴する体験を研究する目的で配布される研究資料です。<br>
+kiririn は macOS/iOS 上において、デジタル放送の視聴を行うプログラムの実装を研究する目的で頒布される研究資料です。<br>
 本アプリに CAS 処理は含まれていないため、暗号化された放送データを視聴することはできません。<br>
 放送視聴機能を利用するには利用者自身が管理する [Chinachu/Mirakurun](https://github.com/Chinachu/Mirakurun) または [l3tnun/EPGStation](https://github.com/l3tnun/EPGStation) が必要です。
 
