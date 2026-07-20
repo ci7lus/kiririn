@@ -286,6 +286,11 @@ final class AppModel {
     }
 
     private func handlePluginDeepLink(components: URLComponents) {
+        if PluginInstallDeepLink.isInstallRequest(components) {
+            handlePluginInstallDeepLink(components: components)
+            return
+        }
+
         let pathComponents = components.path.split(separator: "/").map(String.init)
         guard let manifestID = pathComponents.first, !manifestID.isEmpty else {
             logger.warning("deep link plugins rejected: missing manifest id")
@@ -314,6 +319,31 @@ final class AppModel {
             ]
         )
         logger.info("deep link plugin callback queued: manifestID=\(manifestID)")
+    }
+
+    private func handlePluginInstallDeepLink(components: URLComponents) {
+        guard let request = PluginInstallDeepLink(components: components) else {
+            logger.warning("deep link plugin install rejected: invalid parameters")
+            pendingPluginInstallErrorMessage =
+                "プラグインの追加URLにupdateManifestUrlまたはmanifestIDが正しく設定されていません"
+            return
+        }
+
+        Task {
+            do {
+                let preview = try await pluginStore.previewPlugin(
+                    fromUpdateManifestURL: request.updateManifestURL,
+                    manifestID: request.manifestID
+                )
+                pendingPluginInstallPreviews.append(preview)
+                logger.info("deep link plugin install resolved: manifestID=\(request.manifestID)")
+            } catch {
+                logger.warning(
+                    "deep link plugin install failed: manifestID=\(request.manifestID), error=\(error.localizedDescription)"
+                )
+                pendingPluginInstallErrorMessage = error.localizedDescription
+            }
+        }
     }
 
     private func parseMediaURL(from components: URLComponents) -> URL? {
