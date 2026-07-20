@@ -53,6 +53,7 @@ nonisolated enum ServerAuth: Codable, Equatable, Sendable {
     case none
     case basic(username: String, password: String)
     case bearer(token: String)
+    case cookie(cookie: String)
     case oauth2(accessToken: String?, refreshToken: String?, expiryDate: Date?)
 }
 

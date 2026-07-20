@@ -9,6 +9,19 @@ struct APIClientDiagnosticsTests {
         let programs: [String]
     }
 
+    @Test func cookieAuthAddsCookieHeader() {
+        let configuration = ServerConfiguration(
+            name: "Main",
+            type: .mirakurun,
+            baseURL: "https://example.com",
+            auth: .cookie(cookie: "session=abc123")
+        )
+
+        let client = APIClient(configuration: configuration)
+
+        #expect(client.defaultHeaders["Cookie"] == "session=abc123")
+    }
+
     @Test func decodingDiagnosticReportsJSONErrorIndexAndControlCharacterSnippet() throws {
         let data =
             Data(#"{"programs":["正常"#.utf8)

@@ -28,6 +28,10 @@ nonisolated final class APIClient: Sendable {
             if !token.isEmpty {
                 headers["Authorization"] = "Bearer \(token)"
             }
+        case .cookie(let cookie):
+            if !cookie.isEmpty {
+                headers["Cookie"] = cookie
+            }
         case .none, .oauth2:
             break
         }
