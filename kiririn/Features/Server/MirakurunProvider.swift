@@ -65,18 +65,24 @@ extension MirakurunProvider: DataBroadcastProviding {
     // `.unsupported`. There's no capability probe, so we always hand back an
     // endpoint here and let the SSE connection attempt itself be the check.
     func dataBroadcastEndpoint(for service: TVService) -> DataBroadcastEndpoint? {
+        // Mahiron's SSE payloads carry absolute `/api/...` URLs for each
+        // module, but those would drop any base path the server is mounted
+        // under - build them from the configured base URL instead.
         guard let providerIdentifier = service.providerIdentifier,
             let eventsURL = client.buildStreamURL(
                 path: "api/services/\(providerIdentifier)/data-broadcast/events"),
-            let moduleBaseURL = client.buildStreamURL(
-                path: "api/services/\(providerIdentifier)/data-broadcast/modules")
+            let stateURL = client.buildStreamURL(
+                path: "api/services/\(providerIdentifier)/data-broadcast/state"),
+            let baseURL = client.buildStreamURL(
+                path: "api/services/\(providerIdentifier)/data-broadcast")
         else {
             return nil
         }
         return DataBroadcastEndpoint(
             eventsURL: eventsURL,
+            stateURL: stateURL,
             headers: client.defaultHeaders,
-            moduleBaseURL: moduleBaseURL
+            baseURL: baseURL
         )
     }
 }

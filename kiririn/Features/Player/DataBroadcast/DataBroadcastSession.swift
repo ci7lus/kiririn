@@ -43,11 +43,12 @@ struct DataBroadcastCaptureSnapshot {
 /// the plan at ~/.claude/plans/mahiron-api-buzzing-pascal.md).
 ///
 /// Design: thin-Swift / fat-JS. This class only does transport (SSE bytes,
-/// module GETs) and lifecycle; all ARIB byte-level parsing (PMT sections,
-/// DII descriptors, zlib, multipart entities) happens in the JS adapter
-/// (web/bml/src/mahiron.ts, pmt.ts, module_decoder.ts), which reuses
-/// web-bml/aribts code directly. The minimal Mahiron JSON structs here exist
-/// only to decide *which* modules to fetch, not to interpret their content.
+/// module manifest/resource GETs) and lifecycle. Mahiron expands each
+/// completed DSM-CC module into logical BML resources server-side (zlib,
+/// multipart entities, Type descriptors), so the only ARIB byte-level parsing
+/// left in kiririn is the PMT section, done in the JS adapter
+/// (web/bml/src/mahiron.ts, pmt.ts) with web-bml/aribts code. The minimal
+/// Mahiron JSON structs here exist only to decide *which* modules to fetch.
 @MainActor
 @Observable
 final class DataBroadcastSession {
@@ -141,14 +142,33 @@ final class DataBroadcastSession {
         let moduleId: Int
         let downloadId: UInt32
         let version: Int
-        let info: Data
         let priority: Int
+
+        /// Immutable module generation identity, matching the URL Mahiron
+        /// serves it under.
+        var key: String { "\(componentTag)/\(moduleId)/\(downloadId)/\(version)" }
+    }
+
+    /// How a failed module GET should be retried, derived from Mahiron's
+    /// status codes (see internal/web/api/data_broadcast.go).
+    private enum ModuleFetchFailure: Error {
+        /// This generation will never be servable (404 unknown/superseded,
+        /// 422 undecodable entity, 507 over receiver resource limits).
+        case permanent(String)
+        /// 425: announced but not yet complete. Only reachable in a race
+        /// (Mahiron restarted, or the payload was released before the cache
+        /// caught up), so poll rather than give up.
+        case notReady
+        /// 410 (evicted from the completed-module cache), 5xx, transport
+        /// errors - worth a bounded number of retries.
+        case transient(String)
     }
     private var fetchQueue: [FetchRequest] = []
     private var delivered: Set<String> = []
     private var inflight: Set<String> = []
     private var activeFetchCount = 0
     private let maxConcurrentFetches = 4
+    private let maxConcurrentResourceFetches = 4
     /// Latest module metadata seen per "componentTag/moduleId". Drives the
     /// periodic reconciliation pass: a module whose fetch failed (or whose
     /// completion event we somehow missed) has no other retry trigger on a
@@ -157,9 +177,13 @@ final class DataBroadcastSession {
     /// undelivered until it succeeds or is abandoned.
     private var knownModules: [String: MahironModule] = [:]
     private var fetchFailureCounts: [String: Int] = [:]
+    private var notReadyCounts: [String: Int] = [:]
     private var abandonedFetches: Set<String> = []
     private var reconcileTask: Task<Void, Never>?
     private let maxFetchFailures = 5
+    /// 425 polls are driven by the 5s reconciliation pass, so this is roughly
+    /// two minutes of waiting for a module Mahiron says it hasn't finished.
+    private let maxNotReadyPolls = 24
 
     private let scriptMessageProxy: LeakAversionBMLMessageHandler
 
@@ -220,6 +244,7 @@ final class DataBroadcastSession {
         delivered.removeAll()
         knownModules.removeAll()
         fetchFailureCounts.removeAll()
+        notReadyCounts.removeAll()
         abandonedFetches.removeAll()
         status = .idle
     }
@@ -369,9 +394,21 @@ final class DataBroadcastSession {
     }
 
     private func schedule(componentTag: Int, module: MahironModule) {
+        let key = "\(componentTag)/\(module.moduleId)/\(module.downloadId)/\(module.version)"
+        // A rejected module was refused by Mahiron's receiver and can never be
+        // fetched; don't track it so reconciliation doesn't poll it forever.
+        // The JS adapter drops it from the DII list web-bml sees as well.
+        if module.status == "rejected" {
+            knownModules.removeValue(forKey: "\(componentTag)/\(module.moduleId)")
+            if abandonedFetches.insert(key).inserted {
+                logger.warning(
+                    "module rejected by receiver component=\(componentTag) module=\(module.moduleId): \(module.rejectionReason ?? "unknown")"
+                )
+            }
+            return
+        }
         knownModules["\(componentTag)/\(module.moduleId)"] = module
         guard module.complete else { return }
-        let key = "\(componentTag)/\(module.moduleId)/\(module.downloadId)/\(module.version)"
         guard !delivered.contains(key), !inflight.contains(key), !abandonedFetches.contains(key)
         else { return }
 
@@ -387,7 +424,6 @@ final class DataBroadcastSession {
                 moduleId: module.moduleId,
                 downloadId: module.downloadId,
                 version: module.version,
-                info: module.info ?? Data(),
                 priority: priority
             ))
         fetchQueue.sort { $0.priority < $1.priority }
@@ -405,50 +441,168 @@ final class DataBroadcastSession {
     }
 
     private func performFetch(_ request: FetchRequest, attempt: Int) async {
-        let key =
-            "\(request.componentTag)/\(request.moduleId)/\(request.downloadId)/\(request.version)"
-        let url = endpoint.moduleURL(componentTag: request.componentTag, moduleId: request.moduleId)
+        let key = request.key
         do {
-            var urlRequest = URLRequest(url: url)
-            for (field, value) in endpoint.headers {
-                urlRequest.setValue(value, forHTTPHeaderField: field)
-            }
-            let (data, response) = try await URLSession.shared.data(for: urlRequest)
-            guard let http = response as? HTTPURLResponse else {
-                throw APIError.invalidResponse
-            }
-            guard (200...299).contains(http.statusCode) else {
-                throw APIError.httpError(statusCode: http.statusCode, diagnostic: nil)
-            }
+            let startedAt = ContinuousClock.now
+            let files = try await fetchModuleFiles(request)
+            let elapsed = ContinuousClock.now - startedAt
             inflight.remove(key)
             delivered.insert(key)
+            fetchFailureCounts[key] = nil
+            notReadyCounts[key] = nil
             logger.debug(
-                "module fetched component=\(request.componentTag) module=\(request.moduleId) bytes=\(data.count)"
+                "module fetched component=\(request.componentTag) module=\(request.moduleId) resources=\(files.count) in \(Int(elapsed / .milliseconds(1)))ms"
             )
-            postModuleData(request, data: data)
+            postModuleResources(request, files: files)
+        } catch let failure as ModuleFetchFailure {
+            switch failure {
+            case .permanent(let reason):
+                abandonedFetches.insert(key)
+                inflight.remove(key)
+                logger.warning(
+                    "module unavailable component=\(request.componentTag) module=\(request.moduleId): \(reason)"
+                )
+            case .notReady:
+                let polls = (notReadyCounts[key] ?? 0) + 1
+                notReadyCounts[key] = polls
+                inflight.remove(key)
+                if polls >= maxNotReadyPolls {
+                    abandonedFetches.insert(key)
+                    logger.warning(
+                        "module still incomplete after \(polls) polls component=\(request.componentTag) module=\(request.moduleId)"
+                    )
+                }
+            case .transient(let reason):
+                if attempt < 2 {
+                    try? await Task.sleep(for: .seconds(1))
+                    await performFetch(request, attempt: attempt + 1)
+                    return
+                }
+                recordFetchFailure(request, reason: reason)
+            }
         } catch {
             if attempt < 2 {
                 try? await Task.sleep(for: .seconds(1))
                 await performFetch(request, attempt: attempt + 1)
                 return
             }
-            let failureCount = (fetchFailureCounts[key] ?? 0) + 1
-            fetchFailureCounts[key] = failureCount
-            if failureCount >= maxFetchFailures {
-                abandonedFetches.insert(key)
-                logger.warning(
-                    "giving up on module after \(failureCount) failures component=\(request.componentTag) module=\(request.moduleId): \(error)"
-                )
-            } else {
-                // Reconciliation re-schedules this on its next pass.
-                logger.warning(
-                    "module fetch failed (\(failureCount)/\(maxFetchFailures)) component=\(request.componentTag) module=\(request.moduleId): \(error)"
-                )
-            }
-            inflight.remove(key)
+            recordFetchFailure(request, reason: "\(error)")
         }
         activeFetchCount -= 1
         drainFetchQueue()
+    }
+
+    private func recordFetchFailure(_ request: FetchRequest, reason: String) {
+        let key = request.key
+        let failureCount = (fetchFailureCounts[key] ?? 0) + 1
+        fetchFailureCounts[key] = failureCount
+        if failureCount >= maxFetchFailures {
+            abandonedFetches.insert(key)
+            logger.warning(
+                "giving up on module after \(failureCount) failures component=\(request.componentTag) module=\(request.moduleId): \(reason)"
+            )
+        } else {
+            // Reconciliation re-schedules this on its next pass.
+            logger.warning(
+                "module fetch failed (\(failureCount)/\(maxFetchFailures)) component=\(request.componentTag) module=\(request.moduleId): \(reason)"
+            )
+        }
+        inflight.remove(key)
+    }
+
+    /// Fetches the module's resource manifest and every resource it lists.
+    /// Mahiron serves both under the module's immutable version URL, so the
+    /// bytes are content-addressed and safely cacheable by URLSession.
+    private func fetchModuleFiles(_ request: FetchRequest) async throws -> [BMLModuleFile] {
+        let headers = endpoint.headers
+        let manifestData = try await Self.fetchData(
+            from: endpoint.moduleVersionURL(
+                componentTag: request.componentTag, downloadId: request.downloadId,
+                moduleId: request.moduleId, version: request.version),
+            headers: headers)
+        guard
+            let manifest = try? JSONDecoder().decode(
+                MahironModuleManifest.self, from: manifestData)
+        else {
+            throw ModuleFetchFailure.permanent("malformed module manifest")
+        }
+        guard !manifest.resources.isEmpty else {
+            throw ModuleFetchFailure.permanent("module manifest has no resources")
+        }
+
+        let urls = manifest.resources.map { resource in
+            endpoint.moduleResourceURL(
+                componentTag: request.componentTag, downloadId: request.downloadId,
+                moduleId: request.moduleId, version: request.version, resourceId: resource.id)
+        }
+        // Resource order is the broadcast entity order; keep it by index
+        // rather than by completion order. A module can carry up to 256
+        // resources, so keep only a few requests in flight at a time.
+        var payloads: [Int: Data] = [:]
+        let initialFetches = min(maxConcurrentResourceFetches, urls.count)
+        try await withThrowingTaskGroup(of: (Int, Data).self) { group in
+            var next = 0
+            while next < initialFetches {
+                let index = next
+                let url = urls[index]
+                group.addTask {
+                    let data = try await Self.fetchData(from: url, headers: headers)
+                    return (index, data)
+                }
+                next += 1
+            }
+            while let (index, data) = try await group.next() {
+                payloads[index] = data
+                guard next < urls.count else { continue }
+                let pending = next
+                let url = urls[pending]
+                group.addTask {
+                    let data = try await Self.fetchData(from: url, headers: headers)
+                    return (pending, data)
+                }
+                next += 1
+            }
+        }
+        return try manifest.resources.enumerated().map { index, resource in
+            guard let data = payloads[index] else {
+                throw ModuleFetchFailure.transient("missing resource \(resource.id)")
+            }
+            return BMLModuleFile(
+                contentLocation: resource.contentLocation?.isEmpty == false
+                    ? resource.contentLocation : nil,
+                contentType: resource.contentType,
+                dataBase64: data.base64EncodedString()
+            )
+        }
+    }
+
+    private nonisolated static func fetchData(from url: URL, headers: [String: String]) async throws
+        -> Data
+    {
+        var urlRequest = URLRequest(url: url)
+        for (field, value) in headers {
+            urlRequest.setValue(value, forHTTPHeaderField: field)
+        }
+        let (data, response) = try await URLSession.shared.data(for: urlRequest)
+        guard let http = response as? HTTPURLResponse else {
+            throw ModuleFetchFailure.transient("invalid response")
+        }
+        switch http.statusCode {
+        case 200...299:
+            return data
+        case 404:
+            throw ModuleFetchFailure.permanent("unknown or superseded module generation")
+        case 422:
+            throw ModuleFetchFailure.permanent("module entity cannot be decoded")
+        case 425:
+            throw ModuleFetchFailure.notReady
+        case 507:
+            throw ModuleFetchFailure.permanent("module exceeds receiver resource limits")
+        case 410:
+            throw ModuleFetchFailure.transient("module evicted from cache")
+        default:
+            throw ModuleFetchFailure.transient("HTTP \(http.statusCode)")
+        }
     }
 
     /// Safety net for delivery gaps: on a static carousel there is no further
@@ -505,14 +659,20 @@ final class DataBroadcastSession {
         post(#"{"type":"sse","event":\#(escapedEvent),"data":\#(jsonData)}"#)
     }
 
-    private func postModuleData(_ request: FetchRequest, data: Data) {
-        let moduleInfoB64 = request.info.base64EncodedString()
-        let dataB64 = data.base64EncodedString()
-        let json =
-            "{\"type\":\"moduleData\",\"componentTag\":\(request.componentTag),"
-            + "\"moduleId\":\(request.moduleId),\"downloadId\":\(request.downloadId),"
-            + "\"version\":\(request.version),\"moduleInfoB64\":\"\(moduleInfoB64)\","
-            + "\"dataBase64\":\"\(dataB64)\"}"
+    private func postModuleResources(_ request: FetchRequest, files: [BMLModuleFile]) {
+        let payload = BMLModuleResourcesPayload(
+            componentTag: request.componentTag,
+            moduleId: request.moduleId,
+            downloadId: request.downloadId,
+            version: request.version,
+            files: files
+        )
+        guard let json = try? Self.jsonText(for: payload) else {
+            logger.warning(
+                "failed to encode module resources component=\(request.componentTag) module=\(request.moduleId)"
+            )
+            return
+        }
         post(json)
     }
 

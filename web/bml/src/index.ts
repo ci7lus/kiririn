@@ -316,14 +316,13 @@ window.kiririnBML = {
             case "sse":
                 adapter.handleSSE(message.event, message.data);
                 break;
-            case "moduleData":
-                adapter.handleModuleData({
+            case "moduleResources":
+                adapter.handleModuleResources({
                     componentTag: message.componentTag,
                     moduleId: message.moduleId,
                     downloadId: message.downloadId,
                     version: message.version,
-                    moduleInfoBase64: message.moduleInfoB64,
-                    dataBase64: message.dataBase64,
+                    files: message.files,
                 });
                 break;
             case "programInfo":
