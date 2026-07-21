@@ -13,7 +13,6 @@
     "crc-32": "^1.2.2",
     "css": "https://github.com/otya128/reworkcss-css/releases/download/v3.0.1/css-3.0.1.tgz",
     "fast-xml-parser": "^4.0.11",
-    "fflate": "^0.8.2",
     "process": "^0.11.10"
   },
   "devDependencies": {

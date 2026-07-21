@@ -56,13 +56,31 @@ nonisolated struct MahironModule: Decodable, Sendable {
     let downloadId: UInt32
     let version: Int
     let size: Int
-    /// DII moduleInfo descriptor bytes for this module. Go's `encoding/json`
-    /// marshals `[]byte` as base64 (or null when empty), and Foundation's
-    /// JSONDecoder decodes a `Data` field from a base64 string by default -
-    /// no manual decode step.
-    let info: Data?
     let complete: Bool
-    let etag: String?
+    /// `announced` / `receiving` / `complete` / `rejected`. A rejected module
+    /// was refused by Mahiron's receiver (resource limits, unsupported
+    /// carousel) and will never become fetchable - see `rejectionReason`.
+    let status: String?
+    let rejectionReason: String?
+}
+
+// MARK: - Mahiron module resource manifest
+// Mahiron expands a completed DSM-CC module into logical BML resources
+// server-side (zlib, multipart entities, Type-descriptor direct mapping) and
+// serves each one under the module's immutable version URL.
+
+nonisolated struct MahironModuleResource: Decodable, Sendable {
+    let id: String
+    let contentLocation: String?
+    let contentType: String
+}
+
+nonisolated struct MahironModuleManifest: Decodable, Sendable {
+    let componentTag: Int
+    let moduleId: Int
+    let downloadId: UInt32
+    let version: Int
+    let resources: [MahironModuleResource]
 }
 
 nonisolated struct MahironComponent: Decodable, Sendable {
@@ -105,6 +123,23 @@ nonisolated struct MahironModuleListEnvelope: Decodable, Sendable {
 
 nonisolated struct MahironModuleEnvelope: Decodable, Sendable {
     let module: MahironModule?
+}
+
+/// One logical BML resource of a module, in the shape web-bml's `ModuleFile`
+/// expects (`contentType` is re-parsed into a MediaType by the JS adapter).
+nonisolated struct BMLModuleFile: Encodable, Sendable {
+    let contentLocation: String?
+    let contentType: String
+    let dataBase64: String
+}
+
+nonisolated struct BMLModuleResourcesPayload: Encodable, Sendable {
+    let type = "moduleResources"
+    let componentTag: Int
+    let moduleId: Int
+    let downloadId: UInt32
+    let version: Int
+    let files: [BMLModuleFile]
 }
 
 // MARK: - Native -> Web bridge payloads

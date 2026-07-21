@@ -6,13 +6,14 @@ export type NativeToWebMessage =
     | { type: "init"; programInfo: ProgramInfoMessage | null; postalCode: string | null }
     | { type: "sse"; event: string; data: unknown }
     | {
-          type: "moduleData";
+          type: "moduleResources";
           componentTag: number;
           moduleId: number;
           downloadId: number;
           version: number;
-          moduleInfoB64: string;
-          dataBase64: string;
+          // Mahiron expands the module entity server-side; each file is one
+          // logical BML resource in broadcast order.
+          files: { contentLocation: string | null; contentType: string; dataBase64: string }[];
       }
     | { type: "programInfo"; programInfo: ProgramInfoMessage }
     | { type: "key"; action: "down" | "up"; aribKeyCode: number }

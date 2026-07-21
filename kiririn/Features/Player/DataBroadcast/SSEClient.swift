@@ -14,8 +14,10 @@ nonisolated enum SSEClientError: Error, Sendable {
 }
 
 /// Minimal Server-Sent Events reader. Only `event:`/`data:` fields are
-/// handled (Mahiron doesn't use `id:`/`retry:`); multi-line `data:` fields are
-/// joined with `\n` per the SSE spec.
+/// handled; multi-line `data:` fields are joined with `\n` per the SSE spec.
+/// Mahiron sends `id:` (its per-service event sequence) but doesn't support
+/// resuming from `Last-Event-ID` - every connection starts with an
+/// authoritative `snapshot` event instead - so the id is ignored.
 ///
 /// Lines are split manually from the byte stream instead of via
 /// `AsyncBytes.lines`: `AsyncLineSequence` skips empty lines, and SSE uses

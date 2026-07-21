@@ -1,6 +1,12 @@
-import { BITBroadcaster, CurrentTime, ESEvent, ResponseMessage } from "../../web-bml/server/ws_api";
+import {
+    BITBroadcaster,
+    CurrentTime,
+    ESEvent,
+    ModuleFile,
+    ResponseMessage,
+} from "../../web-bml/server/ws_api";
+import { parseMediaTypeFromString } from "../../web-bml/server/entity_parser";
 import { hexToBytes } from "./hex";
-import { decodeModule } from "./module_decoder";
 import { parsePMTSection } from "./pmt";
 import { log } from "./bridge";
 
@@ -16,6 +22,10 @@ import { log } from "./bridge";
 // all (the native side synthesizes ProgramInfoMessage from the app's own
 // Playable/EPG state instead - see bridge NativeToWebMessage "programInfo"),
 // so only the `currentTime` shape's PascalCase actually matters here.
+//
+// Module content itself never reaches this file: Mahiron expands a completed
+// DSM-CC module into logical resources server-side, the native side fetches
+// them, and they arrive as a "moduleResources" bridge message.
 
 type MahironModule = {
     componentTag: number;
@@ -24,28 +34,32 @@ type MahironModule = {
     version: number;
     size: number;
     complete: boolean;
+    /** "announced" | "receiving" | "complete" | "rejected" */
+    status?: string;
+    rejectionReason?: string | null;
 };
 
 type ModuleRegistryEntry = { id: number; version: number; size: number };
 
 type ComponentState = {
     downloadId: number;
+    dataEventId: number;
+    returnToEntry: boolean | undefined;
     modules: Map<number, ModuleRegistryEntry>;
     listAnnounced: boolean;
 };
 
-type PendingModuleData = {
+type PendingModuleResources = {
     componentTag: number;
     moduleId: number;
     downloadId: number;
     version: number;
-    moduleInfoBase64: string;
-    dataBase64: string;
+    files: { contentLocation: string | null; contentType: string; dataBase64: string }[];
 };
 
 /**
  * Converts Mahiron's data-broadcast SSE events (and native-fetched module
- * binaries) into web-bml `ResponseMessage`s, enforcing the one ordering
+ * resources) into web-bml `ResponseMessage`s, enforcing the one ordering
  * constraint web-bml itself doesn't self-heal from: a `moduleListUpdated`
  * (DII) must be emitted for a component before any `moduleDownloaded` (DDB)
  * for that same component, or web-bml's Resources cache silently drops it
@@ -55,7 +69,7 @@ type PendingModuleData = {
  */
 export class MahironAdapter {
     private readonly components = new Map<number, ComponentState>();
-    private readonly pendingModuleData = new Map<number, PendingModuleData[]>();
+    private readonly pendingModuleData = new Map<number, PendingModuleResources[]>();
     private readonly seenEventTypes = new Set<string>();
 
     public constructor(private readonly emit: (message: ResponseMessage) => void) {}
@@ -103,7 +117,7 @@ export class MahironAdapter {
         }
     }
 
-    public handleModuleData(payload: PendingModuleData): void {
+    public handleModuleResources(payload: PendingModuleResources): void {
         const state = this.components.get(payload.componentTag);
         if (state == null || !state.listAnnounced || state.downloadId !== payload.downloadId) {
             const queue = this.pendingModuleData.get(payload.componentTag) ?? [];
@@ -155,14 +169,26 @@ export class MahironAdapter {
         if (modules.length === 0) {
             return;
         }
-        this.applyModuleList(component.componentTag, modules[0].downloadId, modules);
+        this.applyModuleList(
+            component.componentTag,
+            component.carousel?.downloadId ?? modules[0].downloadId,
+            modules,
+            component.dataEventId,
+            component.returnToEntry,
+        );
     }
 
     private handleModuleListEvent(list: any): void {
         if (list == null) {
             return;
         }
-        this.applyModuleList(list.componentTag, list.downloadId, (list.modules ?? []) as MahironModule[]);
+        this.applyModuleList(
+            list.componentTag,
+            list.downloadId,
+            (list.modules ?? []) as MahironModule[],
+            list.dataEventId,
+            list.returnToEntry,
+        );
     }
 
     private handleModuleUpdatedEvent(mod: MahironModule): void {
@@ -178,10 +204,29 @@ export class MahironAdapter {
             // fetches for them). Announcing a partial list here nukes the
             // component's cache and leaves the content stuck on
             // データ取得中. Wait for the full list from Mahiron's own
-            // moduleListUpdated/snapshot; moduleData received meanwhile is
-            // queued via pendingModuleData.
-            state = { downloadId: mod.downloadId, modules: new Map(), listAnnounced: false };
+            // moduleListUpdated/snapshot; module resources received meanwhile
+            // are queued via pendingModuleData.
+            state = {
+                downloadId: mod.downloadId,
+                dataEventId: dataEventIdFromDownloadId(mod.downloadId),
+                returnToEntry: undefined,
+                modules: new Map(),
+                listAnnounced: false,
+            };
             this.components.set(mod.componentTag, state);
+        }
+        if (mod.status === "rejected") {
+            // Refused by Mahiron's receiver and never fetchable. Keeping it in
+            // the DII list web-bml sees would leave content waiting on it stuck
+            // on データ取得中; dropping it fails those fetches fast instead.
+            log(
+                "warn",
+                `module rejected by receiver (component ${mod.componentTag}, module ${mod.moduleId}): ${mod.rejectionReason ?? "unknown"}`,
+            );
+            if (state.modules.delete(mod.moduleId) && state.listAnnounced) {
+                this.announceModuleList(mod.componentTag, state);
+            }
+            return;
         }
         const existing = state.modules.get(mod.moduleId);
         const changed = existing == null || existing.version !== mod.version || existing.size !== mod.size;
@@ -193,9 +238,33 @@ export class MahironAdapter {
         }
     }
 
-    private applyModuleList(componentTag: number, downloadId: number, modules: MahironModule[]): void {
-        const state: ComponentState = { downloadId, modules: new Map(), listAnnounced: false };
+    private applyModuleList(
+        componentTag: number,
+        downloadId: number,
+        modules: MahironModule[],
+        dataEventId: unknown,
+        returnToEntry: unknown,
+    ): void {
+        const state: ComponentState = {
+            downloadId,
+            dataEventId:
+                typeof dataEventId === "number"
+                    ? dataEventId
+                    : dataEventIdFromDownloadId(downloadId),
+            returnToEntry: typeof returnToEntry === "boolean" ? returnToEntry : undefined,
+            modules: new Map(),
+            listAnnounced: false,
+        };
         for (const m of modules) {
+            // Rejected modules are announced by the DII but can never be
+            // fetched - see handleModuleUpdatedEvent.
+            if (m.status === "rejected") {
+                log(
+                    "warn",
+                    `module rejected by receiver (component ${componentTag}, module ${m.moduleId}): ${m.rejectionReason ?? "unknown"}`,
+                );
+                continue;
+            }
             state.modules.set(m.moduleId, { id: m.moduleId, version: m.version, size: m.size });
         }
         this.components.set(componentTag, state);
@@ -208,7 +277,8 @@ export class MahironAdapter {
             type: "moduleListUpdated",
             componentId: componentTag,
             modules: [...state.modules.values()],
-            dataEventId: dataEventIdFromDownloadId(state.downloadId),
+            dataEventId: state.dataEventId,
+            returnToEntryFlag: state.returnToEntry,
         });
         this.flushPendingModuleData(componentTag);
     }
@@ -220,27 +290,45 @@ export class MahironAdapter {
         }
         this.pendingModuleData.delete(componentTag);
         for (const payload of queue) {
-            this.handleModuleData(payload);
+            this.handleModuleResources(payload);
         }
     }
 
-    private emitModuleDownloaded(payload: PendingModuleData): void {
-        try {
-            const message = decodeModule({
-                componentTag: payload.componentTag,
-                moduleId: payload.moduleId,
-                version: payload.version,
-                dataEventId: dataEventIdFromDownloadId(payload.downloadId),
-                moduleInfoBase64: payload.moduleInfoBase64,
-                dataBase64: payload.dataBase64,
+    // Mahiron expands the module entity (zlib, multipart, Type descriptor)
+    // itself, so this only has to restore web-bml's MediaType shape - the
+    // parameters it drops are unused by web-bml outside multipart boundaries.
+    private emitModuleDownloaded(payload: PendingModuleResources): void {
+        const files: ModuleFile[] = [];
+        for (const file of payload.files) {
+            const contentType = parseMediaTypeFromString(file.contentType).mediaType;
+            if (contentType == null) {
+                log(
+                    "warn",
+                    `skipping resource with unparsable content type "${file.contentType}" (component ${payload.componentTag}, module ${payload.moduleId})`,
+                );
+                continue;
+            }
+            // A module that maps directly to a single resource is referenced
+            // as /<component>/<module> with no filename, and web-bml keys it
+            // by a null contentLocation (the non-multipart branch of
+            // web-bml/server/decode_ts.ts). Mahiron sends null for exactly
+            // that case, so it passes straight through.
+            files.push({
+                contentLocation: file.contentLocation,
+                contentType,
+                dataBase64: file.dataBase64,
             });
-            this.emit(message);
-        } catch (e) {
-            log(
-                "error",
-                `failed to decode module (component ${payload.componentTag}, module ${payload.moduleId}): ${e}`,
-            );
         }
+        this.emit({
+            type: "moduleDownloaded",
+            componentId: payload.componentTag,
+            moduleId: payload.moduleId,
+            files,
+            version: payload.version,
+            dataEventId:
+                this.components.get(payload.componentTag)?.dataEventId ??
+                dataEventIdFromDownloadId(payload.downloadId),
+        });
     }
 
     // ES event messages (DSM-CC stream descriptor sections, Mahiron PR #33).
