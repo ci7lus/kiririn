@@ -35,6 +35,20 @@ struct PluginInstallDeepLinkTests {
         #expect(PluginInstallDeepLink(components: components) == nil)
     }
 
+    @Test func trimsUpdateManifestURL() throws {
+        let url = try #require(
+            URL(
+                string:
+                    "kiririn://plugins/?updateManifestUrl=%20https://example.com/update.json%20&manifestID=com.example.plugin"
+            ))
+        let components = try #require(
+            URLComponents(url: url, resolvingAgainstBaseURL: false)
+        )
+        let request = try #require(PluginInstallDeepLink(components: components))
+
+        #expect(request.updateManifestURL.absoluteString == "https://example.com/update.json")
+    }
+
     @Test func rejectsNonHTTPUpdateManifestURL() throws {
         let url = try #require(
             URL(

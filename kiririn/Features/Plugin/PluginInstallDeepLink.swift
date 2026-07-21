@@ -17,7 +17,7 @@ struct PluginInstallDeepLink: Equatable {
         guard
             let rawUpdateManifestURL = queryItems.first(where: {
                 $0.name == Self.updateManifestURLQueryName
-            })?.value,
+            })?.value?.trimmingCharacters(in: .whitespacesAndNewlines),
             let updateManifestURL = URL(string: rawUpdateManifestURL),
             let scheme = updateManifestURL.scheme?.lowercased(),
             ["http", "https"].contains(scheme),

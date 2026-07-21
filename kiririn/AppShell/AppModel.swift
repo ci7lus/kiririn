@@ -329,7 +329,7 @@ final class AppModel {
             return
         }
 
-        Task {
+        Task { @MainActor in
             do {
                 let preview = try await pluginStore.previewPlugin(
                     fromUpdateManifestURL: request.updateManifestURL,
