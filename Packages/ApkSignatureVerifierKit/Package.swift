@@ -11,6 +11,9 @@ let package = Package(
     products: [
         .library(
             name: "ApkSignatureVerifierKit",
+            // Xcode 26 can omit binaries for transitive PackageProducts when testing a client.
+            // Keep this product dynamic so Xcode links the transitive products correctly.
+            type: .dynamic,
             targets: ["ApkSignatureVerifierKit"]
         )
     ],

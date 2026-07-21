@@ -38,6 +38,35 @@ struct PluginManifestParserTests {
         #expect(manifest.displayAreas == [.overlay])
     }
 
+    @Test func parsesKiririnUpdateURL() throws {
+        let parser = PluginManifestParser()
+        let manifestData = Data(
+            """
+            {
+              "name": "Test Plugin",
+              "version": "1.0.0",
+              "browser_specific_settings": {
+                "kiririn": {
+                  "id": "com.example.test",
+                  "update_url": "https://example.com/plugins/sample/update.json",
+                  "views": {
+                    "overlay": {
+                      "page": "overlay.html"
+                    }
+                  }
+                }
+              }
+            }
+            """.utf8)
+
+        let manifest = try parser.parse(
+            manifestData: manifestData,
+            resourceExists: { _ in true }
+        )
+
+        #expect(manifest.manifestUpdateURL == "https://example.com/plugins/sample/update.json")
+    }
+
     @Test func rejectsManifestMissingRequiredFields() {
         let parser = PluginManifestParser()
         let manifestData = Data("{}".utf8)

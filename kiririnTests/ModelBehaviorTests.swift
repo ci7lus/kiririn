@@ -96,7 +96,7 @@ struct ModelBehaviorTests {
         let encoded = LocalRecordPath.recordID(
             serverId: "server/main", recordID: "record id?#1")
 
-        #expect(encoded == "servermainrecordid1")
+        #expect(encoded == "server%2Fmain%5Frecord%20id%3F%231")
     }
 
     @Test func localRecordItemUsesPersistedStateWhileVideoFileIsMissing() throws {

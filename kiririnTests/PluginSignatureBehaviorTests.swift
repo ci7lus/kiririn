@@ -7,15 +7,22 @@ import Testing
 
 struct PluginSignatureBehaviorTests {
 
-    @Test func pluginStoreStoresUnsignedPackageAuthenticationAndDisablesManualUpdate() throws {
+    @Test
+    func pluginStoreInDeveloperModeStoresUnsignedPackageAuthenticationAndDisablesManualUpdate()
+        throws
+    {
         let suiteName = "kiririn.plugin.signature.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
+        let pluginDirectoryURL = temporaryPluginDirectoryURL()
+        defer { try? FileManager.default.removeItem(at: pluginDirectoryURL) }
 
         let store = PluginStore(
             defaults: defaults,
+            pluginDirectoryURL: pluginDirectoryURL,
             packageSignatureVerifier: ApkSignatureVerifierKit(trustedChainPEMData: nil)
         )
+        store.setDeveloperModeEnabled(true)
         let packageData = unsignedPluginPackageData(
             manifestID: "com.example.unsigned",
             updateURL: "https://example.com/plugins/sample/update.json"
@@ -36,9 +43,12 @@ struct PluginSignatureBehaviorTests {
         let suiteName = "kiririn.plugin.signature.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
+        let pluginDirectoryURL = temporaryPluginDirectoryURL()
+        defer { try? FileManager.default.removeItem(at: pluginDirectoryURL) }
 
         let store = PluginStore(
             defaults: defaults,
+            pluginDirectoryURL: pluginDirectoryURL,
             packageSignatureVerifier: ApkSignatureVerifierKit(trustedChainPEMData: nil)
         )
         let plugin = PluginDefinition(
@@ -69,9 +79,12 @@ struct PluginSignatureBehaviorTests {
         let suiteName = "kiririn.plugin.signature.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
+        let pluginDirectoryURL = temporaryPluginDirectoryURL()
+        defer { try? FileManager.default.removeItem(at: pluginDirectoryURL) }
 
         let store = PluginStore(
             defaults: defaults,
+            pluginDirectoryURL: pluginDirectoryURL,
             packageSignatureVerifier: ApkSignatureVerifierKit(trustedChainPEMData: nil)
         )
         let packageData = unsignedPluginPackageData(
@@ -120,8 +133,10 @@ struct PluginSignatureBehaviorTests {
         let suiteName = "kiririn.plugin.routing.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
+        let pluginDirectoryURL = temporaryPluginDirectoryURL()
+        defer { try? FileManager.default.removeItem(at: pluginDirectoryURL) }
 
-        let store = PluginStore(defaults: defaults)
+        let store = PluginStore(defaults: defaults, pluginDirectoryURL: pluginDirectoryURL)
         let preview = routingPreview(
             manifestID: "com.example.routing.install", signerHashes: ["aa"])
 
@@ -137,8 +152,10 @@ struct PluginSignatureBehaviorTests {
         let suiteName = "kiririn.plugin.routing.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
+        let pluginDirectoryURL = temporaryPluginDirectoryURL()
+        defer { try? FileManager.default.removeItem(at: pluginDirectoryURL) }
 
-        let store = PluginStore(defaults: defaults)
+        let store = PluginStore(defaults: defaults, pluginDirectoryURL: pluginDirectoryURL)
         let previous = routingPlugin(
             manifestID: "com.example.routing.update",
             signerHashes: ["same-signer"]
@@ -162,8 +179,10 @@ struct PluginSignatureBehaviorTests {
         let suiteName = "kiririn.plugin.routing.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
+        let pluginDirectoryURL = temporaryPluginDirectoryURL()
+        defer { try? FileManager.default.removeItem(at: pluginDirectoryURL) }
 
-        let store = PluginStore(defaults: defaults)
+        let store = PluginStore(defaults: defaults, pluginDirectoryURL: pluginDirectoryURL)
         let previous = routingPlugin(
             manifestID: "com.example.routing.reject",
             signerHashes: ["trusted-a"]
@@ -187,8 +206,10 @@ struct PluginSignatureBehaviorTests {
         let suiteName = "kiririn.plugin.routing.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
+        let pluginDirectoryURL = temporaryPluginDirectoryURL()
+        defer { try? FileManager.default.removeItem(at: pluginDirectoryURL) }
 
-        let store = PluginStore(defaults: defaults)
+        let store = PluginStore(defaults: defaults, pluginDirectoryURL: pluginDirectoryURL)
         store.setDeveloperModeEnabled(true)
 
         let previous = routingPlugin(
@@ -208,6 +229,13 @@ struct PluginSignatureBehaviorTests {
             #expect(Bool(false))
         }
     }
+}
+
+private func temporaryPluginDirectoryURL() -> URL {
+    FileManager.default.temporaryDirectory.appending(
+        path: "kiririn-plugin-tests-\(UUID().uuidString)",
+        directoryHint: .isDirectory
+    )
 }
 
 private func routingPlugin(manifestID: String, signerHashes: [String]) -> PluginDefinition {
@@ -276,14 +304,14 @@ private func unsignedPluginPackageData(manifestID: String, updateURL: String) ->
           "browser_specific_settings": {
             "kiririn": {
               "id": "\(manifestID)",
+              "update_url": "\(updateURL)",
               "views": {
                 "overlay": {
                   "page": "overlay.html"
                 }
               }
             }
-          },
-          "update_url": "\(updateURL)"
+          }
         }
         """
 
