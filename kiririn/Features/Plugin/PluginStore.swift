@@ -1037,6 +1037,53 @@ class PluginStore {
             manifestID: previous.manifestID,
             currentVersion: previous.manifestVersion
         )
+        let preview = try await previewPlugin(
+            fromUpdateManifestEntry: entry,
+            manifestID: previous.manifestID
+        )
+        guard preview.packageAuthentication.isSigned else {
+            throw PluginManifestValidationError(messages: [
+                "アップデートで取得したパッケージに署名がありません"
+            ])
+        }
+        guard
+            matchingSignerKeyHashes(
+                lhs: previous.packageAuthentication.signerKeyHashes,
+                rhs: preview.packageAuthentication.signerKeyHashes
+            )
+        else {
+            throw PluginManifestValidationError(messages: [
+                "アップデートで取得したパッケージの署名鍵が既存パッケージと一致しません"
+            ])
+        }
+
+        try updateResolver.validateUpdateVersion(
+            currentVersion: previous.manifestVersion,
+            candidateVersion: preview.manifest.version
+        )
+
+        return preview
+    }
+
+    func previewPlugin(fromUpdateManifestURL url: URL, manifestID: String) async throws
+        -> PluginInstallPreview
+    {
+        guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) else {
+            throw PluginManifestValidationError(messages: ["URLはhttp(s)である必要があります"])
+        }
+
+        let entry = try await updateResolver.resolveUpdateEntry(
+            fromUpdateManifestURL: url,
+            manifestID: manifestID,
+            currentVersion: nil
+        )
+        return try await previewPlugin(fromUpdateManifestEntry: entry, manifestID: manifestID)
+    }
+
+    private func previewPlugin(
+        fromUpdateManifestEntry entry: GeckoUpdateManifestEntry,
+        manifestID: String
+    ) async throws -> PluginInstallPreview {
         guard let packageURL = URL(string: entry.updateLink) else {
             throw PluginManifestValidationError(messages: [
                 "アップデートのダウンロードURLが有効ではありません"
@@ -1070,34 +1117,14 @@ class PluginStore {
             entryVersion: entry.version,
             packageVersion: preview.manifest.version
         )
-        guard preview.packageAuthentication.isSigned else {
-            throw PluginManifestValidationError(messages: [
-                "アップデートで取得したパッケージに署名がありません"
-            ])
-        }
-        guard
-            matchingSignerKeyHashes(
-                lhs: previous.packageAuthentication.signerKeyHashes,
-                rhs: preview.packageAuthentication.signerKeyHashes
-            )
-        else {
-            throw PluginManifestValidationError(messages: [
-                "アップデートで取得したパッケージの署名鍵が既存パッケージと一致しません"
-            ])
-        }
         guard case .package = preview.payload else {
             throw PluginManifestValidationError(messages: ["プラグインパッケージの読み込みに失敗しました"])
         }
-        guard preview.manifest.manifestID == previous.manifestID else {
+        guard preview.manifest.manifestID == manifestID else {
             throw PluginManifestValidationError(messages: [
-                "プラグインIDが一致しません。別のプラグインパッケージのため更新を中止しました"
+                "プラグインIDが一致しません。別のプラグインパッケージのため処理を中止しました"
             ])
         }
-
-        try updateResolver.validateUpdateVersion(
-            currentVersion: previous.manifestVersion,
-            candidateVersion: preview.manifest.version
-        )
 
         return preview
     }
