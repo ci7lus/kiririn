@@ -66,7 +66,7 @@ struct KiririnTests {
 
         let replaced = source.replacingARIBEnclosedGlyphsForDisplay()
 
-        #expect(replaced == "[字]字幕[二]音声[4K][HDR][鍵][秘]🈀[VOD]")
+        #expect(replaced == "[字]字幕[二]音声[4K][HDR][鍵]㊙🈀[VOD]")
     }
 
     @Test func replacingARIBEnclosedGlyphsForDisplayLeavesOtherCharactersUnchanged() {

@@ -41,6 +41,7 @@ jobs:
         permissions:
             contents: write
         strategy:
+            fail-fast: false
             matrix:
                 platform:
                     - name: iOS
@@ -56,7 +57,7 @@ jobs:
             - name: Cache SPM packages
               uses: actions/cache@v6
               with:
-                  path: ${{ runner.temp }}/DerivedData/SourcePackages
+                  path: ${{ runner.temp }}/SourcePackages
                   key: spm-${{ hashFiles('kiririn.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
 
             - name: Setup Node.js
@@ -90,6 +91,7 @@ jobs:
                     -destination "${{ matrix.platform.destination }}" \
                     -archivePath "$RUNNER_TEMP/${{ matrix.platform.id }}/kiririn-${{ matrix.platform.id }}.xcarchive" \
                     -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+                    -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
                     -skipPackagePluginValidation \
                     CODE_SIGNING_ALLOWED=NO \
                     CODE_SIGNING_REQUIRED=NO \
@@ -126,3 +128,132 @@ jobs:
                   fi
 
                   gh release upload "$TAG_NAME" "$ARCHIVE_ZIP" --clobber
+
+    package-test:
+        name: Test Packages
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        needs: lint
+        runs-on: macos-26
+        timeout-minutes: 20
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+
+            - name: Run package tests
+              run: |
+                  swift test --package-path Packages/ARIBStandardKit
+                  swift test --package-path Packages/ApkSignatureVerifierKit
+                  swift test --package-path Packages/KppxKit
+
+    test:
+        name: Test ${{ matrix.platform.name }}
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        needs: lint
+        runs-on: macos-26
+        timeout-minutes: 60
+        strategy:
+            fail-fast: false
+            matrix:
+                platform:
+                    - name: iOS
+                      destination: "platform=iOS Simulator"
+                      id: ios
+                      code_coverage: "NO"
+                      only_testing: kiririnTests
+                    - name: macOS
+                      destination: "platform=macOS"
+                      id: macos
+                      code_coverage: "YES"
+                      only_testing: ""
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+
+            - name: Cache SPM packages
+              uses: actions/cache@v6
+              with:
+                  path: ${{ runner.temp }}/SourcePackages
+                  key: spm-${{ hashFiles('kiririn.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+
+            - name: Cache VLCKit
+              id: vlckit-cache
+              uses: actions/cache@v6
+              with:
+                  path: |
+                      ./Packages/VLCKit/VLCKit.xcframework
+                      ./Packages/VLCKit/VLCKitAssets/LicenseNotices/
+                      ./Packages/VLCKit/VLCKitAssets/dodeca_and_7channel_3DSL_HRTF.sofa
+                      ./kiririn/rounded-mplus-1m-wadalab-comp-arib.ttf
+                  key: vlckit-${{ hashFiles('setup.sh') }}
+
+            - name: Setup dependencies
+              env:
+                  VLCKIT_CACHE_HIT: ${{ steps.vlckit-cache.outputs.cache-hit }}
+              run: ./setup.sh
+
+            - name: Run tests
+              env:
+                  PLATFORM_ID: ${{ matrix.platform.id }}
+                  TEST_DESTINATION: ${{ matrix.platform.destination }}
+                  TEST_CODE_COVERAGE: ${{ matrix.platform.code_coverage }}
+                  TEST_ONLY_TARGET: ${{ matrix.platform.only_testing }}
+                  TEST_RESULT_DIR: ${{ runner.temp }}/TestResults
+                  TEST_RESULT_BUNDLE_PATH: ${{ runner.temp }}/TestResults/kiririn-${{ matrix.platform.id }}-test.xcresult
+              run: |
+                  mkdir -p "$TEST_RESULT_DIR"
+
+                  if [ "$PLATFORM_ID" = "ios" ]; then
+                    SIMULATOR_UDID="$(
+                      xcrun simctl list devices available --json | jq -er '
+                        [
+                          .devices
+                          | to_entries
+                          | map(select(.key | contains(".iOS-")))
+                          | sort_by(.key | [scan("[0-9]+") | tonumber])
+                          | reverse[]
+                          | .value[]
+                          | select(.isAvailable and (.name | startswith("iPhone")))
+                          | .udid
+                        ][0] // error("No available iOS Simulator found")
+                      '
+                    )"
+                    TEST_DESTINATION="platform=iOS Simulator,id=$SIMULATOR_UDID"
+                  fi
+
+                  TEST_SELECTION_ARGS=()
+                  if [ -n "$TEST_ONLY_TARGET" ]; then
+                    TEST_SELECTION_ARGS+=("-only-testing:$TEST_ONLY_TARGET")
+                  fi
+
+                  xcodebuild test \
+                    -project "$PROJECT" \
+                    -scheme "$SCHEME" \
+                    -destination "$TEST_DESTINATION" \
+                    -destination-timeout 120 \
+                    -enableCodeCoverage "$TEST_CODE_COVERAGE" \
+                    -showBuildTimingSummary \
+                    -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+                    -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
+                    -skipPackagePluginValidation \
+                    -resultBundlePath "$TEST_RESULT_BUNDLE_PATH" \
+                    "${TEST_SELECTION_ARGS[@]}" \
+                    CODE_SIGNING_ALLOWED=NO \
+                    CODE_SIGNING_REQUIRED=NO \
+                    CODE_SIGN_IDENTITY="" \
+                    COMPILER_INDEX_STORE_ENABLE=NO
+
+            - name: Upload test result bundle
+              if: failure()
+              uses: actions/upload-artifact@v7
+              with:
+                  name: kiririn-${{ matrix.platform.id }}-test-results
+                  path: ${{ runner.temp }}/TestResults/*.xcresult
+                  compression-level: 0
+                  if-no-files-found: warn
+
+    complete:
+        name: Complete
+        needs: [lint, build, package-test, test]
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo "All jobs completed successfully."

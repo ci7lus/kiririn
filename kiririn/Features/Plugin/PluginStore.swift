@@ -197,9 +197,10 @@ struct PluginDefinition: Identifiable, Codable, Equatable {
 class PluginStore {
     private let defaults: UserDefaults
     private let fileManager: FileManager
+    let pluginDirectoryURL: URL
     private let pluginsKey = "kiririn.plugin.definitions"
     private let developerModeKey = "kiririn.plugin.developer_mode_enabled"
-    private let pluginDirectoryName = "Plugins"
+    private static let pluginDirectoryName = "Plugins"
     nonisolated private static let webKitExtractedArchivePrefix = "WebKitExtractedArchive-"
     private static let currentAppVersion =
         PluginManifestParser.trimmedNonEmpty(
@@ -244,6 +245,7 @@ class PluginStore {
     init(
         defaults: UserDefaults = .standard,
         fileManager: FileManager = .default,
+        pluginDirectoryURL: URL? = nil,
         packageSignatureVerifier: ApkSignatureVerifierKit =
             ApkSignatureVerifierKit(
                 trustedChainPEMData: TrustedCertificateChain.data,
@@ -252,6 +254,15 @@ class PluginStore {
     ) {
         self.defaults = defaults
         self.fileManager = fileManager
+        let applicationSupportDirectory =
+            fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
+        self.pluginDirectoryURL =
+            pluginDirectoryURL
+            ?? applicationSupportDirectory.appending(
+                path: Self.pluginDirectoryName,
+                directoryHint: .isDirectory
+            )
         self.packageSignatureVerifier = packageSignatureVerifier
         self.updateResolver = PluginUpdateResolver(
             currentAppVersion: Self.currentAppVersion,
@@ -706,13 +717,6 @@ class PluginStore {
     private func persistPlugins() {
         guard let data = try? JSONEncoder().encode(plugins) else { return }
         defaults.set(data, forKey: pluginsKey)
-    }
-
-    var pluginDirectoryURL: URL {
-        let base =
-            fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? fileManager.temporaryDirectory
-        return base.appending(path: pluginDirectoryName, directoryHint: .isDirectory)
     }
 
     func resolvedManifest(for id: UUID) -> ExtensionPluginManifest? {
