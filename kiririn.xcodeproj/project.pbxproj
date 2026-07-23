@@ -21,6 +21,7 @@
 		CEA761572FDC65F200C55CC4 /* ApkSignatureVerifierKit in Frameworks */ = {isa = PBXBuildFile; productRef = CEA761562FDC65F200C55CC4 /* ApkSignatureVerifierKit */; };
 		CEA761592FDC66F500C55CC4 /* ApkSignatureVerifierKit in Frameworks */ = {isa = PBXBuildFile; productRef = CEA761582FDC66F500C55CC4 /* ApkSignatureVerifierKit */; };
 		CEA7615E2FDC6B1C00C55CC4 /* ARIBStandardKit in Frameworks */ = {isa = PBXBuildFile; productRef = CEA7615D2FDC6B1C00C55CC4 /* ARIBStandardKit */; };
+		CEA761602FDD000000C55CC4 /* ApkSignatureVerifierKit in Embed Frameworks */ = {isa = PBXBuildFile; productRef = CEA761562FDC65F200C55CC4 /* ApkSignatureVerifierKit */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -47,6 +48,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
+				CEA761602FDD000000C55CC4 /* ApkSignatureVerifierKit in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
