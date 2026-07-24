@@ -519,7 +519,8 @@ final class DataBroadcastSession {
             from: endpoint.moduleVersionURL(
                 componentTag: request.componentTag, downloadId: request.downloadId,
                 moduleId: request.moduleId, version: request.version),
-            headers: headers)
+            headers: headers,
+            bypassCache: true)
         guard
             let manifest = try? JSONDecoder().decode(
                 MahironModuleManifest.self, from: manifestData)
@@ -576,10 +577,17 @@ final class DataBroadcastSession {
         }
     }
 
-    private nonisolated static func fetchData(from url: URL, headers: [String: String]) async throws
-        -> Data
-    {
-        var urlRequest = URLRequest(url: url)
+    private nonisolated static func fetchData(
+        from url: URL,
+        headers: [String: String],
+        bypassCache: Bool = false
+    ) async throws -> Data {
+        var urlRequest = URLRequest(
+            url: url,
+            cachePolicy: bypassCache ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy)
+        if bypassCache {
+            urlRequest.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        }
         for (field, value) in headers {
             urlRequest.setValue(value, forHTTPHeaderField: field)
         }
