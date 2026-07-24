@@ -515,7 +515,7 @@ final class DataBroadcastSession {
     /// bytes are content-addressed and safely cacheable by URLSession.
     private func fetchModuleFiles(_ request: FetchRequest) async throws -> [BMLModuleFile] {
         let headers = endpoint.headers
-        let manifestData = try await Self.fetchData(
+        let manifestData = try await Self.fetchDataBypassingCache(
             from: endpoint.moduleVersionURL(
                 componentTag: request.componentTag, downloadId: request.downloadId,
                 moduleId: request.moduleId, version: request.version),
@@ -583,6 +583,21 @@ final class DataBroadcastSession {
         for (field, value) in headers {
             urlRequest.setValue(value, forHTTPHeaderField: field)
         }
+        return try await fetchData(for: urlRequest)
+    }
+
+    private nonisolated static func fetchDataBypassingCache(
+        from url: URL, headers: [String: String]
+    ) async throws -> Data {
+        var urlRequest = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        for (field, value) in headers {
+            urlRequest.setValue(value, forHTTPHeaderField: field)
+        }
+        urlRequest.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        return try await fetchData(for: urlRequest)
+    }
+
+    private nonisolated static func fetchData(for urlRequest: URLRequest) async throws -> Data {
         let (data, response) = try await URLSession.shared.data(for: urlRequest)
         guard let http = response as? HTTPURLResponse else {
             throw ModuleFetchFailure.transient("invalid response")
