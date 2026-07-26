@@ -517,7 +517,11 @@ struct ProgramGuideView: View {
         }
 
         if now >= timelineStart && now < timelineEnd {
-            let targetY = max(0, sectionHeaderHeight + yOffset(for: now) - viewportHeight * 0.2)
+            let requestedY =
+                sectionHeaderHeight + yOffset(for: now) - viewportHeight * 0.2
+            let maximumY = max(
+                0, sectionHeaderHeight + timelineHeight - viewportHeight)
+            let targetY = min(max(0, requestedY), maximumY)
             if animated {
                 withAnimation { updateScrollPosition(toY: targetY) }
             } else {
