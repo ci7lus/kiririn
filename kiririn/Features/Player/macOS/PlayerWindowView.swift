@@ -41,6 +41,7 @@
             .background(Color.clear)
             .frame(minWidth: 640, minHeight: 360)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle(windowTitle)
             .toolbar(removing: .title)
             .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
             .overlay {
@@ -135,6 +136,16 @@
             playerWindowReference.window
         }
 
+        private var windowTitle: String {
+            let title =
+                playerState.currentPlayable?.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingARIBEnclosedGlyphsForDisplay()
+            guard let title, !title.isEmpty else {
+                return Self.defaultWindowTitle
+            }
+            return title
+        }
+
         private func configureWindow(_ window: NSWindow) {
             if playerWindow !== window {
                 playerWindowReference.window = window
@@ -159,14 +170,7 @@
 
         private func applyWindowTitle(window: NSWindow?) {
             guard let window else { return }
-            let currentTitle =
-                playerState.currentPlayable?.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                .replacingARIBEnclosedGlyphsForDisplay()
-            if let currentTitle, !currentTitle.isEmpty {
-                setWindowTitle(currentTitle, window: window)
-            } else {
-                setWindowTitle(Self.defaultWindowTitle, window: window)
-            }
+            setWindowTitle(windowTitle, window: window)
         }
 
         private func applyWindowLevel(window: NSWindow?, isAlwaysOnTop: Bool) {
