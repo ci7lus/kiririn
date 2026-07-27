@@ -1,8 +1,27 @@
 import CryptoKit
 import Foundation
+import Synchronization
 import Testing
 
 @testable import kiririn
+
+private nonisolated final class InMemoryRemoteTrustedPeerDataStore:
+    RemoteTrustedPeerDataStoring, Sendable
+{
+    private let values = Mutex<[String: Data]>([:])
+
+    func load(account: String) -> Data? {
+        values.withLock { $0[account] }
+    }
+
+    func save(_ data: Data, account: String) {
+        values.withLock { $0[account] = data }
+    }
+
+    func delete(account: String) {
+        values.withLock { $0[account] = nil }
+    }
+}
 
 struct RemoteControlTests {
     @Test func protocolEnvelopeRoundTripsCommands() throws {
@@ -146,9 +165,7 @@ struct RemoteControlTests {
     }
 
     @Test func trustedPeerStorePersistsAndRemovesPeers() throws {
-        let service = "jp.pronama.kiririn.remote.tests.\(UUID().uuidString)"
-        let store = RemoteTrustedPeerStore(service: service)
-        defer { try? store.removeAll() }
+        let store = RemoteTrustedPeerStore(store: InMemoryRemoteTrustedPeerDataStore())
         let peer = RemoteTrustedPeer(
             id: "peer",
             displayName: "Mac",
@@ -159,7 +176,7 @@ struct RemoteControlTests {
         try store.save([peer])
         #expect(try store.load() == [peer])
 
-        try store.save([])
+        try store.removeAll()
         #expect(try store.load().isEmpty)
     }
 }

@@ -1,8 +1,16 @@
 import Foundation
 
+nonisolated protocol RemoteTrustedPeerDataStoring: Sendable {
+    func load(account: String) throws -> Data?
+    func save(_ data: Data, account: String) throws
+    func delete(account: String) throws
+}
+
+extension KeychainDataStore: RemoteTrustedPeerDataStoring {}
+
 nonisolated struct RemoteTrustedPeerStore {
     private let account = "trusted-peers"
-    private let store: KeychainDataStore
+    private let store: any RemoteTrustedPeerDataStoring
 
     init(service: String = "jp.pronama.kiririn.remote.trust") {
         store = KeychainDataStore(
@@ -10,6 +18,10 @@ nonisolated struct RemoteTrustedPeerStore {
             label: "kiririn Remote Control Trusted Peers",
             accessibility: .afterFirstUnlockThisDeviceOnly
         )
+    }
+
+    init(store: any RemoteTrustedPeerDataStoring) {
+        self.store = store
     }
 
     func load() throws -> [RemoteTrustedPeer] {
