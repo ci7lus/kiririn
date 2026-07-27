@@ -27,6 +27,7 @@ final class AppModel {
     let manager: ServerManager
     let playerState: PlayerState
     let pluginStore: PluginStore
+    let remoteControlService: RemoteControlService
     private(set) var cacheStore: CacheStore?
 
     var activePlayerStates: [PlayerState] = []
@@ -75,12 +76,14 @@ final class AppModel {
         activePlayerStates = [playerState]
         focusedPlayerID = playerState.id
         pluginStore = PluginStore()
+        remoteControlService = RemoteControlService()
         pluginStore.onLocalFolderManifestChanged = { [weak self] pluginID in
             guard let self else { return }
             self.syncPluginsToPlayer()
             self.reloadPluginInAllPlayerStates(id: pluginID.uuidString)
         }
         playerState.plugins = pluginStore.plugins
+        remoteControlService.configure(appModel: self)
     }
 
     func setupIfNeeded() {
