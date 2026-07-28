@@ -65,7 +65,9 @@
 		CE4442832FB8887D0092C2BF /* Exceptions for "kiririn" folder in "kiririn" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Config.xcconfig,
 				Info.plist,
+				LocalSettings.xcconfig,
 			);
 			platformFiltersByRelativePath = {
 				AppShell/macOS/CaptionWindowView.swift = (macos, );
@@ -264,7 +266,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1600;
-				LastUpgradeCheck = 2630;
+				LastUpgradeCheck = 2660;
 				TargetAttributes = {
 					105FC5792E9EAD3100EA8BCF = {
 						CreatedOnToolsVersion = 16.0;
