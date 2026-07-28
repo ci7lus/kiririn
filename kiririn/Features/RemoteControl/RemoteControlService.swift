@@ -147,7 +147,7 @@ final class RemoteControlService {
     func connect(to peer: RemoteDiscoveredPeer) {
         operationMode = .controller
         currentConnectionID = peer.id
-        connectionStatus = .connecting(peer.displayName)
+        connectionStatus = .connecting(peerID: peer.id, displayName: peer.displayName)
         lastErrorMessage = nil
         transport.connect(to: peer.id)
     }
@@ -318,7 +318,7 @@ final class RemoteControlService {
                 discoveredPeers.first(where: { $0.id == connectionID })?.displayName
                 ?? remoteIdentity?.displayName
                 ?? "接続先"
-            connectionStatus = .connecting(name)
+            connectionStatus = .connecting(peerID: connectionID, displayName: name)
         case .connected(let connectionID):
             guard currentConnectionID == nil || currentConnectionID == connectionID else {
                 return

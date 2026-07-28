@@ -45,7 +45,7 @@ nonisolated enum RemoteControlPayload: Codable, Equatable, Sendable {
 }
 
 nonisolated struct RemoteControlEnvelope: Codable, Equatable, Sendable {
-    static let currentProtocolVersion = 2
+    static let currentProtocolVersion = 1
 
     let protocolVersion: Int
     let messageID: UUID

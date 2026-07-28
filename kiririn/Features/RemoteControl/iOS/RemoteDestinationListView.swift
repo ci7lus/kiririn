@@ -121,7 +121,7 @@
                 "停止中"
             case .browsing:
                 "検索中"
-            case .connecting(let name):
+            case .connecting(_, let name):
                 "\(name)へ接続中"
             case .pairing(let name):
                 "\(name)とペアリング中"
@@ -142,10 +142,10 @@
         }
 
         private func isConnecting(to peer: RemoteDiscoveredPeer) -> Bool {
-            guard case .connecting(let name) = service.connectionStatus else {
+            guard case .connecting(let peerID, _) = service.connectionStatus else {
                 return false
             }
-            return name == peer.displayName
+            return peerID == peer.id
         }
 
         private var errorPresentationBinding: Binding<Bool> {

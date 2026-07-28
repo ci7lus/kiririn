@@ -68,7 +68,7 @@ nonisolated struct RemotePairingRequest: Equatable, Identifiable, Sendable {
 nonisolated enum RemoteConnectionStatus: Equatable, Sendable {
     case idle
     case browsing
-    case connecting(String)
+    case connecting(peerID: String, displayName: String)
     case pairing(String)
     case connected(String)
     case failed(String)
