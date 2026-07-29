@@ -171,6 +171,7 @@ final class RemotePlayerCommandDispatcher {
             isRecording: state.isRecording,
             isSubtitleEnabled: state.isSubtitleEnabled,
             isPipEnabled: state.isPipEnabled,
+            isDataBroadcastVisible: state.bmlContentVisible,
             isFullscreen: windowSnapshot?.isFullscreen,
             isAlwaysOnTop: windowSnapshot?.isAlwaysOnTop,
             capabilities: capabilities,

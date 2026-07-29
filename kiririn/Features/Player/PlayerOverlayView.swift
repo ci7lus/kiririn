@@ -321,6 +321,7 @@ struct PlayerOverlayView_iOS: View {
         if let session = playerState.dataBroadcastSession {
             let frame = playerSurfaceFrame(in: geo)
             BMLOverlayView_iOS(session: session)
+                .id(ObjectIdentifier(session.webView))
                 .frame(width: frame.width, height: frame.height)
                 .clipShape(.rect(cornerRadius: playerState.mode == .mini ? 14 : 0))
                 .position(x: frame.midX, y: frame.midY)

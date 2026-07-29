@@ -38,6 +38,7 @@ nonisolated struct RemotePlayerSnapshot: Codable, Equatable, Identifiable, Senda
     let isRecording: Bool
     let isSubtitleEnabled: Bool
     let isPipEnabled: Bool
+    let isDataBroadcastVisible: Bool
     let isFullscreen: Bool?
     let isAlwaysOnTop: Bool?
     let capabilities: Set<RemoteControlCapability>

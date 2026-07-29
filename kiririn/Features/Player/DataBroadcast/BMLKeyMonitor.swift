@@ -58,7 +58,7 @@ final class BMLKeyMonitor {
         guard let key = Self.aribKey(for: event) else {
             return event
         }
-        let contentVisible = session.status == .active && !session.isInvisible
+        let contentVisible = session.status == .active && session.isContentVisible
 
         guard event.type == .keyDown else {
             // keyUp is always delivered for mapped keys: web-bml holds

@@ -258,14 +258,12 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             return true
         }
     }
-    /// Whether the BML content is currently presenting itself. Visibility is
-    /// content-driven (ARIB receivers auto-start data broadcasting in an
-    /// invisible state; the content shows itself upon receiving the
-    /// DataButton key), so this mirrors web-bml's `invisible` state rather
-    /// than any native toggle.
+    /// Whether the BML content is currently presenting itself. A newly
+    /// created session stays closed until the next DataButton press, then
+    /// follows web-bml's `invisible` state.
     var bmlContentVisible: Bool {
         guard let session = dataBroadcastSession else { return false }
-        return session.status == .active && !session.isInvisible
+        return session.status == .active && session.isContentVisible
     }
     var isRecording = false
     var caption: String = ""
@@ -1435,10 +1433,19 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
     @discardableResult
     func pressBMLKey(_ key: ARIBRemoteKey) -> Bool {
-        guard let session = dataBroadcastSession, session.status == .active else {
-            return false
+        guard let session = dataBroadcastSession else { return false }
+        if key == .data {
+            switch session.status {
+            case .unsupported, .failed:
+                return false
+            default:
+                break
+            }
+            session.pressDataButton()
+            return true
         }
 
+        guard session.status == .active else { return false }
         if let requiredGroup = key.requiredGroup {
             guard bmlContentVisible,
                 session.usedKeyGroups.contains(requiredGroup.rawValue)

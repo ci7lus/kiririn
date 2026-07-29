@@ -5,6 +5,7 @@
         let service: RemoteControlService
         let player: RemotePlayerSnapshot
         let send: (RemoteControlCommand) -> Void
+        @State private var isReloadConfirmationPresented = false
         @State private var isCloseConfirmationPresented = false
 
         private let columns = [
@@ -54,7 +55,17 @@
 
                 if player.capabilities.contains(.reload) {
                     RemoteActionButton(title: "再読込", systemImage: "arrow.clockwise") {
-                        send(.reload)
+                        isReloadConfirmationPresented = true
+                    }
+                    .confirmationDialog(
+                        "プレイヤーを再読み込みしますか？",
+                        isPresented: $isReloadConfirmationPresented,
+                        titleVisibility: .visible
+                    ) {
+                        Button("再読み込み") {
+                            send(.reload)
+                        }
+                        Button("キャンセル", role: .cancel) {}
                     }
                 }
 

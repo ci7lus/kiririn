@@ -93,6 +93,7 @@
                                 // never reaches this layer anyway - WindowDragSurface
                                 // sits above it in the ZStack; BML is keyboard-only.
                                 BMLOverlayView_macOS(session: session)
+                                    .id(ObjectIdentifier(session.webView))
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                                     .opacity(playerState.bmlContentVisible ? 1 : 0)
                                     .allowsHitTesting(false)

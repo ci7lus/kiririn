@@ -39,7 +39,8 @@
             let isAvailable = player.capabilities.contains(.dataBroadcast)
             return BMLRemoteControlAvailability(
                 isDataButtonEnabled: isAvailable,
-                enabledGroups: isAvailable ? player.bmlKeyGroups : []
+                enabledGroups: isAvailable && player.isDataBroadcastVisible
+                    ? player.bmlKeyGroups : []
             )
         }
     }
