@@ -85,7 +85,7 @@
                     ContentUnavailableView(
                         "接続先が見つかりません",
                         systemImage: "macbook.trianglebadge.exclamationmark",
-                        description: Text("接続するにはリモコン機能を有効化する必要があります")
+                        description: Text("接続するには接続先でリモコン機能を有効化する必要があります")
                     )
                 } else {
                     ForEach(service.discoveredPeers) { peer in
