@@ -13,6 +13,7 @@
         let pluginStore: PluginStore
         @Binding var isAlwaysOnTop: Bool
         let playerWindowReference: WindowReference_macOS
+        var volumeFeedbackRequestID: UUID? = nil
         let onToggleFullscreen: () -> Void
         let onControlsVisibilityChanged: (Bool) -> Void
 
@@ -92,6 +93,7 @@
                                 // never reaches this layer anyway - WindowDragSurface
                                 // sits above it in the ZStack; BML is keyboard-only.
                                 BMLOverlayView_macOS(session: session)
+                                    .id(ObjectIdentifier(session.webView))
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                                     .opacity(playerState.bmlContentVisible ? 1 : 0)
                                     .allowsHitTesting(false)
@@ -222,6 +224,10 @@
                     } else if oldValue {
                         showCaptureFeedback(text: "録画終了", systemImage: "stop.circle.fill")
                     }
+                }
+                .onChange(of: volumeFeedbackRequestID) { _, requestID in
+                    guard requestID != nil else { return }
+                    showVolumeFeedback()
                 }
                 .onChange(of: playerState.playbackErrorMessage) { _, newValue in
                     guard let raw = newValue else { return }
@@ -686,8 +692,7 @@
         }
 
         private func jump(seconds: Double) {
-            guard let player = playerState.player else { return }
-            player.jump(withOffset: Int32(seconds) * 1000)
+            playerState.skip(by: seconds)
             showSeekFeedback(for: seconds)
         }
 

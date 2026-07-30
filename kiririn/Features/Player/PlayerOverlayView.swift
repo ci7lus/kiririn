@@ -321,6 +321,7 @@ struct PlayerOverlayView_iOS: View {
         if let session = playerState.dataBroadcastSession {
             let frame = playerSurfaceFrame(in: geo)
             BMLOverlayView_iOS(session: session)
+                .id(ObjectIdentifier(session.webView))
                 .frame(width: frame.width, height: frame.height)
                 .clipShape(.rect(cornerRadius: playerState.mode == .mini ? 14 : 0))
                 .position(x: frame.midX, y: frame.midY)
@@ -1126,13 +1127,16 @@ struct PlayerOverlayView_iOS: View {
             if isDataBroadcastEnabled {
                 NavigationStack {
                     if playerState.dataBroadcastSession != nil {
-                        BMLRemoteControlView(
-                            playerState: playerState,
-                            layout: .tab
-                        )
-                        .padding(.top, 24)
-                        .padding(.bottom, collapsedBarReservedBottomHeight)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        ScrollView {
+                            BMLRemoteControlView(
+                                playerState: playerState,
+                                layout: .touch
+                            )
+                            .padding(.horizontal)
+                            .padding(.top, 24)
+                            .padding(.bottom, collapsedBarReservedBottomHeight / 2)
+                        }
+                        .scrollIndicators(.hidden)
                         .navigationBarTitleDisplayMode(.inline)
                     } else {
                         unavailableLowerContextView(
@@ -2597,8 +2601,8 @@ struct PlayerOverlayView_iOS: View {
     }
 
     private func jump(seconds: Double) {
-        guard isSeekActionAvailable, let player = playerState.player else { return }
-        player.jump(withOffset: Int32(seconds) * 1000)
+        guard isSeekActionAvailable else { return }
+        playerState.skip(by: seconds)
         showSeekFeedback(for: seconds)
     }
 

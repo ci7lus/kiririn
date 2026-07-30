@@ -16,7 +16,9 @@
         @State private var playerWindowReference = WindowReference_macOS()
         @State private var isAlwaysOnTop = false
         @State private var isOverlayVisible = true
+        @State private var volumeFeedbackRequestID: UUID?
         @State private var restorationWaitTask: Task<Void, Never>?
+        @State private var remoteEndpoint: PlayerWindowRemoteEndpoint_macOS?
 
         var body: some View {
             ZStack {
@@ -27,6 +29,7 @@
                         pluginStore: appModel.pluginStore,
                         isAlwaysOnTop: $isAlwaysOnTop,
                         playerWindowReference: playerWindowReference,
+                        volumeFeedbackRequestID: volumeFeedbackRequestID,
                         onToggleFullscreen: {
                             playerWindow?.toggleFullScreen(nil)
                         },
@@ -75,6 +78,7 @@
                 appModel.focusedPlayerID = playerState.id
                 appModel.setupIfNeeded()
                 appModel.configureDetachedPlayerState(playerState)
+                registerRemoteEndpointIfNeeded()
                 logWindowContext(trigger: "onAppear", playable: initialPlayable)
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification))
@@ -119,6 +123,8 @@
                 scheduleRestorationFallbackIfNeeded()
             }
             .onDisappear {
+                appModel.remoteControlService.unregisterWindowEndpoint(playerID: playerState.id)
+                remoteEndpoint = nil
                 appModel.activePlayerStates.removeAll { $0 === playerState }
                 if appModel.focusedPlayerID == playerState.id {
                     appModel.focusedPlayerID = nil
@@ -134,6 +140,22 @@
 
         private var playerWindow: NSWindow? {
             playerWindowReference.window
+        }
+
+        private func registerRemoteEndpointIfNeeded() {
+            guard remoteEndpoint == nil else { return }
+            let endpoint = PlayerWindowRemoteEndpoint_macOS(
+                windowReference: playerWindowReference,
+                isAlwaysOnTop: { isAlwaysOnTop },
+                setAlwaysOnTop: { isAlwaysOnTop = $0 },
+                showVolumeFeedback: { volumeFeedbackRequestID = UUID() },
+                close: { dismiss() }
+            )
+            remoteEndpoint = endpoint
+            appModel.remoteControlService.registerWindowEndpoint(
+                endpoint,
+                playerID: playerState.id
+            )
         }
 
         private var windowTitle: String {

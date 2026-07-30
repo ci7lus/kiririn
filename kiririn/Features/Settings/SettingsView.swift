@@ -134,6 +134,12 @@ struct SettingsView: View {
                 }
 
                 NavigationLink {
+                    RemoteControlSettingsView(service: appModel.remoteControlService)
+                } label: {
+                    Label("リモコン", systemImage: "appletvremote.gen4")
+                }
+
+                NavigationLink {
                     AboutAppView()
                 } label: {
                     Label("このアプリについて", systemImage: "info.circle")

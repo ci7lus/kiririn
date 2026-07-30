@@ -20,6 +20,7 @@ export type NativeToWebMessage =
     | { type: "audioOutput"; volume: number; muted: boolean }
     | { type: "inputResult"; requestId: number; value: string }
     | { type: "inputCancel"; requestId: number }
+    | { type: "setPresentationVisible"; visible: boolean }
     | { type: "reset" };
 
 // JS -> Swift (webkit.messageHandlers.bml.postMessage)

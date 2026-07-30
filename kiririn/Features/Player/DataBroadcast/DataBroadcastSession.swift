@@ -79,6 +79,8 @@ final class DataBroadcastSession {
     private(set) var stageRect: CGRect?
     private(set) var videoRect: CGRect?
     private(set) var isInvisible = false
+    private var isPresentationSuppressed = true
+    private var requestedPresentationVisible: Bool?
     /// 実機の「データ取得中...」に相当。コンテンツが待っているモジュール取得が
     /// 保留中のあいだtrue (web-bmlのIndicator.setReceivingStatus由来)。
     private(set) var isReceiving = false
@@ -100,6 +102,20 @@ final class DataBroadcastSession {
             videoFrame: videoRect,
             outputHeight: outputHeight
         )
+    }
+
+    var isContentVisible: Bool {
+        !isInvisible && !isPresentationSuppressed
+    }
+
+    func pressDataButton() {
+        let shouldShow = !isContentVisible
+        requestedPresentationVisible = shouldShow
+        if !shouldShow {
+            isPresentationSuppressed = true
+        }
+        logger.info("BML presentation requested: visible=\(shouldShow)")
+        post(#"{"type":"setPresentationVisible","visible":\#(shouldShow)}"#)
     }
 
     func takeCaptureSnapshot(layout: DataBroadcastCaptureLayout) async
@@ -234,6 +250,12 @@ final class DataBroadcastSession {
         isNetworking = false
         invisibleUpdateTask?.cancel()
         invisibleUpdateTask = nil
+        stageRect = nil
+        videoRect = nil
+        isInvisible = false
+        isPresentationSuppressed = true
+        requestedPresentationVisible = nil
+        usedKeyGroups.removeAll()
         inputRequest = nil
         consecutiveFailures = 0
         sseClient.cancelAll()
@@ -792,6 +814,10 @@ final class DataBroadcastSession {
                 if self.isInvisible != nextValue {
                     self.isInvisible = nextValue
                     self.logger.info("BML invisible: \(nextValue)")
+                }
+                if self.requestedPresentationVisible == !nextValue {
+                    self.isPresentationSuppressed = nextValue
+                    self.requestedPresentationVisible = nil
                 }
             }
         case "receiving":

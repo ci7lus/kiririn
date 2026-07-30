@@ -227,6 +227,9 @@ function applyStageScale(width: number, height: number): void {
 }
 
 let lastResolution: { width: number; height: number } | null = null;
+let isDocumentLoaded = false;
+let requestedPresentationVisible: boolean | null = null;
+
 function reapplyStageScale(): void {
     if (lastResolution != null) {
         applyStageScale(lastResolution.width, lastResolution.height);
@@ -263,6 +266,7 @@ function postLayoutRects(): void {
 }
 
 bmlBrowser.addEventListener("load", (evt) => {
+    isDocumentLoaded = true;
     lastResolution = evt.detail.resolution;
     applyStageScale(evt.detail.resolution.width, evt.detail.resolution.height);
     console.info(
@@ -280,6 +284,7 @@ bmlBrowser.addEventListener("load", (evt) => {
         height: evt.detail.resolution.height,
         profile: evt.detail.profile,
     });
+    applyRequestedPresentationVisibility();
 });
 
 bmlBrowser.addEventListener("videochanged", (evt) => {
@@ -296,8 +301,52 @@ bmlBrowser.addEventListener("invisible", (evt) => {
 });
 
 bmlBrowser.addEventListener("usedkeylistchanged", (evt) => {
-    postToNative({ type: "usedKeyList", groups: [...evt.detail.usedKeyList] });
+    const declaredGroups = [...evt.detail.usedKeyList];
+    const effectiveGroups =
+        declaredGroups.length === 0 ? ["basic", "data-button"] : declaredGroups;
+    postToNative({ type: "usedKeyList", groups: effectiveGroups });
 });
+
+function synchronizePresentation(): void {
+    reapplyStageScale();
+    const isInvisible = bmlBrowser.content.invisible;
+    if (isInvisible != null) {
+        postToNative({ type: "invisible", value: isInvisible });
+    }
+}
+
+function synchronizePresentationAfterLayout(): void {
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            synchronizePresentation();
+            window.setTimeout(synchronizePresentation, 300);
+        });
+    });
+}
+
+function applyRequestedPresentationVisibility(): void {
+    if (requestedPresentationVisible == null) {
+        return;
+    }
+    if (requestedPresentationVisible && audioContext.state === "suspended") {
+        void audioContext.resume().catch((error) => {
+            log("warn", `BML audio resume failed: ${String(error)}`);
+        });
+    }
+    if (!isDocumentLoaded) {
+        return;
+    }
+    const shouldShow = requestedPresentationVisible;
+    const isInvisible = bmlBrowser.content.invisible;
+    if (isInvisible == null) {
+        return;
+    }
+    if (shouldShow === isInvisible) {
+        bmlBrowser.content.processKeyDown(AribKeyCode.DataButton);
+        bmlBrowser.content.processKeyUp(AribKeyCode.DataButton);
+    }
+    synchronizePresentationAfterLayout();
+}
 
 window.kiririnBML = {
     onNativeMessage(raw: unknown) {
@@ -337,6 +386,10 @@ window.kiririnBML = {
                 }
                 break;
             }
+            case "setPresentationVisible":
+                requestedPresentationVisible = message.visible;
+                applyRequestedPresentationVisibility();
+                break;
             case "audioOutput":
                 audioGain.gain.value = message.muted ? 0 : message.volume / 100;
                 break;

@@ -244,6 +244,8 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     var selectedVideoTrack: PlayerVideoTrack?
     var selectedAudioStereoMode: PlayerAudioStereoMode = .unset
     var selectedAudioMixMode: PlayerAudioMixMode = .unset
+    private var requestedPlayingState: Bool?
+    private var playbackTransitionID: UUID?
     var showingPluginOverlay = true
     var plugins: [PluginDefinition] = []
     var dataBroadcastSession: DataBroadcastSession?
@@ -256,14 +258,12 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             return true
         }
     }
-    /// Whether the BML content is currently presenting itself. Visibility is
-    /// content-driven (ARIB receivers auto-start data broadcasting in an
-    /// invisible state; the content shows itself upon receiving the
-    /// DataButton key), so this mirrors web-bml's `invisible` state rather
-    /// than any native toggle.
+    /// Whether the BML content is currently presenting itself. A newly
+    /// created session stays closed until the next DataButton press, then
+    /// follows web-bml's `invisible` state.
     var bmlContentVisible: Bool {
         guard let session = dataBroadcastSession else { return false }
-        return session.status == .active && !session.isInvisible
+        return session.status == .active && session.isContentVisible
     }
     var isRecording = false
     var caption: String = ""
@@ -488,32 +488,57 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     }
 
     func togglePlayPause() {
-        guard let player = player else { return }
-        if isPlaying {
+        setPlaying(!(requestedPlayingState ?? isPlaying))
+    }
+
+    func setPlaying(_ enabled: Bool) {
+        guard let player else { return }
+        requestedPlayingState = enabled
+        playbackTransitionID = nil
+
+        if !enabled {
             player.pause()
             isPlaying = false
             playbackStatus.isPlaying = false
-        } else {
-            Task {
-                await refreshCurrentPlayableHeaders()
-                if let media = player.media, let headers = currentPlayable?.headers {
-                    media.removeAllHTTPHeaders()
-                    for (key, value) in headers {
-                        media.addHTTPHeader(withName: key, value: value)
-                    }
-                }
+            requestedPlayingState = nil
+            return
+        }
 
-                player.rate = playbackRate
-                if player.isSeekable {
-                    player.play()
-                } else {
-                    player.stop()
-                    player.play()
-                }
-                isPlaying = true
-                playbackStatus.isPlaying = true
-                playbackStatus.rate = playbackRate
+        guard !isPlaying else {
+            requestedPlayingState = nil
+            return
+        }
+
+        let transitionID = UUID()
+        playbackTransitionID = transitionID
+        Task { @MainActor [weak self, weak player] in
+            guard let self, let player else { return }
+            await refreshCurrentPlayableHeaders()
+            guard playbackTransitionID == transitionID,
+                requestedPlayingState == true,
+                self.player === player
+            else {
+                return
             }
+            if let media = player.media, let headers = currentPlayable?.headers {
+                media.removeAllHTTPHeaders()
+                for (key, value) in headers {
+                    media.addHTTPHeader(withName: key, value: value)
+                }
+            }
+
+            player.rate = playbackRate
+            if player.isSeekable {
+                player.play()
+            } else {
+                player.stop()
+                player.play()
+            }
+            isPlaying = true
+            playbackStatus.isPlaying = true
+            playbackStatus.rate = playbackRate
+            requestedPlayingState = nil
+            playbackTransitionID = nil
         }
     }
 
@@ -633,6 +658,11 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         applyAudioOutput()
     }
 
+    func setMuted(_ enabled: Bool) {
+        guard enabled != isMuted else { return }
+        toggleMute()
+    }
+
     func toggleMute() {
         isMuted.toggle()
         applyAudioOutput()
@@ -692,6 +722,23 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     func togglePip() {
         guard isPipAvailable else { return }
         isPipEnabled.toggle()
+    }
+
+    func setPipEnabled(_ enabled: Bool) {
+        guard enabled != isPipEnabled else { return }
+        togglePip()
+    }
+
+    func skip(by seconds: Double) {
+        let milliseconds = seconds * 1_000
+        guard seconds.isFinite,
+            milliseconds >= Double(Int32.min),
+            milliseconds <= Double(Int32.max),
+            let player
+        else {
+            return
+        }
+        player.jump(withOffset: Int32(milliseconds.rounded()))
     }
 
     private func loadAudioTracks() {
@@ -1381,9 +1428,35 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     /// press. The content itself toggles between invisible/visible in
     /// response (DataButtonPressed event), exactly like a hardware receiver.
     func pressBMLDataButton() {
-        guard let session = dataBroadcastSession, session.status == .active else { return }
-        session.sendKey(down: true, aribKeyCode: 20)  // AribKeyCode.DataButton
-        session.sendKey(down: false, aribKeyCode: 20)
+        _ = pressBMLKey(.data)
+    }
+
+    @discardableResult
+    func pressBMLKey(_ key: ARIBRemoteKey) -> Bool {
+        guard let session = dataBroadcastSession else { return false }
+        if key == .data {
+            switch session.status {
+            case .unsupported, .failed:
+                return false
+            default:
+                break
+            }
+            session.pressDataButton()
+            return true
+        }
+
+        guard session.status == .active else { return false }
+        if let requiredGroup = key.requiredGroup {
+            guard bmlContentVisible,
+                session.usedKeyGroups.contains(requiredGroup.rawValue)
+            else {
+                return false
+            }
+        }
+
+        session.sendKey(down: true, aribKeyCode: key.rawValue)
+        session.sendKey(down: false, aribKeyCode: key.rawValue)
+        return true
     }
 
     private func savePlaybackPositionIfNeeded() {
@@ -1677,6 +1750,11 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             player.startRecording(atPath: tempDir.path)
             isRecording = true
         }
+    }
+
+    func setRecording(_ enabled: Bool) {
+        guard enabled != isRecording else { return }
+        toggleRecording()
     }
 
     private func makePlayer() -> VLCMediaPlayer {

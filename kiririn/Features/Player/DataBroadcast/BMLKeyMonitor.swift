@@ -55,10 +55,10 @@ final class BMLKeyMonitor {
         guard event.modifierFlags.intersection([.command, .control]).isEmpty else {
             return event
         }
-        guard let code = Self.aribKeyCode(for: event) else {
+        guard let key = Self.aribKey(for: event) else {
             return event
         }
-        let contentVisible = session.status == .active && !session.isInvisible
+        let contentVisible = session.status == .active && session.isContentVisible
 
         guard event.type == .keyDown else {
             // keyUp is always delivered for mapped keys: web-bml holds
@@ -66,7 +66,7 @@ final class BMLKeyMonitor {
             // the declared groups / visibility may have changed in between
             // (e.g. the press itself navigated or closed the content) -
             // dropping the up would wedge all subsequent key handling.
-            session.sendKey(down: false, aribKeyCode: code)
+            session.sendKey(down: false, aribKeyCode: key.rawValue)
             return contentVisible ? nil : event
         }
 
@@ -78,45 +78,34 @@ final class BMLKeyMonitor {
         // behavior), but the swallow is unconditional: usedKeyList
         // arrives async from JS and is briefly empty/stale across page
         // transitions.
-        if session.usedKeyGroups.contains(Self.keyGroup(for: code)) {
+        if let requiredGroup = key.requiredGroup,
+            session.usedKeyGroups.contains(requiredGroup.rawValue)
+        {
             if event.isARepeat {
                 // web-bml ignores further keyDowns until the previous
                 // press completes with a keyUp (keyProcessStatus), so
                 // expand OS key repeats into full up->down cycles to get
                 // hold-to-repeat navigation.
-                session.sendKey(down: false, aribKeyCode: code)
+                session.sendKey(down: false, aribKeyCode: key.rawValue)
             }
-            session.sendKey(down: true, aribKeyCode: code)
+            session.sendKey(down: true, aribKeyCode: key.rawValue)
         }
         return nil
     }
 
     // MARK: - AribKeyCode mapping (see web-bml/client/content.ts's AribKeyCode)
 
-    private static func keyGroup(for aribKeyCode: Int) -> String {
-        switch aribKeyCode {
-        case 1, 2, 3, 4, 18, 19:
-            return "basic"
-        case 5...17:
-            return "numeric-tuning"
-        case 20...26, 100:
-            return "data-button"
-        default:
-            return ""
-        }
-    }
-
-    private static func aribKeyCode(for event: NSEvent) -> Int? {
+    private static func aribKey(for event: NSEvent) -> ARIBRemoteKey? {
         // Plain arrows are the player's volume/seek keys, so BML
         // navigation requires ⌥ - see the type-level comment.
         let hasOption = event.modifierFlags.contains(.option)
         switch event.keyCode {
-        case 126: return hasOption ? 1 : nil  // ⌥Up
-        case 125: return hasOption ? 2 : nil  // ⌥Down
-        case 123: return hasOption ? 3 : nil  // ⌥Left
-        case 124: return hasOption ? 4 : nil  // ⌥Right
-        case 36: return 18  // Return -> Enter
-        case 51, 53: return 19  // Delete/Escape -> Back
+        case 126: return hasOption ? .up : nil
+        case 125: return hasOption ? .down : nil
+        case 123: return hasOption ? .left : nil
+        case 124: return hasOption ? .right : nil
+        case 36: return .enter
+        case 51, 53: return .back
         default: break
         }
         guard let scalar = event.charactersIgnoringModifiers?.unicodeScalars.first,
@@ -125,23 +114,23 @@ final class BMLKeyMonitor {
             return nil
         }
         switch Character(scalar).lowercased() {
-        case "0": return 5
-        case "1": return 6
-        case "2": return 7
-        case "3": return 8
-        case "4": return 9
-        case "5": return 10
-        case "6": return 11
-        case "7": return 12
-        case "8": return 13
-        case "9": return 14
+        case "0": return .digit0
+        case "1": return .digit1
+        case "2": return .digit2
+        case "3": return .digit3
+        case "4": return .digit4
+        case "5": return .digit5
+        case "6": return .digit6
+        case "7": return .digit7
+        case "8": return .digit8
+        case "9": return .digit9
         // "d" is intentionally not mapped to AribKeyCode.DataButton (20) -
         // it's reserved for the native overlay toggle (see
         // DetachedPlayerOverlayView_macOS's d-button/shortcut).
-        case "b": return 21  // BlueButton
-        case "r": return 22  // RedButton
-        case "g": return 23  // GreenButton
-        case "y": return 24  // YellowButton
+        case "b": return .blue
+        case "r": return .red
+        case "g": return .green
+        case "y": return .yellow
         default: return nil
         }
     }
