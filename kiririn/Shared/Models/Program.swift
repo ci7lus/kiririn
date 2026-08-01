@@ -4,6 +4,18 @@ import GRDB
 import OrderedCollections
 import SwiftUI
 
+nonisolated struct ProgramServiceKey: Hashable, Sendable {
+    let serviceId: Int
+    let networkId: Int
+}
+
+nonisolated struct ProgramDisplaySnapshot: Equatable, Sendable {
+    let currentPrograms: [ProgramServiceKey: Program]
+    let nextPrograms: [ProgramServiceKey: Program]
+
+    static let empty = ProgramDisplaySnapshot(currentPrograms: [:], nextPrograms: [:])
+}
+
 nonisolated struct Program: Codable, Identifiable, Sendable, Equatable, Hashable, FetchableRecord,
     PersistableRecord
 {

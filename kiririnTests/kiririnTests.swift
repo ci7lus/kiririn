@@ -248,4 +248,49 @@ struct KiririnTests {
 
         #expect(applied.extended == OrderedDictionary<String, String>())
     }
+
+    @Test @MainActor func programChannelColumnEqualityDetectsProgramChanges() {
+        func makeProgram(id: String) -> Program {
+            Program(
+                id: id,
+                serverId: "server",
+                eventId: 1,
+                serviceId: 10,
+                networkId: 20,
+                startAt: Date(timeIntervalSince1970: 1_000),
+                endAt: Date(timeIntervalSince1970: 1_060),
+                duration: 60,
+                name: id,
+                desc: nil,
+                extended: nil,
+                genres: [],
+                updatedAt: nil
+            )
+        }
+
+        let timelineStart = Date(timeIntervalSince1970: 900)
+        let timelineEnd = Date(timeIntervalSince1970: 1_200)
+        let first = ProgramChannelColumnView(
+            channelId: "20-10",
+            programs: [makeProgram(id: "first")],
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 1,
+            width: 200,
+            totalHeight: 300,
+            onProgramTapped: { _ in }
+        )
+        let second = ProgramChannelColumnView(
+            channelId: "20-10",
+            programs: [makeProgram(id: "second")],
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 1,
+            width: 200,
+            totalHeight: 300,
+            onProgramTapped: { _ in }
+        )
+
+        #expect(first != second)
+    }
 }

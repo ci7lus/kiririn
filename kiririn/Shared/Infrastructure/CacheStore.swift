@@ -4,6 +4,12 @@ import GRDB
 import ImageIO
 import Logging
 import Observation
+import os.signpost
+
+private let cacheStorePerformanceLog = OSLog(
+    subsystem: "jp.pronama.kiririn",
+    category: "PointsOfInterest"
+)
 
 struct CacheDatabaseFailureFeedback: Identifiable, Equatable {
     let id = UUID()
@@ -413,16 +419,18 @@ class CacheStore {
         }
     }
 
-    func cleanupOldPrograms() async {
-        guard let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date())
-        else {
-            return
-        }
+    func cleanupOldPrograms(referenceDate: Date = Date()) async {
+        let cutoffDate = referenceDate.addingTimeInterval(-24 * 60 * 60)
         do {
-            _ = try await dbQueue.write { db in
-                try Program
-                    .filter(Program.Columns.endAt < yesterday)
-                    .deleteAll(db)
+            try await dbQueue.write { db in
+                try db.execute(
+                    sql: """
+                        DELETE FROM program
+                        WHERE (duration = 0 AND startAt <= :cutoffDate)
+                           OR (duration != 0 AND endAt <= :cutoffDate)
+                        """,
+                    arguments: ["cutoffDate": cutoffDate]
+                )
             }
         } catch {
             self.logger.error("Failed to cleanup old programs: \(error)")
@@ -538,57 +546,145 @@ class CacheStore {
         }
     }
 
-    func fetchAllCurrentPrograms() async -> [Program] {
-        let now = Date()
-        do {
-            return try await dbQueue.read { db in
-                let sql = """
-                    SELECT * FROM (
-                        SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC) as rn
-                        FROM program
-                        WHERE startAt < :now
-                          AND (endAt > :now OR duration = 0)
-                    ) WHERE rn = 1
-                    """
-                return try Program.fetchAll(
-                    db, sql: sql, arguments: StatementArguments(["now": now]))
-            }
-        } catch {
-            reportDatabaseFailureIfNeeded(operation: "fetch all current programs", error: error)
-            return []
-        }
-    }
+    func fetchProgramDisplaySnapshot(
+        for services: [TVService],
+        at date: Date = Date()
+    ) async -> ProgramDisplaySnapshot {
+        let serviceKeys = Set(
+            services.map { ProgramServiceKey(serviceId: $0.serviceId, networkId: $0.networkId) })
+        guard !serviceKeys.isEmpty else { return .empty }
 
-    func fetchAllNextPrograms() async -> [Program] {
-        let now = Date()
+        let signpostID = OSSignpostID(log: cacheStorePerformanceLog)
+        os_signpost(
+            .begin,
+            log: cacheStorePerformanceLog,
+            name: "Program Display Snapshot Query",
+            signpostID: signpostID
+        )
+        defer {
+            os_signpost(
+                .end,
+                log: cacheStorePerformanceLog,
+                name: "Program Display Snapshot Query",
+                signpostID: signpostID
+            )
+        }
+
+        let sortedServiceKeys = serviceKeys.sorted {
+            if $0.networkId != $1.networkId { return $0.networkId < $1.networkId }
+            return $0.serviceId < $1.serviceId
+        }
+        var arguments: [String: (any DatabaseValueConvertible)?] = ["now": date]
+        let requestedValues = sortedServiceKeys.enumerated().map { index, key -> String in
+            arguments["serviceId\(index)"] = key.serviceId
+            arguments["networkId\(index)"] = key.networkId
+            return "(:serviceId\(index), :networkId\(index))"
+        }.joined(separator: ", ")
+        let statementArguments = StatementArguments(arguments)
+
         do {
-            return try await dbQueue.read { db in
-                let sql = """
-                    SELECT p.*
-                    FROM (
-                        SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC) as rn
-                        FROM program
-                    ) p
-                    INNER JOIN (
-                        SELECT networkId, serviceId, MIN(startAt) AS nextStartAt
-                        FROM (
-                            SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC) as rn
-                            FROM program
+            let programs = try await dbQueue.read { db in
+                let sql: String = """
+                    WITH requested(serviceId, networkId) AS MATERIALIZED (
+                        VALUES \(requestedValues)
+                    ),
+                    current_start AS MATERIALIZED (
+                        SELECT s.serviceId, s.networkId,
+                               (
+                                   SELECT MIN(candidateStart)
+                                   FROM (
+                                       SELECT MIN(p.startAt) AS candidateStart
+                                       FROM program p INDEXED BY index_program_on_serviceId_networkId_endAt_startAt
+                                       WHERE p.serviceId = s.serviceId
+                                         AND p.networkId = s.networkId
+                                         AND p.startAt < :now
+                                         AND p.endAt > :now
+                                       UNION ALL
+                                       SELECT MIN(p.startAt) AS candidateStart
+                                       FROM program p INDEXED BY index_program_on_serviceId_networkId_zeroDuration_startAt
+                                       WHERE p.serviceId = s.serviceId
+                                         AND p.networkId = s.networkId
+                                         AND p.startAt < :now
+                                         AND p.duration = 0
+                                   )
+                               ) AS startAt
+                        FROM requested s
+                    ),
+                    current_program AS (
+                        SELECT p.*
+                        FROM program p
+                        INNER JOIN current_start s
+                            ON p.serviceId = s.serviceId
+                           AND p.networkId = s.networkId
+                           AND p.startAt = s.startAt
+                        WHERE p.rowid = (
+                            SELECT latest.rowid
+                            FROM program latest
+                            WHERE latest.serviceId = s.serviceId
+                              AND latest.networkId = s.networkId
+                              AND latest.startAt = s.startAt
+                              AND latest.startAt < :now
+                              AND (latest.endAt > :now OR latest.duration = 0)
+                            ORDER BY latest.updatedAt DESC
+                            LIMIT 1
                         )
-                        WHERE rn = 1 AND startAt >= :now
-                        GROUP BY networkId, serviceId
-                    ) n
-                    ON p.networkId = n.networkId
-                    AND p.serviceId = n.serviceId
-                    AND p.startAt = n.nextStartAt
-                    WHERE p.rn = 1
+                    ),
+                    next_start AS MATERIALIZED (
+                        SELECT s.serviceId, s.networkId,
+                               (
+                                   SELECT p.startAt
+                                   FROM program p
+                                   WHERE p.serviceId = s.serviceId
+                                     AND p.networkId = s.networkId
+                                     AND p.startAt >= :now
+                                   ORDER BY p.startAt ASC
+                                   LIMIT 1
+                               ) AS startAt
+                        FROM requested s
+                    ),
+                    next_program AS (
+                        SELECT p.*
+                        FROM program p
+                        INNER JOIN next_start s
+                            ON p.serviceId = s.serviceId
+                           AND p.networkId = s.networkId
+                           AND p.startAt = s.startAt
+                        WHERE p.rowid = (
+                            SELECT latest.rowid
+                            FROM program latest
+                            WHERE latest.serviceId = s.serviceId
+                              AND latest.networkId = s.networkId
+                              AND latest.startAt = s.startAt
+                            ORDER BY latest.updatedAt DESC
+                            LIMIT 1
+                        )
+                    )
+                    SELECT * FROM current_program
+                    UNION ALL
+                    SELECT * FROM next_program
                     """
                 return try Program.fetchAll(
-                    db, sql: sql, arguments: StatementArguments(["now": now]))
+                    db, sql: sql, arguments: statementArguments)
             }
+
+            var currentPrograms: [ProgramServiceKey: Program] = [:]
+            var nextPrograms: [ProgramServiceKey: Program] = [:]
+            for program in programs {
+                let key = ProgramServiceKey(
+                    serviceId: program.serviceId, networkId: program.networkId)
+                if program.startAt < date {
+                    currentPrograms[key] = program
+                } else {
+                    nextPrograms[key] = program
+                }
+            }
+            return ProgramDisplaySnapshot(
+                currentPrograms: currentPrograms,
+                nextPrograms: nextPrograms
+            )
         } catch {
-            reportDatabaseFailureIfNeeded(operation: "fetch all next programs", error: error)
-            return []
+            reportDatabaseFailureIfNeeded(operation: "fetch program display snapshot", error: error)
+            return .empty
         }
     }
 
@@ -970,6 +1066,39 @@ extension CacheStore {
             try db.create(
                 index: "index_program_on_serviceId_networkId_startAt", on: "program",
                 columns: ["serviceId", "networkId", "startAt"])
+        }
+
+        migrator.registerMigration(
+            "program-display-snapshot-current-index-20260801",
+            merging: ["program-display-snapshot-index-20260801"]
+        ) { db, appliedIdentifiers in
+            if !appliedIdentifiers.contains("program-display-snapshot-index-20260801") {
+                try db.create(
+                    index: "index_program_on_serviceId_networkId_startAt_updatedAt",
+                    on: "program",
+                    columns: ["serviceId", "networkId", "startAt", "updatedAt"]
+                )
+            }
+
+            let cutoffDate = Date().addingTimeInterval(-24 * 60 * 60)
+            try db.execute(
+                sql: """
+                    DELETE FROM program
+                    WHERE (duration = 0 AND startAt <= :cutoffDate)
+                       OR (duration != 0 AND endAt <= :cutoffDate)
+                    """,
+                arguments: ["cutoffDate": cutoffDate]
+            )
+            try db.create(
+                index: "index_program_on_serviceId_networkId_endAt_startAt", on: "program",
+                columns: ["serviceId", "networkId", "endAt", "startAt"])
+            try db.execute(
+                sql: """
+                    CREATE INDEX index_program_on_serviceId_networkId_zeroDuration_startAt
+                    ON program(serviceId, networkId, startAt)
+                    WHERE duration = 0
+                    """)
+            try db.drop(index: "index_program_on_serviceId_networkId_startAt")
         }
 
         return migrator

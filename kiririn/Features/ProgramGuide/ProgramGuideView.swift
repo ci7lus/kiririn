@@ -826,44 +826,77 @@ struct ProgramGuideView: View {
             groupedPrograms[key, default: []].append(program)
         }
 
-        // 各物理放送局のメインサービス番組を収集（サブチャンネル重複フィルタ用）
-        var mainProgramsByBroadcaster: [String: [Program]] = [:]
+        struct MainServiceGroupKey: Hashable {
+            let networkId: Int
+            let remoteControlKeyId: Int?
+        }
+
+        struct BroadcasterKey: Hashable {
+            let networkId: Int
+            let broadcasterId: Int
+        }
+
+        struct ProgramOverlapKey: Hashable {
+            let startAt: Date
+            let endAt: Date
+            let name: String
+        }
+
+        var mainServiceIDByGroup: [MainServiceGroupKey: Int] = [:]
         for service in sorted {
-            let broadcasterKey =
-                "\(service.networkId)-\(service.remoteControlKeyId ?? service.serviceId)"
-            let serviceKey = "\(service.networkId)-\(service.serviceId)"
-            let isMain =
-                sorted
-                .filter {
-                    $0.networkId == service.networkId
-                        && $0.remoteControlKeyId == service.remoteControlKeyId
-                }
-                .map(\.serviceId).min() == service.serviceId
-            if isMain {
-                mainProgramsByBroadcaster[broadcasterKey] = groupedPrograms[serviceKey]
+            let groupKey = MainServiceGroupKey(
+                networkId: service.networkId,
+                remoteControlKeyId: service.remoteControlKeyId
+            )
+            if let currentMainServiceID = mainServiceIDByGroup[groupKey] {
+                mainServiceIDByGroup[groupKey] = min(
+                    currentMainServiceID, service.serviceId)
+            } else {
+                mainServiceIDByGroup[groupKey] = service.serviceId
             }
+        }
+
+        // 各物理放送局のメインサービス番組を収集（サブチャンネル重複フィルタ用）
+        var mainProgramKeysByBroadcaster: [BroadcasterKey: Set<ProgramOverlapKey>] = [:]
+        for service in sorted {
+            let groupKey = MainServiceGroupKey(
+                networkId: service.networkId,
+                remoteControlKeyId: service.remoteControlKeyId
+            )
+            guard mainServiceIDByGroup[groupKey] == service.serviceId else {
+                continue
+            }
+
+            let broadcasterKey = BroadcasterKey(
+                networkId: service.networkId,
+                broadcasterId: service.remoteControlKeyId ?? service.serviceId
+            )
+            let serviceKey = "\(service.networkId)-\(service.serviceId)"
+            let keys = groupedPrograms[serviceKey, default: []].map {
+                ProgramOverlapKey(startAt: $0.startAt, endAt: $0.endAt, name: $0.name)
+            }
+            mainProgramKeysByBroadcaster[broadcasterKey] = Set(keys)
         }
 
         return sorted.compactMap { service in
             let key = "\(service.networkId)-\(service.serviceId)"
-            let broadcasterKey =
-                "\(service.networkId)-\(service.remoteControlKeyId ?? service.serviceId)"
-            let isMain =
-                sorted
-                .filter {
-                    $0.networkId == service.networkId
-                        && $0.remoteControlKeyId == service.remoteControlKeyId
-                }
-                .map(\.serviceId).min() == service.serviceId
+            let groupKey = MainServiceGroupKey(
+                networkId: service.networkId,
+                remoteControlKeyId: service.remoteControlKeyId
+            )
+            let broadcasterKey = BroadcasterKey(
+                networkId: service.networkId,
+                broadcasterId: service.remoteControlKeyId ?? service.serviceId
+            )
+            let isMain = mainServiceIDByGroup[groupKey] == service.serviceId
 
             var grouped = groupedPrograms[key, default: []]
                 .sorted { $0.startAt != $1.startAt ? $0.startAt < $1.startAt : $0.name < $1.name }
 
-            if !isMain, let mainPrograms = mainProgramsByBroadcaster[broadcasterKey] {
+            if !isMain, let mainProgramKeys = mainProgramKeysByBroadcaster[broadcasterKey] {
                 grouped = grouped.filter { sub in
-                    !mainPrograms.contains {
-                        $0.startAt == sub.startAt && $0.endAt == sub.endAt && $0.name == sub.name
-                    }
+                    !mainProgramKeys.contains(
+                        ProgramOverlapKey(startAt: sub.startAt, endAt: sub.endAt, name: sub.name))
                 }
             }
 
