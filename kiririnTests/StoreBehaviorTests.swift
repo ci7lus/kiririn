@@ -24,6 +24,16 @@ struct StoreBehaviorTests {
         #expect(DataBroadcastSettings.postalCode(in: defaults) == "0123456")
     }
 
+    @Test func dataBroadcastReceivingIndicatorDefaultsToOn() {
+        let (defaults, suiteName) = makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        #expect(DataBroadcastSettings.receivingIndicatorEnabled(in: defaults))
+
+        defaults.set(false, forKey: DataBroadcastSettings.receivingIndicatorKey)
+        #expect(!DataBroadcastSettings.receivingIndicatorEnabled(in: defaults))
+    }
+
     @Test func dataBroadcastSettingsRejectsInvalidPostalCodes() {
         #expect(DataBroadcastSettings.validatedPostalCode(nil) == nil)
         #expect(DataBroadcastSettings.validatedPostalCode("") == nil)

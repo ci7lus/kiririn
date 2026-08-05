@@ -36,3 +36,40 @@ struct DataBroadcastCaptureLayoutTests {
         #expect(layout.videoFrame.height == 1080)
     }
 }
+
+struct BMLReceivingIndicatorTests {
+    @Test func showsNothingWhileContentIsNeitherVisibleNorRequested() {
+        #expect(
+            BMLReceivingIndicator.current(
+                isContentVisible: false, isPresentationPending: false,
+                isReceiving: true, isNetworking: true) == nil)
+    }
+
+    @Test func showsReceivingDuringFirstLoadBeforeContentAppears() {
+        // 選局後の初回dボタン: 起動文書がまだ出ていない(コンテンツ非表示)が、
+        // モジュール取得待ちなので実機同様「データ取得中...」を出す。
+        #expect(
+            BMLReceivingIndicator.current(
+                isContentVisible: false, isPresentationPending: true,
+                isReceiving: true, isNetworking: false) == .receiving)
+    }
+
+    @Test func showsNothingWhileIdleWithContentVisible() {
+        #expect(
+            BMLReceivingIndicator.current(
+                isContentVisible: true, isPresentationPending: false,
+                isReceiving: false, isNetworking: false) == nil)
+    }
+
+    @Test func prefersNetworkingOverReceiving() {
+        #expect(
+            BMLReceivingIndicator.current(
+                isContentVisible: true, isPresentationPending: false,
+                isReceiving: true, isNetworking: true) == .networking)
+    }
+
+    @Test func usesReceiverWordingForEachState() {
+        #expect(BMLReceivingIndicator.receiving.displayText == "データ取得中...")
+        #expect(BMLReceivingIndicator.networking.displayText == "通信中...")
+    }
+}

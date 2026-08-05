@@ -4,6 +4,8 @@ struct DataBroadcastSettingsView: View {
     @AppStorage(DataBroadcastSettings.enabledKey) private var isDataBroadcastEnabled = false
     @AppStorage(DataBroadcastSettings.internetAccessKey) private var isInternetAccessEnabled =
         false
+    @AppStorage(DataBroadcastSettings.receivingIndicatorKey)
+    private var isReceivingIndicatorEnabled = DataBroadcastSettings.receivingIndicatorDefault
     @State private var postalCode = ""
 
     private var isPostalCodeValid: Bool {
@@ -17,6 +19,15 @@ struct DataBroadcastSettingsView: View {
             } footer: {
                 Text(
                     "利用には[Mahiron](https://github.com/rokoucha/Mahiron)のデータ放送用拡張APIが必要です。"
+                )
+            }
+            Section {
+                Toggle("データ取得中の表示", isOn: $isReceivingIndicatorEnabled)
+            } header: {
+                Text("表示")
+            } footer: {
+                Text(
+                    "モジュールの取得中や通信中に、受信機と同じ「データ取得中...」「通信中...」を画面右下へ表示します。"
                 )
             }
             Section {

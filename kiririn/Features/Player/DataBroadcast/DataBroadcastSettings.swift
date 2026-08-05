@@ -4,6 +4,7 @@ enum DataBroadcastSettings {
     static let enabledKey = "dataBroadcast.enabled"
     static let postalCodeKey = "dataBroadcast.receiverInfo.postalCode"
     static let internetAccessKey = "dataBroadcast.internetAccess"
+    static let receivingIndicatorKey = "dataBroadcast.receivingIndicator"
     static let webStorageKey = "dataBroadcast.webStorage"
 
     /// web-bmlが郵便番号NVRAMに使うlocalStorageキー
@@ -14,6 +15,14 @@ enum DataBroadcastSettings {
     /// コンテンツが放送局などの外部サーバーへHTTP接続するためデフォルトOFF。
     static func internetAccessEnabled(in defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: internetAccessKey)
+    }
+
+    /// 「データ取得中...」「通信中...」表示を出すか。実機に合わせて既定はON
+    /// (未設定=trueなのでdefaults.boolは使えない)。
+    static let receivingIndicatorDefault = true
+
+    static func receivingIndicatorEnabled(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: receivingIndicatorKey) as? Bool ?? receivingIndicatorDefault
     }
 
     static func postalCode(in defaults: UserDefaults = .standard) -> String? {
