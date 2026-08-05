@@ -108,6 +108,18 @@ final class DataBroadcastSession {
         !isInvisible && !isPresentationSuppressed
     }
 
+    /// dボタンで表示を要求済みだが、まだコンテンツが出ていない状態。web-bmlは
+    /// 起動文書がロードされるまで表示要求を保留する(applyRequestedPresentation-
+    /// Visibilityのメイン文書待ち)ので、選局後の初回読み込みはまるごとここに入る。
+    var isPresentationPending: Bool {
+        switch status {
+        case .unsupported, .failed:
+            return false
+        case .idle, .connecting, .active:
+            return requestedPresentationVisible == true && !isContentVisible
+        }
+    }
+
     func pressDataButton() {
         let shouldShow = !isContentVisible
         requestedPresentationVisible = shouldShow

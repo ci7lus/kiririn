@@ -265,6 +265,17 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         guard let session = dataBroadcastSession else { return false }
         return session.status == .active && session.isContentVisible
     }
+    /// 実機の画面下に出る「データ取得中...」「通信中...」相当の表示(不要ならnil)。
+    /// 設定でのオン/オフは表示側で見る。
+    var bmlReceivingIndicator: BMLReceivingIndicator? {
+        guard let session = dataBroadcastSession else { return nil }
+        return BMLReceivingIndicator.current(
+            isContentVisible: bmlContentVisible,
+            isPresentationPending: session.isPresentationPending,
+            isReceiving: session.isReceiving,
+            isNetworking: session.isNetworking
+        )
+    }
     var isRecording = false
     var caption: String = ""
     var captionHistory: [CaptionHistoryItem] = []

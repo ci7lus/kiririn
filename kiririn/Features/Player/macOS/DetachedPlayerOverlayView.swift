@@ -41,6 +41,9 @@
         @State private var playbackErrorAlertMessage = ""
         @State private var bmlKeyMonitor: BMLKeyMonitor?
         @State private var bmlRemotePanel: BMLRemotePanelController?
+        @AppStorage(DataBroadcastSettings.receivingIndicatorKey)
+        private var isBMLReceivingIndicatorEnabled =
+            DataBroadcastSettings.receivingIndicatorDefault
 
         private var playerWindow: NSWindow? {
             playerWindowReference.window
@@ -525,23 +528,19 @@
                 .transition(.opacity)
         }
 
-        /// 実機の画面下に出る「データ取得中...」「通信中...」表示。BMLコンテンツが
-        /// 表示中で、かつ待ちのモジュール取得または通信コンテンツのHTTP通信がある
-        /// あいだだけ、受信機風に右下へ出す。両方進行中なら通信中を優先。
+        /// 実機の画面下に出る「データ取得中...」「通信中...」表示。待ちのモジュール
+        /// 取得または通信コンテンツのHTTP通信があるあいだだけ、受信機風に右下へ出す。
+        /// 表示条件はBMLReceivingIndicatorを参照。
         @ViewBuilder
         private func bmlReceivingOverlay(scale: CGFloat) -> some View {
-            let isNetworking =
-                playerState.bmlContentVisible
-                && playerState.dataBroadcastSession?.isNetworking == true
-            let isReceiving =
-                playerState.bmlContentVisible
-                && playerState.dataBroadcastSession?.isReceiving == true
+            let indicator =
+                isBMLReceivingIndicatorEnabled ? playerState.bmlReceivingIndicator : nil
             VStack {
                 Spacer()
                 HStack {
                     Spacer()
-                    if isNetworking || isReceiving {
-                        Text(isNetworking ? "通信中..." : "データ取得中...")
+                    if let indicator {
+                        Text(indicator.displayText)
                             .font(.system(size: 21 * scale, weight: .medium))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 15 * scale)
@@ -557,7 +556,7 @@
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(.easeInOut(duration: 0.15), value: isNetworking || isReceiving)
+            .animation(.easeInOut(duration: 0.15), value: indicator)
             .allowsHitTesting(false)
         }
 
