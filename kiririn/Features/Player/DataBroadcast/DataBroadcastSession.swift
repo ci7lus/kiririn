@@ -316,10 +316,18 @@ final class DataBroadcastSession {
             let data: Data
             do {
                 let (responseData, response) = try await URLSession.shared.data(for: request)
-                guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode)
-                else { return }
+                guard let http = response as? HTTPURLResponse else {
+                    self.logger.debug("initial state fetch: non-HTTP response")
+                    return
+                }
+                guard (200...299).contains(http.statusCode) else {
+                    self.logger.debug(
+                        "initial state fetch: non-2xx status \(http.statusCode)")
+                    return
+                }
                 data = responseData
             } catch {
+                self.logger.debug("initial state fetch failed: \(error)")
                 return
             }
             guard !Task.isCancelled, self.started, !self.hasReceivedLiveSnapshot else { return }
