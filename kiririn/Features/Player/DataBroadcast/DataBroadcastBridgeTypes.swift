@@ -101,6 +101,14 @@ nonisolated struct MahironModuleList: Decodable, Sendable {
 nonisolated struct MahironSnapshot: Decodable, Sendable {
     let pmt: MahironPMT?
     let components: [MahironComponent]?
+    /// `live` (session actively tuned) or `cache` (rebuilt from persisted
+    /// PMT/DII without a tuner). Present both on the SSE `snapshot` event
+    /// (always `live`) and on GET `/data-broadcast/state` (see
+    /// DataBroadcastSession.fetchInitialState, which decodes the flat state
+    /// response body directly as a MahironSnapshot).
+    let origin: String?
+    /// Non-nil only when `origin == "cache"`.
+    let storedAt: Double?
 }
 
 // Mahiron wraps each SSE `data:` payload in a per-type envelope:
