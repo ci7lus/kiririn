@@ -147,10 +147,16 @@ final class DataBroadcastSession {
     private let logger = Logger(label: "DataBroadcastSession")
 
     private var sseTask: Task<Void, Never>?
+    private var stateFetchTask: Task<Void, Never>?
     private var started = false
     private var isReady = false
     private var pendingMessages: [String] = []
     private var consecutiveFailures = 0
+    /// Set once the SSE `snapshot` event (always `origin: "live"`) has been
+    /// applied, so a slow-arriving `fetchInitialState()` response - which may
+    /// be a stale `cache` snapshot - is discarded instead of clobbering
+    /// live/newer module state.
+    private var hasReceivedLiveSnapshot = false
 
     // Module fetch scheduling.
     private struct FetchRequest {
@@ -232,12 +238,16 @@ final class DataBroadcastSession {
         started = true
         status = .connecting
         sendProgramInfo(asInit: true)
+        fetchInitialState()
         connectSSE()
         startReconciliation()
     }
 
     func stop() {
         started = false
+        stateFetchTask?.cancel()
+        stateFetchTask = nil
+        hasReceivedLiveSnapshot = false
         sseTask?.cancel()
         sseTask = nil
         reconcileTask?.cancel()
@@ -285,6 +295,50 @@ final class DataBroadcastSession {
         post(
             #"{"type":"audioOutput","volume":\#(volume),"muted":\#(isMuted)}"#
         )
+    }
+
+    // MARK: - Initial state fast path
+
+    /// Fetches GET `/data-broadcast/state` once, in parallel with opening
+    /// SSE. If Mahiron has a `cache`-origin snapshot rebuilt from persisted
+    /// PMT/DII (tuner not yet acquired) or an already-`live` one, this lets
+    /// module prefetch start immediately instead of waiting for the first
+    /// SSE `snapshot` event. Best-effort: a 404 (no live session, no cache)
+    /// or any transport error just falls back to the SSE-only path.
+    private func fetchInitialState() {
+        stateFetchTask?.cancel()
+        stateFetchTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var request = URLRequest(url: self.endpoint.stateURL)
+            for (field, value) in self.endpoint.headers {
+                request.setValue(value, forHTTPHeaderField: field)
+            }
+            let data: Data
+            do {
+                let (responseData, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    self.logger.debug("initial state fetch: non-HTTP response")
+                    return
+                }
+                guard (200...299).contains(http.statusCode) else {
+                    self.logger.debug(
+                        "initial state fetch: non-2xx status \(http.statusCode)")
+                    return
+                }
+                data = responseData
+            } catch {
+                self.logger.debug("initial state fetch failed: \(error)")
+                return
+            }
+            guard !Task.isCancelled, self.started, !self.hasReceivedLiveSnapshot else { return }
+            guard let snapshot = try? JSONDecoder().decode(MahironSnapshot.self, from: data) else {
+                self.logger.warning("failed to decode initial state response")
+                return
+            }
+            self.logger.info(
+                "data-broadcast initial state fetched origin=\(snapshot.origin ?? "unknown")")
+            self.scheduleAll(components: snapshot.components ?? snapshot.pmt?.components ?? [])
+        }
     }
 
     // MARK: - SSE
@@ -369,6 +423,7 @@ final class DataBroadcastSession {
                 logger.warning("failed to decode snapshot event")
                 return
             }
+            hasReceivedLiveSnapshot = true
             knownModules.removeAll()
             scheduleAll(components: snapshot.components ?? snapshot.pmt?.components ?? [])
         case "pmt":

@@ -10,9 +10,12 @@ protocol DataBroadcastProviding {
 
 nonisolated struct DataBroadcastEndpoint: Sendable {
     let eventsURL: URL
-    /// Authoritative carousel state without opening SSE. Unused by the session
-    /// today (every SSE connection starts with a `snapshot` event), kept for
-    /// diagnostics.
+    /// Authoritative carousel state without opening SSE. Fetched once on
+    /// `startIfIdle()` as a fast path (see
+    /// DataBroadcastSession.fetchInitialState) so module prefetch can start
+    /// from a `cache`-origin snapshot while the tuner is still being
+    /// acquired; the SSE `snapshot` event (always `live`) unconditionally
+    /// supersedes it once it arrives.
     let stateURL: URL
     let headers: [String: String]
     private let baseURL: URL
