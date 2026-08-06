@@ -20,7 +20,10 @@ export type NativeToWebMessage =
     | { type: "audioOutput"; volume: number; muted: boolean }
     | { type: "inputResult"; requestId: number; value: string }
     | { type: "inputCancel"; requestId: number }
-    | { type: "setPresentationVisible"; visible: boolean }
+    // dボタン押下。TR-B14 第三編 2.1.10.4のとおり、そのままコンテンツへ
+    // 渡すだけ。出す/消すはコンテンツの責務なので、ネイティブ側の意図は
+    // 乗せない。
+    | { type: "dataButton" }
     | { type: "reset" };
 
 // JS -> Swift (webkit.messageHandlers.bml.postMessage)
