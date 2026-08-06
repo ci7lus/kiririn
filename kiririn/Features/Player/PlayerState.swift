@@ -258,9 +258,11 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             return true
         }
     }
-    /// Whether the BML content is currently presenting itself. A newly
-    /// created session stays closed until the next DataButton press, then
-    /// follows web-bml's `invisible` state.
+    /// Whether the BML content is currently presenting itself - purely
+    /// web-bml's `invisible` state once a document has been presented. There
+    /// is deliberately no receiver-side "not until the user presses d" gate;
+    /// see DataBroadcastSession.isContentVisible for why one breaks the
+    /// d button.
     var bmlContentVisible: Bool {
         guard let session = dataBroadcastSession else { return false }
         return session.status == .active && session.isContentVisible

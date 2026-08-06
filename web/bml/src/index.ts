@@ -192,7 +192,19 @@ const bmlBrowser = new BMLBrowser({
     // 未対応の受信機として正しく振る舞う(getBrowserSupportも0を返す)。
     ip: window.kiririnBMLConfig?.internetAccess === true ? createIP() : undefined,
     indicator: {
-        setUrl() {},
+        // Content.loadDocument()は最後に(loading=false)で、
+        // launchDocument()は遷移開始時に(loading=true)でこれを呼ぶ。
+        // web-bmlが公開している中でこれだけが「文書のスクリプトが評価され
+        // onloadも走り終わった」ことを示すので、保留中のdボタンを渡す
+        // タイミングとして使う。
+        setUrl(name: string, loading: boolean) {
+            console.info(`[kiririn-bml] setUrl: ${name} loading=${loading}`);
+            cancelDocumentReadyFallback();
+            isDocumentReady = !loading;
+            if (!loading) {
+                applyPresentationRequest("setUrl");
+            }
+        },
         // 実機でいう画面下の「データ取得中...」表示 - ネイティブ側でバッジ表示する
         setReceivingStatus(receiving: boolean) {
             if (receiving !== lastReceivingStatus) {
@@ -227,8 +239,20 @@ function applyStageScale(width: number, height: number): void {
 }
 
 let lastResolution: { width: number; height: number } | null = null;
-let isDocumentLoaded = false;
-let requestedPresentationVisible: boolean | null = null;
+// Content.loadDocument()を最後まで走り切った(onload実行・beitemのsubscribe
+// 適用・イベントキュー処理まで終わった)文書が提示されているか。web-bmlの
+// "load"イベントはloadDocument()の途中(スクリプト評価前)に飛んでくるので、
+// dボタンを渡してよいかの判断にはそちらを使えない - indicator.setUrlを参照。
+let isDocumentReady = false;
+let documentReadyFallbackTimer: number | undefined;
+// dボタン押下を保留しているか。選局直後は起動文書がまだ届いていないので、
+// 提示できるようになるまでここで持っておいて、届いたら渡す。
+let hasPendingDataButton = false;
+// loadDocument()がスクリプト内のlaunchDocument等で途中returnするとsetUrl
+// (loading=false)が来ないので、loadから一定時間で提示済みとみなす保険。
+// 通常はモジュールがキャッシュ済みで即座にsetUrl(false)が来るため、これが
+// 効くのは異常系だけ - 早すぎるとスクリプト評価前に渡してしまうので長め。
+const documentReadyFallbackMs = 3000;
 
 function reapplyStageScale(): void {
     if (lastResolution != null) {
@@ -266,7 +290,6 @@ function postLayoutRects(): void {
 }
 
 bmlBrowser.addEventListener("load", (evt) => {
-    isDocumentLoaded = true;
     lastResolution = evt.detail.resolution;
     applyStageScale(evt.detail.resolution.width, evt.detail.resolution.height);
     console.info(
@@ -284,7 +307,15 @@ bmlBrowser.addEventListener("load", (evt) => {
         height: evt.detail.resolution.height,
         profile: evt.detail.profile,
     });
-    applyRequestedPresentationVisibility();
+    // ここでdボタンを渡してはいけない。このイベントはloadDocument()の途中
+    // (arib-scriptの評価前・onloadの前)で発火するため、DataButtonPressedの
+    // onoccurが未定義の関数を指してしまい押下が握り潰される
+    // (STD-B24 第二分冊(2/2) 第二編 付属1 5.1.3: onloadが実行されるまで
+    // イベントは実行されない)。保留分はindicator.setUrl(loading=false)から
+    // 渡す。
+    isDocumentReady = false;
+    armDocumentReadyFallback();
+    synchronizePresentationAfterLayout();
 });
 
 bmlBrowser.addEventListener("videochanged", (evt) => {
@@ -324,27 +355,55 @@ function synchronizePresentationAfterLayout(): void {
     });
 }
 
-function applyRequestedPresentationVisibility(): void {
-    if (requestedPresentationVisible == null) {
+function cancelDocumentReadyFallback(): void {
+    if (documentReadyFallbackTimer != null) {
+        window.clearTimeout(documentReadyFallbackTimer);
+        documentReadyFallbackTimer = undefined;
+    }
+}
+
+function armDocumentReadyFallback(): void {
+    cancelDocumentReadyFallback();
+    documentReadyFallbackTimer = window.setTimeout(() => {
+        documentReadyFallbackTimer = undefined;
+        if (isDocumentReady) {
+            return;
+        }
+        log("warn", "BML document readiness fell back to a timer");
+        isDocumentReady = true;
+        applyPresentationRequest("readyFallback");
+    }, documentReadyFallbackMs);
+}
+
+/// dボタン押下をコンテンツへ渡す。TR-B14 第三編 2.1.10.4 / 5.3.1により、
+/// BMLエンジン起動後の押下はすべてコンテンツへ渡し、出す/消すはコンテンツの
+/// 責務。受信機側が提示状態と突き合わせて握り潰してはいけない - NTVのように
+/// 「invisible=falseだが何も描かない待機文書」を挟むコンテンツでは、
+/// invisibleを見て判断すると押下が無駄になる (実測: 待機文書tvdata.bmlは
+/// invisible=falseで映像フル表示、実体は押下で遷移する/60/配下の文書)。
+///
+/// 渡すのは文書が提示され終わってから (indicator.setUrl(loading=false))。
+/// web-bmlの"load"はloadDocument()の途中でarib-script評価前なので、そこで
+/// 渡すとDataButtonPressedのonoccurが未定義の関数を指して握り潰される。
+function applyPresentationRequest(source: string): void {
+    if (!hasPendingDataButton) {
         return;
     }
-    if (requestedPresentationVisible && audioContext.state === "suspended") {
-        void audioContext.resume().catch((error) => {
-            log("warn", `BML audio resume failed: ${String(error)}`);
-        });
-    }
-    if (!isDocumentLoaded) {
+    console.info(
+        `[kiririn-bml] applyPresentationRequest(${source}): ready=${isDocumentReady}` +
+            ` invisible=${bmlBrowser.content.invisible}`,
+    );
+    if (!isDocumentReady || bmlBrowser.content.invisible == null) {
+        // 起動文書がまだ提示されていない。setUrl(loading=false)か保険タイマ
+        // から呼び直される。
         return;
     }
-    const shouldShow = requestedPresentationVisible;
-    const isInvisible = bmlBrowser.content.invisible;
-    if (isInvisible == null) {
-        return;
-    }
-    if (shouldShow === isInvisible) {
-        bmlBrowser.content.processKeyDown(AribKeyCode.DataButton);
-        bmlBrowser.content.processKeyUp(AribKeyCode.DataButton);
-    }
+    // ワンショット。保留したまま文書遷移をまたぐと遷移先の提示完了でもう一度
+    // 渡してしまう (実測で二重送出を確認済み)。
+    hasPendingDataButton = false;
+    console.info(`[kiririn-bml] delivering DataButton (${source})`);
+    bmlBrowser.content.processKeyDown(AribKeyCode.DataButton);
+    bmlBrowser.content.processKeyUp(AribKeyCode.DataButton);
     synchronizePresentationAfterLayout();
 }
 
@@ -386,10 +445,16 @@ window.kiririnBML = {
                 }
                 break;
             }
-            case "setPresentationVisible":
-                requestedPresentationVisible = message.visible;
-                applyRequestedPresentationVisibility();
+            case "dataButton": {
+                if (audioContext.state === "suspended") {
+                    void audioContext.resume().catch((error) => {
+                        log("warn", `BML audio resume failed: ${String(error)}`);
+                    });
+                }
+                hasPendingDataButton = true;
+                applyPresentationRequest("dataButton");
                 break;
+            }
             case "audioOutput":
                 audioGain.gain.value = message.muted ? 0 : message.volume / 100;
                 break;
@@ -402,6 +467,9 @@ window.kiririnBML = {
             case "reset":
                 lastPMTComponents = null;
                 adapter = new MahironAdapter(emitToBrowser);
+                isDocumentReady = false;
+                hasPendingDataButton = false;
+                cancelDocumentReadyFallback();
                 break;
             default:
                 log("warn", `unhandled native message: ${JSON.stringify(message)}`);

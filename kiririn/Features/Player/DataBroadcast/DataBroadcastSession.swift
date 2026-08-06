@@ -78,9 +78,13 @@ final class DataBroadcastSession {
     private(set) var status: Status = .idle
     private(set) var stageRect: CGRect?
     private(set) var videoRect: CGRect?
-    private(set) var isInvisible = false
-    private var isPresentationSuppressed = true
-    private var requestedPresentationVisible: Bool?
+    /// コンテンツのbody@invisible。文書が提示されるまでは「非提示」が正しい
+    /// 初期値なのでtrueから始める(falseで始めると提示直前に一瞬合成される)。
+    private(set) var isInvisible = true
+    /// 文書がひとつでも提示されたか。BMLエンジン起動前は合成しない。
+    private var hasPresentedDocument = false
+    /// dボタンを押したがまだ文書が提示されていない状態(「データ取得中...」用)。
+    private var isAwaitingPresentation = false
     /// 実機の「データ取得中...」に相当。コンテンツが待っているモジュール取得が
     /// 保留中のあいだtrue (web-bmlのIndicator.setReceivingStatus由来)。
     private(set) var isReceiving = false
@@ -104,30 +108,40 @@ final class DataBroadcastSession {
         )
     }
 
+    /// データ放送面を合成するか。受信機側のゲートは持たず、コンテンツの
+    /// `invisible`だけに従う (TR-B14 第三編 2.1.10.4)。
+    ///
+    /// 「invisible=false」は「データ放送が見えている」とは限らない点に注意:
+    /// 多くの局は選局後、映像を全画面のまま何も描かない透過の待機文書
+    /// (NTVなら/40/0001/tvdata.bml)をinvisible=falseで提示し、dボタンで
+    /// 実体の文書へ遷移する。合成しても見た目は変わらないので、受信機側が
+    /// 「まだ出さない」と抑える必要はない。抑えると押下が状態合わせに消費
+    /// されて、実機なら1回で済むところが3回必要になる(実測)。
     var isContentVisible: Bool {
-        !isInvisible && !isPresentationSuppressed
+        hasPresentedDocument && !isInvisible
     }
 
-    /// dボタンで表示を要求済みだが、まだコンテンツが出ていない状態。web-bmlは
-    /// 起動文書がロードされるまで表示要求を保留する(applyRequestedPresentation-
-    /// Visibilityのメイン文書待ち)ので、選局後の初回読み込みはまるごとここに入る。
+    /// dボタンを押したが、起動文書がまだ提示されていない状態。選局直後は
+    /// カルーセルの取得待ちでまるごとここに入る(「データ取得中...」を出す)。
     var isPresentationPending: Bool {
         switch status {
         case .unsupported, .failed:
             return false
         case .idle, .connecting, .active:
-            return requestedPresentationVisible == true && !isContentVisible
+            return isAwaitingPresentation && !isContentVisible
         }
     }
 
+    /// dボタン押下。TR-B14 第三編 2.1.10.4 / 5.3.1のとおり、BMLエンジン起動後の
+    /// 押下はそのままコンテンツへ渡す。出す/消すはコンテンツの責務 - NTVは
+    /// 待機文書と実体文書の間をlaunchDocumentで往復して実現している。
+    /// 起動文書がまだ提示されていない場合はJS側が保留し、提示され次第渡す。
     func pressDataButton() {
-        let shouldShow = !isContentVisible
-        requestedPresentationVisible = shouldShow
-        if !shouldShow {
-            isPresentationSuppressed = true
+        if !hasPresentedDocument {
+            isAwaitingPresentation = true
         }
-        logger.info("BML presentation requested: visible=\(shouldShow)")
-        post(#"{"type":"setPresentationVisible","visible":\#(shouldShow)}"#)
+        logger.info("BML data button pressed (presented=\(hasPresentedDocument))")
+        post(#"{"type":"dataButton"}"#)
     }
 
     func takeCaptureSnapshot(layout: DataBroadcastCaptureLayout) async
@@ -274,9 +288,9 @@ final class DataBroadcastSession {
         invisibleUpdateTask = nil
         stageRect = nil
         videoRect = nil
-        isInvisible = false
-        isPresentationSuppressed = true
-        requestedPresentationVisible = nil
+        isInvisible = true
+        hasPresentedDocument = false
+        isAwaitingPresentation = false
         usedKeyGroups.removeAll()
         inputRequest = nil
         consecutiveFailures = 0
@@ -874,6 +888,10 @@ final class DataBroadcastSession {
             }
         case "invisible":
             let nextValue = (body["value"] as? Bool) ?? false
+            logger.debug(
+                "BML invisible msg: \(nextValue) (current=\(isInvisible) presented=\(hasPresentedDocument))"
+            )
+            // 文書遷移中のtrue→falseでちらつかないよう少し待ってから反映する。
             invisibleUpdateTask?.cancel()
             invisibleUpdateTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .milliseconds(300))
@@ -882,10 +900,9 @@ final class DataBroadcastSession {
                     self.isInvisible = nextValue
                     self.logger.info("BML invisible: \(nextValue)")
                 }
-                if self.requestedPresentationVisible == !nextValue {
-                    self.isPresentationSuppressed = nextValue
-                    self.requestedPresentationVisible = nil
-                }
+                self.logger.debug(
+                    "BML presentation state: status=\(String(describing: self.status)) invisible=\(self.isInvisible) presented=\(self.hasPresentedDocument) contentVisible=\(self.isContentVisible)"
+                )
             }
         case "receiving":
             receivingClearTask?.cancel()
@@ -954,6 +971,10 @@ final class DataBroadcastSession {
         case "log":
             logger.debug("[bml] \(body["message"] as? String ?? "")")
         case "loaded":
+            // 文書がひとつでも提示された。以降はコンテンツのinvisibleだけで
+            // 合成可否が決まる。
+            hasPresentedDocument = true
+            isAwaitingPresentation = false
             logger.info(
                 "BML loaded: \(body["width"] as? Double ?? 0)x\(body["height"] as? Double ?? 0) profile=\(body["profile"] as? String ?? "?")"
             )
