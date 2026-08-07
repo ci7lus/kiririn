@@ -165,7 +165,7 @@ final class GoogleDriveProvider: RecordingServerProvider {
     func fetchRecords(pageToken: String?, limit: Int, keyword: String?) async throws
         -> RecordsResult
     {
-        var query = "mimeType contains 'video/' and trashed = false"
+        var query = "not mimeType contains 'application/vnd.google' and trashed = false"
         if let keyword, !keyword.isEmpty {
             let escapedKeyword = keyword.replacingOccurrences(of: "'", with: "\\'")
             query += " and fullText contains '\(escapedKeyword)'"
