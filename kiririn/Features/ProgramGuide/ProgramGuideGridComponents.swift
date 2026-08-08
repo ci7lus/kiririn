@@ -107,7 +107,7 @@ struct ProgramCellWrapper: View, Equatable {
         let height = CGFloat(duration) * minuteHeight
 
         if height > 0 {
-            ProgramCellView(program: program)
+            ProgramCellView(program: program, availableHeight: height)
                 .frame(width: width - 8, height: height, alignment: .topLeading)
                 .offset(x: 4, y: y)
                 .contentShape(.rect)
@@ -117,10 +117,13 @@ struct ProgramCellWrapper: View, Equatable {
 
 struct ProgramCellView: View, Equatable {
     @Environment(\.colorScheme) private var colorScheme
+    @ScaledMetric(relativeTo: .subheadline) private var minimumHeightForTimeRange: CGFloat = 68
+    @ScaledMetric(relativeTo: .caption2) private var minimumHeightForDescription: CGFloat = 88
     let program: Program
+    let availableHeight: CGFloat
 
     static func == (lhs: ProgramCellView, rhs: ProgramCellView) -> Bool {
-        lhs.program == rhs.program
+        lhs.program == rhs.program && lhs.availableHeight == rhs.availableHeight
     }
 
     var body: some View {
@@ -137,13 +140,17 @@ struct ProgramCellView: View, Equatable {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Text(timeRange)
-                .font(.caption2)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if availableHeight >= minimumHeightForTimeRange {
+                Text(timeRange)
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
-            if let desc = compactDescription {
+            if availableHeight >= minimumHeightForDescription,
+                let desc = compactDescription
+            {
                 BroadcastText(desc, style: .caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
