@@ -1,11 +1,18 @@
 import OrderedCollections
 import SwiftUI
+import os.signpost
 
 #if canImport(UIKit)
     import UIKit
 #elseif canImport(AppKit)
     import AppKit
 #endif
+
+private let serviceListPerformanceLog = OSLog(
+    subsystem: "jp.pronama.kiririn",
+    category: "PointsOfInterest"
+)
+private let serviceListRebuildDebounce: Duration = .milliseconds(250)
 
 @Observable
 class ServiceListViewModel {
@@ -24,11 +31,9 @@ struct ServiceListView: View {
     @State private var serviceSelectionForReconnection: TVService?
     @State private var showingFavoriteOrderingSheet = false
     @State private var viewModel = ServiceListViewModel()
-    @State private var minuteRefreshTick = Date()
     @State private var groupedServices: [(String, [ServiceListItem])] = []
-    @State private var rebuildTask: Task<Void, Never>?
+    @State private var refreshState = ServiceListRefreshState()
     @State private var isBuildingList = true
-    @State private var rebuildGeneration = 0
 
     private struct ServiceDisplayGroup {
         let id: String
@@ -39,6 +44,11 @@ struct ServiceListView: View {
         var services: [TVService] {
             [primary] + secondary
         }
+    }
+
+    private enum RebuildSource {
+        case fetch(at: Date)
+        case snapshot(ProgramDisplaySnapshot)
     }
 
     private struct ServiceListItem: Identifiable {
@@ -116,7 +126,7 @@ struct ServiceListView: View {
             triggerRebuild()
         }
         .onChange(of: manager.serviceListServices) {
-            triggerRebuild()
+            triggerRebuild(after: serviceListRebuildDebounce)
         }
         .sheet(isPresented: $showingFavoriteOrderingSheet) {
             FavoriteServiceOrderingSheet(
@@ -435,21 +445,66 @@ struct ServiceListView: View {
     }
 
     @MainActor
-    private func triggerRebuild() {
-        rebuildTask?.cancel()
-        rebuildGeneration += 1
-        let generation = rebuildGeneration
-        isBuildingList = true
-        rebuildTask = Task {
-            await buildGroupedServices(generation: generation)
-        }
+    @discardableResult
+    private func triggerRebuild(after delay: Duration? = nil) -> Task<Void, Never> {
+        triggerRebuild(source: .fetch(at: Date()), after: delay)
     }
 
     @MainActor
-    private func buildGroupedServices(generation: Int) async {
+    @discardableResult
+    private func triggerRebuild(
+        source: RebuildSource,
+        after delay: Duration? = nil
+    ) -> Task<Void, Never> {
+        refreshState.rebuildTask?.cancel()
+        refreshState.rebuildGeneration += 1
+        let generation = refreshState.rebuildGeneration
+        if groupedServices.isEmpty {
+            isBuildingList = true
+        }
+        let task = Task { @MainActor in
+            if let delay {
+                do {
+                    try await Task.sleep(for: delay)
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled else { return }
+            await buildGroupedServices(
+                generation: generation,
+                source: source
+            )
+        }
+        refreshState.rebuildTask = task
+        return task
+    }
+
+    @MainActor
+    private func buildGroupedServices(
+        generation: Int,
+        source: RebuildSource
+    ) async {
         if !manager.isCacheReady {
             return
         }
+
+        let signpostID = OSSignpostID(log: serviceListPerformanceLog)
+        os_signpost(
+            .begin,
+            log: serviceListPerformanceLog,
+            name: "Service List Rebuild",
+            signpostID: signpostID
+        )
+        defer {
+            os_signpost(
+                .end,
+                log: serviceListPerformanceLog,
+                name: "Service List Rebuild",
+                signpostID: signpostID
+            )
+        }
+
         let keyword = viewModel.searchText.normalizedForJapaneseSearch()
         let currentServices = sortedServices
         let favoriteServices = currentServices.filter { $0.favoritedAt != nil }
@@ -458,26 +513,17 @@ struct ServiceListView: View {
 
         var newGroups: [(String, [ServiceListItem])] = []
 
-        // 大量のawaitによるスレッドホップを防ぐため、全サービスの現在の番組情報を一括で取得する
-        var programCache: [String: Program] = [:]
-        var nextProgramCache: [String: Program] = [:]
-        async let allCurrentProgramsTask = manager.fetchAllCurrentPrograms()
-        async let allNextProgramsTask = manager.fetchAllNextPrograms()
-        let allCurrentPrograms = await allCurrentProgramsTask
-        let allNextPrograms = await allNextProgramsTask
-        for program in allCurrentPrograms {
-            let key = "\(program.networkId)-\(program.serviceId)"
-            programCache[key] = program
+        let displaySnapshot: ProgramDisplaySnapshot
+        switch source {
+        case .fetch(let date):
+            displaySnapshot = await manager.fetchProgramDisplaySnapshot(
+                for: currentServices,
+                at: date
+            )
+        case .snapshot(let snapshot):
+            displaySnapshot = snapshot
         }
-        for program in allNextPrograms {
-            let key = "\(program.networkId)-\(program.serviceId)"
-            if nextProgramCache[key] == nil {
-                nextProgramCache[key] = program
-            }
-        }
-
-        // ServiceListItemの生成時に引き当てるためのキーをサービス側でも用意する
-        func serviceKey(_ s: TVService) -> String { "\(s.networkId)-\(s.serviceId)" }
+        guard !Task.isCancelled, generation == refreshState.rebuildGeneration else { return }
 
         func buildItems(
             from services: [TVService],
@@ -494,20 +540,21 @@ struct ServiceListView: View {
 
                 var children: [ServiceListItem] = []
                 for secondary in group.secondary {
-                    if Task.isCancelled { return [] }
-                    let program = programCache[serviceKey(secondary)]
+                    guard !Task.isCancelled else { return [] }
+                    let key = serviceKey(for: secondary)
                     children.append(
                         ServiceListItem(
                             id: "\(group.id)-\(secondary.id)",
                             service: secondary,
-                            currentProgram: program,
-                            nextProgram: nextProgramCache[serviceKey(secondary)],
+                            currentProgram: displaySnapshot.currentPrograms[key],
+                            nextProgram: displaySnapshot.nextPrograms[key],
                             hasDifferentChildProgram: false,
                             children: nil
                         ))
                 }
 
-                let primaryProgram = programCache[serviceKey(group.primary)]
+                let primaryKey = serviceKey(for: group.primary)
+                let primaryProgram = displaySnapshot.currentPrograms[primaryKey]
                 let hasDifferentChildProgram: Bool = {
                     guard let primaryProgram, isKnownProgram(primaryProgram) else { return false }
                     for child in children {
@@ -530,7 +577,7 @@ struct ServiceListView: View {
                 let primaryMatches = matchesSearch(
                     service: group.primary,
                     program: primaryProgram,
-                    nextProgram: nextProgramCache[serviceKey(group.primary)],
+                    nextProgram: displaySnapshot.nextPrograms[primaryKey],
                     keyword: keyword
                 )
                 guard keyword.isEmpty || primaryMatches || !filteredChildren.isEmpty else {
@@ -541,7 +588,7 @@ struct ServiceListView: View {
                         id: group.id,
                         service: group.primary,
                         currentProgram: primaryProgram,
-                        nextProgram: nextProgramCache[serviceKey(group.primary)],
+                        nextProgram: displaySnapshot.nextPrograms[primaryKey],
                         hasDifferentChildProgram: hasDifferentChildProgram,
                         children: filteredChildren.isEmpty ? nil : filteredChildren
                     ))
@@ -563,8 +610,9 @@ struct ServiceListView: View {
             newGroups.append((channelType, items))
         }
 
-        guard generation == rebuildGeneration else { return }
+        guard !Task.isCancelled, generation == refreshState.rebuildGeneration else { return }
 
+        refreshState.latestSnapshot = displaySnapshot
         self.groupedServices =
             newGroups
             .filter { !$0.1.isEmpty }
@@ -574,8 +622,10 @@ struct ServiceListView: View {
                 return ai < bi
             }
 
-        isBuildingList = false
-        rebuildTask = nil
+        if isBuildingList {
+            isBuildingList = false
+        }
+        refreshState.rebuildTask = nil
     }
 
     @MainActor
@@ -596,10 +646,77 @@ struct ServiceListView: View {
             try? await Task.sleep(for: .seconds(wait))
             if Task.isCancelled { break }
 
-            await playerState.refreshProgramInfo()
-            minuteRefreshTick = Date()
-            triggerRebuild()
+            await performMinuteRefresh(at: Date())
         }
+    }
+
+    @MainActor
+    private func performMinuteRefresh(at date: Date) async {
+        let refreshID = OSSignpostID(log: serviceListPerformanceLog)
+        os_signpost(
+            .begin,
+            log: serviceListPerformanceLog,
+            name: "Service List Minute Refresh",
+            signpostID: refreshID
+        )
+        defer {
+            os_signpost(
+                .end,
+                log: serviceListPerformanceLog,
+                name: "Service List Minute Refresh",
+                signpostID: refreshID
+            )
+        }
+
+        let expectedPlayableID = playerState.currentPlayable?.id
+        let snapshotServices = servicesForProgramSnapshot()
+        let snapshotServiceKeys = Set(snapshotServices.map { serviceKey(for: $0) })
+        let snapshot = await manager.fetchProgramDisplaySnapshot(
+            for: snapshotServices,
+            at: date
+        )
+        guard !Task.isCancelled,
+            playerState.currentPlayable?.id == expectedPlayableID,
+            Set(servicesForProgramSnapshot().map { serviceKey(for: $0) }) == snapshotServiceKeys
+        else {
+            await triggerRebuild().value
+            return
+        }
+
+        if let expectedPlayableID {
+            await playerState.refreshProgramInfo(
+                using: snapshot,
+                expectedPlayableID: expectedPlayableID
+            )
+        }
+        guard refreshState.latestSnapshot != snapshot else { return }
+        await triggerRebuild(source: .snapshot(snapshot)).value
+    }
+
+    private func serviceKey(for service: TVService) -> ProgramServiceKey {
+        ProgramServiceKey(serviceId: service.serviceId, networkId: service.networkId)
+    }
+
+    private func servicesForProgramSnapshot() -> [TVService] {
+        var services = manager.serviceListServices
+        guard let playable = playerState.currentPlayable,
+            case .liveService(let serviceUniqueId) = playable.source,
+            let playerService = playable.displayService
+                ?? manager.service(serviceUniqueId: serviceUniqueId)
+        else {
+            return services
+        }
+
+        let playerKey = ProgramServiceKey(
+            serviceId: playerService.serviceId,
+            networkId: playerService.networkId
+        )
+        if !services.contains(where: {
+            ProgramServiceKey(serviceId: $0.serviceId, networkId: $0.networkId) == playerKey
+        }) {
+            services.append(playerService)
+        }
+        return services
     }
 }
 

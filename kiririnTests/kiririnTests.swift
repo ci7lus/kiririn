@@ -248,4 +248,190 @@ struct KiririnTests {
 
         #expect(applied.extended == OrderedDictionary<String, String>())
     }
+
+    @Test @MainActor func programChannelColumnEqualityDetectsProgramChanges() {
+        func makeProgram(id: String) -> Program {
+            Program(
+                id: id,
+                serverId: "server",
+                eventId: 1,
+                serviceId: 10,
+                networkId: 20,
+                startAt: Date(timeIntervalSince1970: 1_000),
+                endAt: Date(timeIntervalSince1970: 1_060),
+                duration: 60,
+                name: id,
+                desc: nil,
+                extended: nil,
+                genres: [],
+                updatedAt: nil
+            )
+        }
+
+        let timelineStart = Date(timeIntervalSince1970: 900)
+        let timelineEnd = Date(timeIntervalSince1970: 1_200)
+        let first = ProgramChannelColumnView(
+            channelId: "20-10",
+            programs: [makeProgram(id: "first")],
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 1,
+            width: 200,
+            totalHeight: 300,
+            visibleRange: ProgramGuideVisibleRange(
+                start: timelineStart,
+                end: timelineEnd
+            ),
+            onProgramTapped: { _ in }
+        )
+        let second = ProgramChannelColumnView(
+            channelId: "20-10",
+            programs: [makeProgram(id: "second")],
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 1,
+            width: 200,
+            totalHeight: 300,
+            visibleRange: ProgramGuideVisibleRange(
+                start: timelineStart,
+                end: timelineEnd
+            ),
+            onProgramTapped: { _ in }
+        )
+
+        #expect(first != second)
+    }
+
+    @Test func programGuideVisibleRangeUsesBufferedQuantizedWindow() {
+        let timelineStart = Date(timeIntervalSince1970: 0)
+        let timelineEnd = timelineStart.addingTimeInterval(24 * 60 * 60)
+
+        let range = ProgramGuideVisibleRange.make(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: 52 + 300 * 2.5,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+
+        #expect(range.start == timelineStart.addingTimeInterval(90 * 60))
+        #expect(range.end == timelineStart.addingTimeInterval(720 * 60))
+    }
+
+    @Test func programGuideVisibleRangeClampsToTimelineBounds() {
+        let timelineStart = Date(timeIntervalSince1970: 0)
+        let timelineEnd = timelineStart.addingTimeInterval(24 * 60 * 60)
+
+        let topRange = ProgramGuideVisibleRange.make(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: 0,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+        let bottomRange = ProgramGuideVisibleRange.make(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: 10_000,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+
+        #expect(topRange.start == timelineStart)
+        #expect(bottomRange.end == timelineEnd)
+    }
+
+    @Test func programGuideVisibleRangeTestsProgramIntersection() {
+        let timelineStart = Date(timeIntervalSince1970: 0)
+        let timelineEnd = timelineStart.addingTimeInterval(24 * 60 * 60)
+        let range = ProgramGuideVisibleRange(
+            start: timelineStart.addingTimeInterval(60 * 60),
+            end: timelineStart.addingTimeInterval(120 * 60)
+        )
+
+        #expect(
+            range.intersects(
+                programStart: timelineStart.addingTimeInterval(90 * 60),
+                programEnd: timelineStart.addingTimeInterval(150 * 60),
+                timelineEnd: timelineEnd
+            )
+        )
+        #expect(
+            !range.intersects(
+                programStart: timelineStart.addingTimeInterval(120 * 60),
+                programEnd: timelineStart.addingTimeInterval(150 * 60),
+                timelineEnd: timelineEnd
+            )
+        )
+        #expect(
+            range.intersects(
+                programStart: timelineStart.addingTimeInterval(90 * 60),
+                programEnd: timelineStart.addingTimeInterval(90 * 60),
+                timelineEnd: timelineEnd
+            )
+        )
+    }
+
+    @Test func programGuideVisibleRangeDoesNotRefreshDuringSmallScrolls() {
+        let timelineStart = Date(timeIntervalSince1970: 0)
+        let timelineEnd = timelineStart.addingTimeInterval(24 * 60 * 60)
+        let initialRange = ProgramGuideVisibleRange.make(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: 0,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+        let needsRefresh = initialRange.needsRefresh(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: 52 + 30 * 2.5,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+
+        #expect(!needsRefresh)
+    }
+
+    @Test func programGuideVisibleRangeRefreshesNearBufferEdge() {
+        let timelineStart = Date(timeIntervalSince1970: 0)
+        let timelineEnd = timelineStart.addingTimeInterval(24 * 60 * 60)
+        let initialRange = ProgramGuideVisibleRange.make(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: 0,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+        let verticalScrollOffset = 52 + 190 * 2.5
+        let needsRefresh = initialRange.needsRefresh(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: verticalScrollOffset,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+        let refreshedRange = ProgramGuideVisibleRange.make(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: verticalScrollOffset,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+
+        #expect(needsRefresh)
+        #expect(refreshedRange != initialRange)
+        #expect(
+            refreshedRange.end
+                == timelineStart.addingTimeInterval(600 * 60)
+        )
+    }
 }

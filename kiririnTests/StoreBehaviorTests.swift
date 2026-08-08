@@ -294,6 +294,191 @@ struct StoreBehaviorTests {
         #expect(favoriteByKey["1-101"]?.displayOrder == 1)
         #expect(favoriteByKey["1-102"]?.displayOrder == 0)
     }
+
+    @MainActor
+    @Test
+    func cacheStoreBuildsProgramDisplaySnapshotForRequestedServices() async throws {
+        let dbQueue = try DatabaseQueue()
+        let store = CacheStore(databaseQueue: dbQueue)
+        let currentDate = Date(timeIntervalSince1970: 1_000)
+        let service = makeService(networkId: 1, transportStreamId: nil, serviceId: 101)
+        let zeroDurationService = makeService(
+            networkId: 1, transportStreamId: nil, serviceId: 102)
+        let otherService = makeService(networkId: 1, transportStreamId: nil, serviceId: 103)
+
+        let current = Program(
+            id: "current",
+            serverId: "server-1",
+            eventId: 1,
+            serviceId: 101,
+            networkId: 1,
+            startAt: Date(timeIntervalSince1970: 900),
+            endAt: Date(timeIntervalSince1970: 1_100),
+            duration: 200,
+            name: "現在番組",
+            desc: nil,
+            extended: nil,
+            genres: [],
+            updatedAt: nil
+        )
+        let earlierCurrent = Program(
+            id: "earlier-current",
+            serverId: "server-1",
+            eventId: 5,
+            serviceId: 101,
+            networkId: 1,
+            startAt: Date(timeIntervalSince1970: 800),
+            endAt: Date(timeIntervalSince1970: 1_050),
+            duration: 250,
+            name: "先に始まった現在番組",
+            desc: nil,
+            extended: nil,
+            genres: [],
+            updatedAt: Date(timeIntervalSince1970: 1_001)
+        )
+        let next = Program(
+            id: "next",
+            serverId: "server-1",
+            eventId: 2,
+            serviceId: 101,
+            networkId: 1,
+            startAt: Date(timeIntervalSince1970: 1_100),
+            endAt: Date(timeIntervalSince1970: 1_200),
+            duration: 100,
+            name: "次番組",
+            desc: nil,
+            extended: nil,
+            genres: [],
+            updatedAt: nil
+        )
+        let later = Program(
+            id: "later",
+            serverId: "server-1",
+            eventId: 3,
+            serviceId: 101,
+            networkId: 1,
+            startAt: Date(timeIntervalSince1970: 1_200),
+            endAt: Date(timeIntervalSince1970: 1_300),
+            duration: 100,
+            name: "さらに次の番組",
+            desc: nil,
+            extended: nil,
+            genres: [],
+            updatedAt: nil
+        )
+        let unrelated = Program(
+            id: "unrelated",
+            serverId: "server-1",
+            eventId: 4,
+            serviceId: 202,
+            networkId: 2,
+            startAt: Date(timeIntervalSince1970: 900),
+            endAt: Date(timeIntervalSince1970: 1_100),
+            duration: 200,
+            name: "対象外",
+            desc: nil,
+            extended: nil,
+            genres: [],
+            updatedAt: nil
+        )
+        let zeroDuration = Program(
+            id: "zero-duration",
+            serverId: "server-1",
+            eventId: 6,
+            serviceId: 102,
+            networkId: 1,
+            startAt: Date(timeIntervalSince1970: 950),
+            endAt: Date(timeIntervalSince1970: 950),
+            duration: 0,
+            name: "終了時刻不明",
+            desc: nil,
+            extended: nil,
+            genres: [],
+            updatedAt: nil
+        )
+
+        await store.cachePrograms(
+            [current, earlierCurrent, next, later, unrelated, zeroDuration], serverId: "server-1")
+
+        let snapshot = await store.fetchProgramDisplaySnapshot(
+            for: [service, zeroDurationService, otherService], at: currentDate)
+        let key = ProgramServiceKey(serviceId: 101, networkId: 1)
+        let zeroDurationKey = ProgramServiceKey(serviceId: 102, networkId: 1)
+
+        #expect(snapshot.currentPrograms[key]?.id == "earlier-current")
+        #expect(snapshot.currentPrograms[zeroDurationKey]?.id == "zero-duration")
+        #expect(snapshot.nextPrograms[key]?.id == "next")
+        #expect(snapshot.currentPrograms.count == 2)
+        #expect(snapshot.nextPrograms.count == 1)
+    }
+
+    @MainActor @Test func cacheStoreCleansUpProgramsOlderThanOneDay() async throws {
+        let dbQueue = try DatabaseQueue()
+        let store = CacheStore(databaseQueue: dbQueue)
+        let referenceDate = Date(timeIntervalSince1970: 100_000)
+        let cutoffDate = referenceDate.addingTimeInterval(-24 * 60 * 60)
+
+        func makeProgram(
+            id: String,
+            startAt: Date,
+            endAt: Date,
+            duration: TimeInterval
+        ) -> Program {
+            Program(
+                id: id,
+                serverId: "server-1",
+                eventId: nil,
+                serviceId: 101,
+                networkId: 1,
+                startAt: startAt,
+                endAt: endAt,
+                duration: duration,
+                name: id,
+                desc: nil,
+                extended: nil,
+                genres: [],
+                updatedAt: nil
+            )
+        }
+
+        await store.cachePrograms(
+            [
+                makeProgram(
+                    id: "expired-normal",
+                    startAt: cutoffDate.addingTimeInterval(-60),
+                    endAt: cutoffDate,
+                    duration: 60
+                ),
+                makeProgram(
+                    id: "recent-normal",
+                    startAt: cutoffDate,
+                    endAt: cutoffDate.addingTimeInterval(60),
+                    duration: 60
+                ),
+                makeProgram(
+                    id: "expired-zero-duration",
+                    startAt: cutoffDate,
+                    endAt: cutoffDate,
+                    duration: 0
+                ),
+                makeProgram(
+                    id: "recent-zero-duration",
+                    startAt: cutoffDate.addingTimeInterval(1),
+                    endAt: cutoffDate.addingTimeInterval(1),
+                    duration: 0
+                ),
+            ],
+            serverId: "server-1"
+        )
+
+        await store.cleanupOldPrograms(referenceDate: referenceDate)
+
+        let remainingPrograms = await store.loadCachedPrograms(
+            until: referenceDate.addingTimeInterval(1)
+        )
+        #expect(Set(remainingPrograms.map(\.id)) == ["recent-normal", "recent-zero-duration"])
+    }
+
 }
 
 private func makeService(networkId: Int, transportStreamId: Int?, serviceId: Int) -> TVService {

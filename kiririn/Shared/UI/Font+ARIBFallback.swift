@@ -13,6 +13,14 @@ import SwiftUI
 #endif
 
 extension Font {
+    private struct ARIBFontCacheKey: Hashable {
+        let size: CGFloat
+        let weight: CGFloat
+    }
+
+    @MainActor private static var aribFontCache: [ARIBFontCacheKey: Font] = [:]
+    private static let aribFontCacheLimit = 64
+
     private static let aribFallbackDescriptor: CTFontDescriptor? = {
         guard
             let url = Bundle.main.url(
@@ -28,18 +36,39 @@ extension Font {
         return descriptors.first
     }()
 
-    static func systemWithARIBFallback(
+    @MainActor static func systemWithARIBFallback(
         _ style: Font.TextStyle,
         weight: Font.Weight = .regular
     ) -> Font {
-        cascadingARIBFont(from: systemFont(style: style, weight: weight))
+        let preferredFont = PlatformFont.preferredFont(forTextStyle: platformTextStyle(for: style))
+        return cachedARIBFont(size: preferredFont.pointSize, weight: weight)
     }
 
-    static func systemWithARIBFallback(
+    @MainActor static func systemWithARIBFallback(
         size: CGFloat,
         weight: Font.Weight = .regular
     ) -> Font {
-        cascadingARIBFont(from: systemFont(size: size, weight: weight))
+        cachedARIBFont(size: size, weight: weight)
+    }
+
+    @MainActor private static func cachedARIBFont(
+        size: CGFloat,
+        weight: Font.Weight
+    ) -> Font {
+        let platformWeight = platformFontWeight(for: weight)
+        let key = ARIBFontCacheKey(size: size, weight: platformWeight.rawValue)
+        if let cachedFont = aribFontCache[key] {
+            return cachedFont
+        }
+
+        let font = cascadingARIBFont(
+            from: PlatformFont.systemFont(ofSize: size, weight: platformWeight)
+        )
+        if aribFontCache.count >= aribFontCacheLimit {
+            aribFontCache.removeAll(keepingCapacity: true)
+        }
+        aribFontCache[key] = font
+        return font
     }
 
     private static func cascadingARIBFont(from baseFont: CTFont) -> Font {
@@ -58,18 +87,6 @@ extension Font {
                 as CFDictionary
         )
         return Font(CTFontCreateWithFontDescriptor(descriptor, size, nil))
-    }
-
-    private static func systemFont(style: Font.TextStyle, weight: Font.Weight) -> CTFont {
-        let preferredFont = PlatformFont.preferredFont(forTextStyle: platformTextStyle(for: style))
-        return PlatformFont.systemFont(
-            ofSize: preferredFont.pointSize,
-            weight: platformFontWeight(for: weight)
-        )
-    }
-
-    private static func systemFont(size: CGFloat, weight: Font.Weight) -> CTFont {
-        PlatformFont.systemFont(ofSize: size, weight: platformFontWeight(for: weight))
     }
 
     private static func platformTextStyle(for style: Font.TextStyle) -> PlatformFont.TextStyle {

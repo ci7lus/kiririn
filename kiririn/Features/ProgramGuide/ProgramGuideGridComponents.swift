@@ -12,12 +12,14 @@ struct ProgramChannelColumnView: View, Equatable {
     let minuteHeight: CGFloat
     let width: CGFloat
     let totalHeight: CGFloat
+    let visibleRange: ProgramGuideVisibleRange
     let onProgramTapped: (Program) -> Void
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.channelId == rhs.channelId && lhs.timelineStart == rhs.timelineStart
             && lhs.timelineEnd == rhs.timelineEnd && lhs.minuteHeight == rhs.minuteHeight
             && lhs.width == rhs.width && lhs.totalHeight == rhs.totalHeight
+            && lhs.visibleRange == rhs.visibleRange
             && lhs.programs == rhs.programs
     }
 
@@ -25,34 +27,29 @@ struct ProgramChannelColumnView: View, Equatable {
         CGFloat(date.timeIntervalSince(timelineStart) / 60.0) * minuteHeight
     }
 
-    private var timeMarkerOffsets: [CGFloat] {
-        let count = Int((timelineEnd.timeIntervalSince(timelineStart) / 60) / 30)
-        return (0...count).map { CGFloat($0 * 30) * minuteHeight }
+    private var visibleProgramIndices: [Int] {
+        programs.indices.filter { index in
+            let program = programs[index]
+            return visibleRange.intersects(
+                programStart: program.startAt,
+                programEnd: program.endAt,
+                timelineEnd: timelineEnd
+            )
+        }
     }
 
     var body: some View {
-        let markerOffsets = timeMarkerOffsets
+        let renderedProgramIndices = visibleProgramIndices
 
         ZStack(alignment: .topLeading) {
-            Color.kiririnSystemBackground
+            // 絶対Y座標で配置する番組セルの原点を列の左上に固定する。
+            Color.clear
+                .frame(width: width, height: totalHeight)
+                .allowsHitTesting(false)
 
-            Canvas { context, size in
-                for y in markerOffsets {
-                    context.fill(
-                        Path(CGRect(x: 0, y: y, width: size.width, height: 1)),
-                        with: .color(Color.kiririnSeparator.opacity(0.25))
-                    )
-                }
-                context.fill(
-                    Path(CGRect(x: 0, y: 0, width: 1, height: size.height)),
-                    with: .color(Color.kiririnSeparator.opacity(0.6))
-                )
-            }
-            .allowsHitTesting(false)
-
-            ForEach(Array(programs.enumerated()), id: \.offset) { _, program in
+            ForEach(renderedProgramIndices, id: \.self) { index in
                 ProgramCellWrapper(
-                    program: program,
+                    program: programs[index],
                     timelineStart: timelineStart,
                     timelineEnd: timelineEnd,
                     width: width,
@@ -61,19 +58,26 @@ struct ProgramChannelColumnView: View, Equatable {
                 .equatable()
             }
         }
-        .frame(width: width, height: totalHeight)
+        .frame(width: width, height: totalHeight, alignment: .topLeading)
         .clipped()
-        .drawingGroup()
+        .contentShape(.rect)
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(Color.kiririnSeparator.opacity(0.6))
+                .frame(width: 1)
+                .allowsHitTesting(false)
+        }
         .onTapGesture(coordinateSpace: .local) { location in
             let tappedY = location.y
-            if let program = programs.first(where: { program in
+            if let index = renderedProgramIndices.first(where: { index in
+                let program = programs[index]
                 let start = max(program.startAt, timelineStart)
                 let rawEnd = program.endAt > program.startAt ? program.endAt : timelineEnd
                 let end = min(rawEnd, timelineEnd)
                 guard end > start else { return false }
                 return tappedY >= yOffset(for: start) && tappedY < yOffset(for: end)
             }) {
-                onProgramTapped(program)
+                onProgramTapped(programs[index])
             }
         }
     }
@@ -106,7 +110,7 @@ struct ProgramCellWrapper: View, Equatable {
         let height = CGFloat(duration) * minuteHeight
 
         if height > 0 {
-            ProgramCellView(program: program)
+            ProgramCellView(program: program, availableHeight: height)
                 .frame(width: width - 8, height: height, alignment: .topLeading)
                 .offset(x: 4, y: y)
                 .contentShape(.rect)
@@ -116,10 +120,13 @@ struct ProgramCellWrapper: View, Equatable {
 
 struct ProgramCellView: View, Equatable {
     @Environment(\.colorScheme) private var colorScheme
+    @ScaledMetric(relativeTo: .subheadline) private var minimumHeightForTimeRange: CGFloat = 68
+    @ScaledMetric(relativeTo: .caption2) private var minimumHeightForDescription: CGFloat = 88
     let program: Program
+    let availableHeight: CGFloat
 
     static func == (lhs: ProgramCellView, rhs: ProgramCellView) -> Bool {
-        lhs.program == rhs.program
+        lhs.program == rhs.program && lhs.availableHeight == rhs.availableHeight
     }
 
     var body: some View {
@@ -136,13 +143,17 @@ struct ProgramCellView: View, Equatable {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Text(timeRange)
-                .font(.caption2)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if availableHeight >= minimumHeightForTimeRange {
+                Text(timeRange)
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
-            if let desc = compactDescription {
+            if availableHeight >= minimumHeightForDescription,
+                let desc = compactDescription
+            {
                 BroadcastText(desc, style: .caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)

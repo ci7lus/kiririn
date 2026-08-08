@@ -141,6 +141,7 @@ class ServerManager {
     func setCacheStore(_ cacheStore: CacheStore) async {
         self.cacheStore = cacheStore
         CaptureService.shared.setCacheStore(cacheStore)
+        await cacheStore.cleanupOldPrograms()
         await loadCachedData()
         startPeriodicProgramRefreshTaskIfNeeded()
     }
@@ -402,6 +403,7 @@ class ServerManager {
                         return .skipped
                     }
                     await cacheStore.cachePrograms(fetchedPrograms, serverId: serverId)
+                    await cacheStore.cleanupOldPrograms()
                     clearLastError(for: state)
                     lastProgramFullFetchDatesByServer[serverId] = Date()
                     pendingProgramFullFetchServerIDs.remove(serverId)
@@ -1146,12 +1148,11 @@ class ServerManager {
         return await cacheStore.fetchNextProgram(for: service, currentProgram: currentProgram)
     }
 
-    func fetchAllCurrentPrograms() async -> [Program] {
-        await cacheStore.fetchAllCurrentPrograms()
-    }
-
-    func fetchAllNextPrograms() async -> [Program] {
-        await cacheStore.fetchAllNextPrograms()
+    func fetchProgramDisplaySnapshot(
+        for services: [TVService],
+        at date: Date = Date()
+    ) async -> ProgramDisplaySnapshot {
+        await cacheStore.fetchProgramDisplaySnapshot(for: services, at: date)
     }
 
     func fetchCachedPrograms(from: Date? = nil, until date: Date) async -> [Program] {

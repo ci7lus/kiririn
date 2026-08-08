@@ -1154,21 +1154,79 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
                 playable.displayService ?? manager.service(serviceUniqueId: serviceUniqueId)
             guard let resolvedService else {
                 guard currentPlayable?.id == expectedPlayableID else { return }
-                nextProgram = nil
+                if nextProgram != nil {
+                    nextProgram = nil
+                }
                 return
             }
             let current = await manager.currentProgram(for: resolvedService)
             guard currentPlayable?.id == expectedPlayableID else { return }
-            currentPlayable?.program = current
-            dataBroadcastSession?.refreshProgramInfo()
-
             let next = await manager.nextProgram(for: resolvedService, currentProgram: current)
-            guard currentPlayable?.id == expectedPlayableID else { return }
-            nextProgram = next
+            applyProgramInfo(
+                current: current,
+                next: next,
+                expectedPlayableID: expectedPlayableID
+            )
         default:
             guard currentPlayable?.id == expectedPlayableID else { return }
-            nextProgram = nil
+            if nextProgram != nil {
+                nextProgram = nil
+            }
             break
+        }
+    }
+
+    func refreshProgramInfo(
+        using snapshot: ProgramDisplaySnapshot,
+        expectedPlayableID: String
+    ) async {
+        guard let manager, let playable = currentPlayable,
+            playable.id == expectedPlayableID
+        else { return }
+        switch playable.source {
+        case .liveService(let serviceUniqueId):
+            let resolvedService =
+                playable.displayService ?? manager.service(serviceUniqueId: serviceUniqueId)
+            guard let resolvedService else {
+                guard currentPlayable?.id == expectedPlayableID else { return }
+                if nextProgram != nil {
+                    nextProgram = nil
+                }
+                return
+            }
+
+            let key = ProgramServiceKey(
+                serviceId: resolvedService.serviceId,
+                networkId: resolvedService.networkId
+            )
+            guard currentPlayable?.id == expectedPlayableID else { return }
+            let current = snapshot.currentPrograms[key]
+            let next = await manager.nextProgram(for: resolvedService, currentProgram: current)
+            applyProgramInfo(
+                current: current,
+                next: next,
+                expectedPlayableID: expectedPlayableID
+            )
+        default:
+            guard currentPlayable?.id == expectedPlayableID else { return }
+            if nextProgram != nil {
+                nextProgram = nil
+            }
+        }
+    }
+
+    private func applyProgramInfo(
+        current: Program?,
+        next: Program?,
+        expectedPlayableID: String
+    ) {
+        guard currentPlayable?.id == expectedPlayableID else { return }
+        if currentPlayable?.program != current {
+            currentPlayable?.program = current
+            dataBroadcastSession?.refreshProgramInfo()
+        }
+        if nextProgram != next {
+            nextProgram = next
         }
     }
 

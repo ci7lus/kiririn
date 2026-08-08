@@ -20,6 +20,8 @@ struct ProgramGuideView: View {
     @State private var searchQueryResults: [ProgramSearchResult] = []
     @State private var isLoading = false
     @State private var hasAttemptedLoad = false
+    @State private var hasScrolledToCurrentTimeOnInitialDisplay = false
+    @State private var isInitialScrollReady = false
     @State private var channels: [GuideChannel] = []
     @State private var timelineOffsetHours = 0
     @State private var nowLineDate = Date()
@@ -27,7 +29,7 @@ struct ProgramGuideView: View {
     @State private var scrollPosition = ScrollPosition()
     @State private var viewportHeight: CGFloat = 600
     @State private var viewportWidth: CGFloat = 0
-    @State private var verticalScrollOffset: CGFloat = 0
+    @State private var viewportModel: ProgramGuideViewportModel
     @State private var minuteHeight: CGFloat
     @State private var offsetTracker = HorizontalOffsetTracker()
     @State private var horizontalScrollResetToken = 0
@@ -41,6 +43,7 @@ struct ProgramGuideView: View {
     private let channelColumnWidth: CGFloat = 220
     private let timeRulerWidth: CGFloat = 45
     private let sectionHeaderHeight: CGFloat = 52
+    private let currentTimeTopPadding: CGFloat = 32
     private let minimumMinuteHeight: CGFloat = 2.5
     private let maximumMinuteHeight: CGFloat = 9
     private let defaultMinuteHeight: CGFloat = 2.5
@@ -67,10 +70,10 @@ struct ProgramGuideView: View {
     }
 
     private var anchorTime: Date {
-        anchorTime(for: nowLineDate)
+        Self.anchorTime(for: nowLineDate)
     }
 
-    private func anchorTime(for referenceDate: Date) -> Date {
+    private static func anchorTime(for referenceDate: Date) -> Date {
         let calendar = Calendar.current
         var components = calendar.dateComponents([.year, .month, .day, .hour], from: referenceDate)
         if let hour = components.hour, hour < 4 {
@@ -116,6 +119,25 @@ struct ProgramGuideView: View {
         self.manager = manager
         self._playerState = State(initialValue: playerState)
         self._minuteHeight = State(initialValue: defaultMinuteHeight)
+        let initialTimelineStart = Self.anchorTime(for: Date())
+        let initialTimelineEnd =
+            Calendar.current.date(
+                byAdding: .hour,
+                value: timelineHours,
+                to: initialTimelineStart
+            ) ?? initialTimelineStart
+        self._viewportModel = State(
+            initialValue: ProgramGuideViewportModel(
+                visibleRange: ProgramGuideVisibleRange.make(
+                    timelineStart: initialTimelineStart,
+                    timelineEnd: initialTimelineEnd,
+                    minuteHeight: defaultMinuteHeight,
+                    verticalScrollOffset: 0,
+                    viewportHeight: 600,
+                    sectionHeaderHeight: sectionHeaderHeight
+                )
+            )
+        )
     }
 
     var body: some View {
@@ -133,7 +155,8 @@ struct ProgramGuideView: View {
                 .onAppear {
                     let currentDate = Date()
                     nowLineDate = currentDate
-                    lastAnchorTime = anchorTime(for: currentDate)
+                    lastAnchorTime = Self.anchorTime(for: currentDate)
+                    updateVisibleRange()
                     if manager.hasFavoriteServices {
                         selectedBroadcastType = favoriteBroadcastType
                     }
@@ -167,6 +190,7 @@ struct ProgramGuideView: View {
                     }
                 }
                 .onChange(of: timelineOffsetHours) { _, _ in
+                    updateVisibleRange()
                     Task {
                         await reloadPrograms()
                         updateDisplayChannels()
@@ -194,7 +218,8 @@ struct ProgramGuideView: View {
                 guard minuteHeight != defaultMinuteHeight else { return }
                 let previousTimelineHeight = CGFloat(timelineHours * 60) * minuteHeight
                 let visibleContentY =
-                    verticalScrollOffset + (viewportHeight - sectionHeaderHeight) / 2
+                    viewportModel.verticalOffset
+                    + (viewportHeight - sectionHeaderHeight) / 2
                 let anchorY = min(max(visibleContentY / previousTimelineHeight, 0), 1)
                 let factor = defaultMinuteHeight / minuteHeight
                 scaleTimeline(by: factor, around: UnitPoint(x: 0.5, y: anchorY))
@@ -283,6 +308,7 @@ struct ProgramGuideView: View {
                     geo.containerSize.height
                 } action: { _, new in
                     viewportHeight = new
+                    updateVisibleRange()
                 }
                 .onScrollGeometryChange(for: CGFloat.self) { geo in
                     geo.contentOffset.x
@@ -292,12 +318,16 @@ struct ProgramGuideView: View {
                 .onScrollGeometryChange(for: CGFloat.self) { geo in
                     geo.contentOffset.y
                 } action: { _, new in
-                    verticalScrollOffset = new
+                    updateVerticalOffset(new)
+                }
+                .task {
+                    await scrollToCurrentTimeOnInitialDisplay()
                 }
                 .onChange(of: horizontalScrollResetToken) { _, _ in
                     resetHorizontalScrollPosition(proxy: proxy)
                 }
                 .background(Color.kiririnSystemBackground)
+                .opacity(isInitialScrollReady ? 1 : 0)
             }
         }
     }
@@ -322,7 +352,7 @@ struct ProgramGuideView: View {
                 }
                 .zIndex(3000)
 
-            HStack(spacing: 0) {
+            LazyHStack(spacing: 0) {
                 ForEach(displayChannels) { channel in
                     serviceHeaderCell(for: channel.service)
                         .id(channel.id)
@@ -347,36 +377,19 @@ struct ProgramGuideView: View {
                 }
                 .zIndex(1500)
 
-            ZStack(alignment: .topLeading) {
-                LazyHStack(alignment: .top, spacing: 0) {
-                    ForEach(displayChannels) { channel in
-                        ProgramChannelColumnView(
-                            channelId: channel.id,
-                            programs: channel.programs,
-                            timelineStart: timelineStart,
-                            timelineEnd: timelineEnd,
-                            minuteHeight: minuteHeight,
-                            width: channelColumnWidth,
-                            totalHeight: timelineHeight,
-                            onProgramTapped: { program in
-                                selectedProgram = ProgramSelection(
-                                    program: program, service: channel.service)
-                            }
-                        )
-                        .equatable()
-                        .id(channel.id)
-                    }
-                }
-                if nowLineYOffset >= 0 && nowLineYOffset < timelineHeight {
-                    Rectangle()
-                        .fill(Color.accentColor)
-                        .opacity(timelineOffsetHours == 0 ? 1.0 : 0.5)
-                        .frame(width: max(viewportWidth, contentWidth) - timeRulerWidth, height: 3)
-                        .offset(y: nowLineYOffset - 1.5)
-                        .allowsHitTesting(false)
-                        .zIndex(1800)
-                }
-            }
+            ProgramGuideChannelGridView(
+                channels: displayChannels,
+                timelineStart: timelineStart,
+                timelineEnd: timelineEnd,
+                minuteHeight: minuteHeight,
+                channelColumnWidth: channelColumnWidth,
+                timelineHeight: timelineHeight,
+                nowLineYOffset: nowLineYOffset,
+                nowLineOpacity: timelineOffsetHours == 0 ? 1.0 : 0.5,
+                nowLineWidth: max(viewportWidth, contentWidth) - timeRulerWidth,
+                viewportModel: viewportModel,
+                selectedProgram: $selectedProgram
+            )
         }
     }
 
@@ -489,9 +502,10 @@ struct ProgramGuideView: View {
     private func refreshCurrentTime(at date: Date = Date()) async {
         nowLineDate = date
 
-        let currentAnchorTime = anchorTime(for: date)
+        let currentAnchorTime = Self.anchorTime(for: date)
         if let lastAnchorTime, currentAnchorTime != lastAnchorTime {
             self.lastAnchorTime = currentAnchorTime
+            updateVisibleRange()
             await reloadPrograms()
             updateDisplayChannels()
         } else if lastAnchorTime == nil {
@@ -505,35 +519,67 @@ struct ProgramGuideView: View {
 
     private func scrollToNow(animated: Bool) {
         let now = Date()
-        let maxX = max(contentWidth - viewportWidth, 0)
-        let x = min(max(offsetTracker.horizontalOffset, 0), maxX)
+        let hourStart = Calendar.current.dateInterval(of: .hour, for: now)?.start ?? now
 
-        func updateScrollPosition(toY y: CGFloat) {
-            if maxX > 0 {
-                scrollPosition = ScrollPosition(x: x, y: y)
-            } else {
-                scrollPosition = ScrollPosition(y: y)
-            }
-        }
-
-        if now >= timelineStart && now < timelineEnd {
-            let requestedY =
-                sectionHeaderHeight + yOffset(for: now) - viewportHeight * 0.2
+        if hourStart >= timelineStart && hourStart < timelineEnd {
+            let requestedY = yOffset(for: hourStart) - sectionHeaderHeight - 12
             let maximumY = max(
                 0, sectionHeaderHeight + timelineHeight - viewportHeight)
             let targetY = min(max(0, requestedY), maximumY)
-            if animated {
-                withAnimation { updateScrollPosition(toY: targetY) }
-            } else {
-                updateScrollPosition(toY: targetY)
-            }
+            scrollToVerticalOffset(targetY, animated: animated)
         } else {
-            if animated {
-                withAnimation { updateScrollPosition(toY: 0) }
-            } else {
-                updateScrollPosition(toY: 0)
-            }
+            scrollToVerticalOffset(0, animated: animated)
         }
+    }
+
+    private func scrollToVerticalOffset(_ offset: CGFloat, animated: Bool) {
+        #if os(macOS)
+            let nativeOffset = max(offset - sectionHeaderHeight, 0)
+            updateVerticalOffset(nativeOffset)
+            horizontalScrollController.scrollTo(
+                verticalOffset: nativeOffset,
+                animated: animated
+            )
+        #else
+            updateVerticalOffset(offset)
+            let maximumHorizontalOffset = max(contentWidth - viewportWidth, 0)
+            let horizontalOffset = min(
+                max(offsetTracker.horizontalOffset, 0),
+                maximumHorizontalOffset
+            )
+            let updateScrollPosition = {
+                if maximumHorizontalOffset > 0 {
+                    scrollPosition.scrollTo(x: horizontalOffset, y: offset)
+                } else {
+                    scrollPosition.scrollTo(y: offset)
+                }
+            }
+            if animated {
+                withAnimation { updateScrollPosition() }
+            } else {
+                updateScrollPosition()
+            }
+        #endif
+    }
+
+    @MainActor
+    private func scrollToCurrentTimeOnInitialDisplay() async {
+        guard !hasScrolledToCurrentTimeOnInitialDisplay else {
+            isInitialScrollReady = true
+            return
+        }
+
+        do {
+            try await Task.sleep(for: .milliseconds(100))
+        } catch {
+            return
+        }
+
+        guard !Task.isCancelled, !hasScrolledToCurrentTimeOnInitialDisplay else { return }
+        hasScrolledToCurrentTimeOnInitialDisplay = true
+        scrollToNow(animated: false)
+        await Task.yield()
+        isInitialScrollReady = true
     }
 
     private func resetHorizontalScrollPosition(proxy: ScrollViewProxy) {
@@ -560,7 +606,8 @@ struct ProgramGuideView: View {
         )
         let anchorViewportY = min(
             max(
-                sectionHeaderHeight + anchoredTimelineY - verticalScrollOffset,
+                sectionHeaderHeight + anchoredTimelineY
+                    - viewportModel.verticalOffset,
                 sectionHeaderHeight
             ),
             viewportHeight
@@ -577,7 +624,8 @@ struct ProgramGuideView: View {
         )
 
         minuteHeight = updatedMinuteHeight
-        verticalScrollOffset = updatedVerticalOffset
+        updateVerticalOffset(updatedVerticalOffset)
+        updateVisibleRange()
 
         let maximumHorizontalOffset = max(contentWidth - viewportWidth, 0)
         let horizontalOffset = min(
@@ -589,6 +637,27 @@ struct ProgramGuideView: View {
         } else {
             scrollPosition = ScrollPosition(y: updatedVerticalOffset)
         }
+    }
+
+    private func updateVerticalOffset(_ offset: CGFloat) {
+        viewportModel.updateVerticalOffset(
+            offset,
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: minuteHeight,
+            viewportHeight: viewportHeight,
+            sectionHeaderHeight: sectionHeaderHeight
+        )
+    }
+
+    private func updateVisibleRange() {
+        viewportModel.updateVisibleRange(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: minuteHeight,
+            viewportHeight: viewportHeight,
+            sectionHeaderHeight: sectionHeaderHeight
+        )
     }
 
     private func updateDisplayChannels() {
@@ -702,6 +771,7 @@ struct ProgramGuideView: View {
     private var timeRuler: some View {
         let markers = timeMarkers()
 
+        // 48行だけなので、拡大縮小後に古い行高を保持するLazy Stackを使わない。
         return VStack(spacing: 0) {
             ForEach(markers, id: \.self) { mark in
                 let isHour = Calendar.current.component(.minute, from: mark) == 0
@@ -826,44 +896,77 @@ struct ProgramGuideView: View {
             groupedPrograms[key, default: []].append(program)
         }
 
-        // 各物理放送局のメインサービス番組を収集（サブチャンネル重複フィルタ用）
-        var mainProgramsByBroadcaster: [String: [Program]] = [:]
+        struct MainServiceGroupKey: Hashable {
+            let networkId: Int
+            let remoteControlKeyId: Int?
+        }
+
+        struct BroadcasterKey: Hashable {
+            let networkId: Int
+            let broadcasterId: Int
+        }
+
+        struct ProgramOverlapKey: Hashable {
+            let startAt: Date
+            let endAt: Date
+            let name: String
+        }
+
+        var mainServiceIDByGroup: [MainServiceGroupKey: Int] = [:]
         for service in sorted {
-            let broadcasterKey =
-                "\(service.networkId)-\(service.remoteControlKeyId ?? service.serviceId)"
-            let serviceKey = "\(service.networkId)-\(service.serviceId)"
-            let isMain =
-                sorted
-                .filter {
-                    $0.networkId == service.networkId
-                        && $0.remoteControlKeyId == service.remoteControlKeyId
-                }
-                .map(\.serviceId).min() == service.serviceId
-            if isMain {
-                mainProgramsByBroadcaster[broadcasterKey] = groupedPrograms[serviceKey]
+            let groupKey = MainServiceGroupKey(
+                networkId: service.networkId,
+                remoteControlKeyId: service.remoteControlKeyId
+            )
+            if let currentMainServiceID = mainServiceIDByGroup[groupKey] {
+                mainServiceIDByGroup[groupKey] = min(
+                    currentMainServiceID, service.serviceId)
+            } else {
+                mainServiceIDByGroup[groupKey] = service.serviceId
             }
+        }
+
+        // 各物理放送局のメインサービス番組を収集（サブチャンネル重複フィルタ用）
+        var mainProgramKeysByBroadcaster: [BroadcasterKey: Set<ProgramOverlapKey>] = [:]
+        for service in sorted {
+            let groupKey = MainServiceGroupKey(
+                networkId: service.networkId,
+                remoteControlKeyId: service.remoteControlKeyId
+            )
+            guard mainServiceIDByGroup[groupKey] == service.serviceId else {
+                continue
+            }
+
+            let broadcasterKey = BroadcasterKey(
+                networkId: service.networkId,
+                broadcasterId: service.remoteControlKeyId ?? service.serviceId
+            )
+            let serviceKey = "\(service.networkId)-\(service.serviceId)"
+            let keys = groupedPrograms[serviceKey, default: []].map {
+                ProgramOverlapKey(startAt: $0.startAt, endAt: $0.endAt, name: $0.name)
+            }
+            mainProgramKeysByBroadcaster[broadcasterKey] = Set(keys)
         }
 
         return sorted.compactMap { service in
             let key = "\(service.networkId)-\(service.serviceId)"
-            let broadcasterKey =
-                "\(service.networkId)-\(service.remoteControlKeyId ?? service.serviceId)"
-            let isMain =
-                sorted
-                .filter {
-                    $0.networkId == service.networkId
-                        && $0.remoteControlKeyId == service.remoteControlKeyId
-                }
-                .map(\.serviceId).min() == service.serviceId
+            let groupKey = MainServiceGroupKey(
+                networkId: service.networkId,
+                remoteControlKeyId: service.remoteControlKeyId
+            )
+            let broadcasterKey = BroadcasterKey(
+                networkId: service.networkId,
+                broadcasterId: service.remoteControlKeyId ?? service.serviceId
+            )
+            let isMain = mainServiceIDByGroup[groupKey] == service.serviceId
 
             var grouped = groupedPrograms[key, default: []]
                 .sorted { $0.startAt != $1.startAt ? $0.startAt < $1.startAt : $0.name < $1.name }
 
-            if !isMain, let mainPrograms = mainProgramsByBroadcaster[broadcasterKey] {
+            if !isMain, let mainProgramKeys = mainProgramKeysByBroadcaster[broadcasterKey] {
                 grouped = grouped.filter { sub in
-                    !mainPrograms.contains {
-                        $0.startAt == sub.startAt && $0.endAt == sub.endAt && $0.name == sub.name
-                    }
+                    !mainProgramKeys.contains(
+                        ProgramOverlapKey(startAt: sub.startAt, endAt: sub.endAt, name: sub.name))
                 }
             }
 
