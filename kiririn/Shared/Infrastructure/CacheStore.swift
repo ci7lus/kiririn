@@ -1069,16 +1069,13 @@ extension CacheStore {
         }
 
         migrator.registerMigration(
-            "program-display-snapshot-current-index-20260801",
-            merging: ["program-display-snapshot-index-20260801"]
-        ) { db, appliedIdentifiers in
-            if !appliedIdentifiers.contains("program-display-snapshot-index-20260801") {
-                try db.create(
-                    index: "index_program_on_serviceId_networkId_startAt_updatedAt",
-                    on: "program",
-                    columns: ["serviceId", "networkId", "startAt", "updatedAt"]
-                )
-            }
+            "program-display-snapshot-current-index-20260801"
+        ) { db in
+            try db.create(
+                index: "index_program_on_serviceId_networkId_startAt_updatedAt",
+                on: "program",
+                columns: ["serviceId", "networkId", "startAt", "updatedAt"]
+            )
 
             let cutoffDate = Date().addingTimeInterval(-24 * 60 * 60)
             try db.execute(
