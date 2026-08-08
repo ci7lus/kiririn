@@ -12,6 +12,7 @@ private let serviceListPerformanceLog = OSLog(
     subsystem: "jp.pronama.kiririn",
     category: "PointsOfInterest"
 )
+private let serviceListRebuildDebounce: Duration = .milliseconds(250)
 
 @Observable
 class ServiceListViewModel {
@@ -125,7 +126,7 @@ struct ServiceListView: View {
             triggerRebuild()
         }
         .onChange(of: manager.serviceListServices) {
-            triggerRebuild()
+            triggerRebuild(after: serviceListRebuildDebounce)
         }
         .sheet(isPresented: $showingFavoriteOrderingSheet) {
             FavoriteServiceOrderingSheet(
@@ -445,20 +446,31 @@ struct ServiceListView: View {
 
     @MainActor
     @discardableResult
-    private func triggerRebuild() -> Task<Void, Never> {
-        triggerRebuild(source: .fetch(at: Date()))
+    private func triggerRebuild(after delay: Duration? = nil) -> Task<Void, Never> {
+        triggerRebuild(source: .fetch(at: Date()), after: delay)
     }
 
     @MainActor
     @discardableResult
-    private func triggerRebuild(source: RebuildSource) -> Task<Void, Never> {
+    private func triggerRebuild(
+        source: RebuildSource,
+        after delay: Duration? = nil
+    ) -> Task<Void, Never> {
         refreshState.rebuildTask?.cancel()
         refreshState.rebuildGeneration += 1
         let generation = refreshState.rebuildGeneration
         if groupedServices.isEmpty {
             isBuildingList = true
         }
-        let task = Task {
+        let task = Task { @MainActor in
+            if let delay {
+                do {
+                    try await Task.sleep(for: delay)
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled else { return }
             await buildGroupedServices(
                 generation: generation,
                 source: source
