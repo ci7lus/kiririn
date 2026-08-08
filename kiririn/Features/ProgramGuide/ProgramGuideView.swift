@@ -20,6 +20,8 @@ struct ProgramGuideView: View {
     @State private var searchQueryResults: [ProgramSearchResult] = []
     @State private var isLoading = false
     @State private var hasAttemptedLoad = false
+    @State private var hasScrolledToCurrentTimeOnInitialDisplay = false
+    @State private var isInitialScrollReady = false
     @State private var channels: [GuideChannel] = []
     @State private var timelineOffsetHours = 0
     @State private var nowLineDate = Date()
@@ -41,6 +43,7 @@ struct ProgramGuideView: View {
     private let channelColumnWidth: CGFloat = 220
     private let timeRulerWidth: CGFloat = 45
     private let sectionHeaderHeight: CGFloat = 52
+    private let currentTimeTopPadding: CGFloat = 32
     private let minimumMinuteHeight: CGFloat = 2.5
     private let maximumMinuteHeight: CGFloat = 9
     private let defaultMinuteHeight: CGFloat = 2.5
@@ -317,10 +320,14 @@ struct ProgramGuideView: View {
                 } action: { _, new in
                     updateVerticalOffset(new)
                 }
+                .task {
+                    await scrollToCurrentTimeOnInitialDisplay()
+                }
                 .onChange(of: horizontalScrollResetToken) { _, _ in
                     resetHorizontalScrollPosition(proxy: proxy)
                 }
                 .background(Color.kiririnSystemBackground)
+                .opacity(isInitialScrollReady ? 1 : 0)
             }
         }
     }
@@ -512,36 +519,67 @@ struct ProgramGuideView: View {
 
     private func scrollToNow(animated: Bool) {
         let now = Date()
-        let maxX = max(contentWidth - viewportWidth, 0)
-        let x = min(max(offsetTracker.horizontalOffset, 0), maxX)
+        let hourStart = Calendar.current.dateInterval(of: .hour, for: now)?.start ?? now
 
-        func updateScrollPosition(toY y: CGFloat) {
-            updateVerticalOffset(y)
-            if maxX > 0 {
-                scrollPosition = ScrollPosition(x: x, y: y)
-            } else {
-                scrollPosition = ScrollPosition(y: y)
-            }
-        }
-
-        if now >= timelineStart && now < timelineEnd {
-            let requestedY =
-                sectionHeaderHeight + yOffset(for: now) - viewportHeight * 0.2
+        if hourStart >= timelineStart && hourStart < timelineEnd {
+            let requestedY = yOffset(for: hourStart) - sectionHeaderHeight - 12
             let maximumY = max(
                 0, sectionHeaderHeight + timelineHeight - viewportHeight)
             let targetY = min(max(0, requestedY), maximumY)
-            if animated {
-                withAnimation { updateScrollPosition(toY: targetY) }
-            } else {
-                updateScrollPosition(toY: targetY)
-            }
+            scrollToVerticalOffset(targetY, animated: animated)
         } else {
-            if animated {
-                withAnimation { updateScrollPosition(toY: 0) }
-            } else {
-                updateScrollPosition(toY: 0)
-            }
+            scrollToVerticalOffset(0, animated: animated)
         }
+    }
+
+    private func scrollToVerticalOffset(_ offset: CGFloat, animated: Bool) {
+        #if os(macOS)
+            let nativeOffset = max(offset - sectionHeaderHeight, 0)
+            updateVerticalOffset(nativeOffset)
+            horizontalScrollController.scrollTo(
+                verticalOffset: nativeOffset,
+                animated: animated
+            )
+        #else
+            updateVerticalOffset(offset)
+            let maximumHorizontalOffset = max(contentWidth - viewportWidth, 0)
+            let horizontalOffset = min(
+                max(offsetTracker.horizontalOffset, 0),
+                maximumHorizontalOffset
+            )
+            let updateScrollPosition = {
+                if maximumHorizontalOffset > 0 {
+                    scrollPosition.scrollTo(x: horizontalOffset, y: offset)
+                } else {
+                    scrollPosition.scrollTo(y: offset)
+                }
+            }
+            if animated {
+                withAnimation { updateScrollPosition() }
+            } else {
+                updateScrollPosition()
+            }
+        #endif
+    }
+
+    @MainActor
+    private func scrollToCurrentTimeOnInitialDisplay() async {
+        guard !hasScrolledToCurrentTimeOnInitialDisplay else {
+            isInitialScrollReady = true
+            return
+        }
+
+        do {
+            try await Task.sleep(for: .milliseconds(100))
+        } catch {
+            return
+        }
+
+        guard !Task.isCancelled, !hasScrolledToCurrentTimeOnInitialDisplay else { return }
+        hasScrolledToCurrentTimeOnInitialDisplay = true
+        scrollToNow(animated: false)
+        await Task.yield()
+        isInitialScrollReady = true
     }
 
     private func resetHorizontalScrollPosition(proxy: ScrollViewProxy) {
