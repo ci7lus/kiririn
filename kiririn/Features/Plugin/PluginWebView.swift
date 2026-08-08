@@ -18,6 +18,8 @@ import WebKit
 
 @MainActor
 struct PluginWebView: PluginWebViewRepresentable {
+    private static let scrubbingStatusNotificationInterval: TimeInterval = 0.5
+
     let pluginDefinition: PluginDefinition
     let extensionRuntime: ExtensionPluginRuntime
     let webViewConfiguration: WKWebViewConfiguration
@@ -622,7 +624,7 @@ struct PluginWebView: PluginWebViewRepresentable {
             guard pendingStatusInjectionTask == nil else { return }
 
             let elapsed = lastStatusInjectionDate.map { Date.now.timeIntervalSince($0) } ?? 0
-            let delay = max(0, 0.5 - elapsed)
+            let delay = max(0, PluginWebView.scrubbingStatusNotificationInterval - elapsed)
             let task = Task { @MainActor [weak self, weak webView] in
                 try? await Task.sleep(for: .seconds(delay))
                 guard !Task.isCancelled else { return }
