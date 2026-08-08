@@ -9,6 +9,7 @@ final class MediaPlaybackCoordinator {
     private let nowPlayingInfoCenter = MPNowPlayingInfoCenter.default()
     private let commandCenter = MPRemoteCommandCenter.shared()
     private var hasConfiguredCommands = false
+    private var observationTask: Task<Void, Never>?
 
     func configure(appModel: AppModel) {
         guard self.appModel == nil else { return }
@@ -29,11 +30,24 @@ final class MediaPlaybackCoordinator {
             _ = playerState.playbackRate
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
-                self?.observePlaybackState()
+                self?.schedulePlaybackObservation()
             }
         }
 
         updateNowPlayingInfo()
+    }
+
+    private func schedulePlaybackObservation() {
+        observationTask?.cancel()
+        observationTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(50))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            self?.observePlaybackState()
+        }
     }
 
     private func configureRemoteCommands() {
