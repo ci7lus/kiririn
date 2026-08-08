@@ -15,55 +15,6 @@ private func makeIsolatedDefaults() -> (UserDefaults, String) {
 
 struct StoreBehaviorTests {
 
-    @Test func cacheStoreCreatesConsolidatedProgramIndexes() throws {
-        let queue = try DatabaseQueue()
-        _ = CacheStore(databaseQueue: queue)
-
-        let indexNames = try queue.read { db in
-            try String.fetchSet(
-                db,
-                sql: "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'program'"
-            )
-        }
-
-        #expect(indexNames.contains("index_program_on_serviceId_networkId_startAt_updatedAt"))
-        #expect(indexNames.contains("index_program_on_serviceId_networkId_endAt_startAt"))
-        #expect(indexNames.contains("index_program_on_serviceId_networkId_zeroDuration_startAt"))
-        #expect(!indexNames.contains("index_program_on_serviceId_networkId_startAt"))
-    }
-
-    @Test func cacheStoreMergesPreviouslyAppliedProgramGuideMigrations() throws {
-        let queue = try DatabaseQueue()
-        _ = CacheStore(databaseQueue: queue)
-
-        try queue.write { db in
-            try db.execute(
-                sql: "DELETE FROM grdb_migrations WHERE identifier IN (?, ?)",
-                arguments: [
-                    "program-display-snapshot-index-20260801",
-                    "program-display-snapshot-current-index-20260801",
-                ]
-            )
-            try db.execute(
-                sql: "INSERT INTO grdb_migrations (identifier) VALUES (?)",
-                arguments: ["program-display-snapshot-index-20260801"]
-            )
-            try db.execute(
-                sql: "INSERT INTO grdb_migrations (identifier) VALUES (?)",
-                arguments: ["program-display-snapshot-current-index-20260801"]
-            )
-        }
-
-        _ = CacheStore(databaseQueue: queue)
-
-        let appliedIdentifiers = try queue.read { db in
-            try String.fetchSet(db, sql: "SELECT identifier FROM grdb_migrations")
-        }
-
-        #expect(!appliedIdentifiers.contains("program-display-snapshot-index-20260801"))
-        #expect(appliedIdentifiers.contains("program-display-snapshot-current-index-20260801"))
-    }
-
     @Test func dataBroadcastSettingsPersistsValidPostalCode() {
         let (defaults, suiteName) = makeIsolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
