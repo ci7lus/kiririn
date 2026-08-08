@@ -278,6 +278,10 @@ struct KiririnTests {
             minuteHeight: 1,
             width: 200,
             totalHeight: 300,
+            visibleRange: ProgramGuideVisibleRange(
+                start: timelineStart,
+                end: timelineEnd
+            ),
             onProgramTapped: { _ in }
         )
         let second = ProgramChannelColumnView(
@@ -288,9 +292,86 @@ struct KiririnTests {
             minuteHeight: 1,
             width: 200,
             totalHeight: 300,
+            visibleRange: ProgramGuideVisibleRange(
+                start: timelineStart,
+                end: timelineEnd
+            ),
             onProgramTapped: { _ in }
         )
 
         #expect(first != second)
+    }
+
+    @Test func programGuideVisibleRangeUsesBufferedQuantizedWindow() {
+        let timelineStart = Date(timeIntervalSince1970: 0)
+        let timelineEnd = timelineStart.addingTimeInterval(24 * 60 * 60)
+
+        let range = ProgramGuideVisibleRange.make(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: 52 + 300 * 2.5,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+
+        #expect(range.start == timelineStart.addingTimeInterval(90 * 60))
+        #expect(range.end == timelineStart.addingTimeInterval(720 * 60))
+    }
+
+    @Test func programGuideVisibleRangeClampsToTimelineBounds() {
+        let timelineStart = Date(timeIntervalSince1970: 0)
+        let timelineEnd = timelineStart.addingTimeInterval(24 * 60 * 60)
+
+        let topRange = ProgramGuideVisibleRange.make(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: 0,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+        let bottomRange = ProgramGuideVisibleRange.make(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: 10_000,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+
+        #expect(topRange.start == timelineStart)
+        #expect(bottomRange.end == timelineEnd)
+    }
+
+    @Test func programGuideVisibleRangeTestsProgramIntersection() {
+        let timelineStart = Date(timeIntervalSince1970: 0)
+        let timelineEnd = timelineStart.addingTimeInterval(24 * 60 * 60)
+        let range = ProgramGuideVisibleRange(
+            start: timelineStart.addingTimeInterval(60 * 60),
+            end: timelineStart.addingTimeInterval(120 * 60)
+        )
+
+        #expect(
+            range.intersects(
+                programStart: timelineStart.addingTimeInterval(90 * 60),
+                programEnd: timelineStart.addingTimeInterval(150 * 60),
+                timelineEnd: timelineEnd
+            )
+        )
+        #expect(
+            !range.intersects(
+                programStart: timelineStart.addingTimeInterval(120 * 60),
+                programEnd: timelineStart.addingTimeInterval(150 * 60),
+                timelineEnd: timelineEnd
+            )
+        )
+        #expect(
+            range.intersects(
+                programStart: timelineStart.addingTimeInterval(90 * 60),
+                programEnd: timelineStart.addingTimeInterval(90 * 60),
+                timelineEnd: timelineEnd
+            )
+        )
     }
 }

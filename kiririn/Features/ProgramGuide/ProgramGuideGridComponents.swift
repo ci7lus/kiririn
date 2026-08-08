@@ -4,6 +4,10 @@ final class HorizontalOffsetTracker {
     var horizontalOffset: CGFloat = 0
 }
 
+final class VerticalOffsetTracker {
+    var verticalOffset: CGFloat = 0
+}
+
 struct ProgramChannelColumnView: View, Equatable {
     let channelId: String
     let programs: [Program]
@@ -12,12 +16,14 @@ struct ProgramChannelColumnView: View, Equatable {
     let minuteHeight: CGFloat
     let width: CGFloat
     let totalHeight: CGFloat
+    let visibleRange: ProgramGuideVisibleRange
     let onProgramTapped: (Program) -> Void
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.channelId == rhs.channelId && lhs.timelineStart == rhs.timelineStart
             && lhs.timelineEnd == rhs.timelineEnd && lhs.minuteHeight == rhs.minuteHeight
             && lhs.width == rhs.width && lhs.totalHeight == rhs.totalHeight
+            && lhs.visibleRange == rhs.visibleRange
             && lhs.programs == rhs.programs
     }
 
@@ -28,6 +34,17 @@ struct ProgramChannelColumnView: View, Equatable {
     private var timeMarkerOffsets: [CGFloat] {
         let count = Int((timelineEnd.timeIntervalSince(timelineStart) / 60) / 30)
         return (0...count).map { CGFloat($0 * 30) * minuteHeight }
+    }
+
+    private var visibleProgramIndices: [Int] {
+        programs.indices.filter { index in
+            let program = programs[index]
+            return visibleRange.intersects(
+                programStart: program.startAt,
+                programEnd: program.endAt,
+                timelineEnd: timelineEnd
+            )
+        }
     }
 
     var body: some View {
@@ -50,9 +67,9 @@ struct ProgramChannelColumnView: View, Equatable {
             }
             .allowsHitTesting(false)
 
-            ForEach(Array(programs.enumerated()), id: \.offset) { _, program in
+            ForEach(visibleProgramIndices, id: \.self) { index in
                 ProgramCellWrapper(
-                    program: program,
+                    program: programs[index],
                     timelineStart: timelineStart,
                     timelineEnd: timelineEnd,
                     width: width,
@@ -63,7 +80,6 @@ struct ProgramChannelColumnView: View, Equatable {
         }
         .frame(width: width, height: totalHeight)
         .clipped()
-        .drawingGroup()
         .onTapGesture(coordinateSpace: .local) { location in
             let tappedY = location.y
             if let program = programs.first(where: { program in

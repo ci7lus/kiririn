@@ -27,7 +27,8 @@ struct ProgramGuideView: View {
     @State private var scrollPosition = ScrollPosition()
     @State private var viewportHeight: CGFloat = 600
     @State private var viewportWidth: CGFloat = 0
-    @State private var verticalScrollOffset: CGFloat = 0
+    @State private var verticalOffsetTracker = VerticalOffsetTracker()
+    @State private var visibleRange: ProgramGuideVisibleRange
     @State private var minuteHeight: CGFloat
     @State private var offsetTracker = HorizontalOffsetTracker()
     @State private var horizontalScrollResetToken = 0
@@ -67,10 +68,10 @@ struct ProgramGuideView: View {
     }
 
     private var anchorTime: Date {
-        anchorTime(for: nowLineDate)
+        Self.anchorTime(for: nowLineDate)
     }
 
-    private func anchorTime(for referenceDate: Date) -> Date {
+    private static func anchorTime(for referenceDate: Date) -> Date {
         let calendar = Calendar.current
         var components = calendar.dateComponents([.year, .month, .day, .hour], from: referenceDate)
         if let hour = components.hour, hour < 4 {
@@ -116,6 +117,23 @@ struct ProgramGuideView: View {
         self.manager = manager
         self._playerState = State(initialValue: playerState)
         self._minuteHeight = State(initialValue: defaultMinuteHeight)
+        let initialTimelineStart = Self.anchorTime(for: Date())
+        let initialTimelineEnd =
+            Calendar.current.date(
+                byAdding: .hour,
+                value: timelineHours,
+                to: initialTimelineStart
+            ) ?? initialTimelineStart
+        self._visibleRange = State(
+            initialValue: ProgramGuideVisibleRange.make(
+                timelineStart: initialTimelineStart,
+                timelineEnd: initialTimelineEnd,
+                minuteHeight: defaultMinuteHeight,
+                verticalScrollOffset: 0,
+                viewportHeight: 600,
+                sectionHeaderHeight: sectionHeaderHeight
+            )
+        )
     }
 
     var body: some View {
@@ -133,7 +151,8 @@ struct ProgramGuideView: View {
                 .onAppear {
                     let currentDate = Date()
                     nowLineDate = currentDate
-                    lastAnchorTime = anchorTime(for: currentDate)
+                    lastAnchorTime = Self.anchorTime(for: currentDate)
+                    updateVisibleRange()
                     if manager.hasFavoriteServices {
                         selectedBroadcastType = favoriteBroadcastType
                     }
@@ -167,6 +186,7 @@ struct ProgramGuideView: View {
                     }
                 }
                 .onChange(of: timelineOffsetHours) { _, _ in
+                    updateVisibleRange()
                     Task {
                         await reloadPrograms()
                         updateDisplayChannels()
@@ -194,7 +214,8 @@ struct ProgramGuideView: View {
                 guard minuteHeight != defaultMinuteHeight else { return }
                 let previousTimelineHeight = CGFloat(timelineHours * 60) * minuteHeight
                 let visibleContentY =
-                    verticalScrollOffset + (viewportHeight - sectionHeaderHeight) / 2
+                    verticalOffsetTracker.verticalOffset
+                    + (viewportHeight - sectionHeaderHeight) / 2
                 let anchorY = min(max(visibleContentY / previousTimelineHeight, 0), 1)
                 let factor = defaultMinuteHeight / minuteHeight
                 scaleTimeline(by: factor, around: UnitPoint(x: 0.5, y: anchorY))
@@ -283,6 +304,7 @@ struct ProgramGuideView: View {
                     geo.containerSize.height
                 } action: { _, new in
                     viewportHeight = new
+                    updateVisibleRange()
                 }
                 .onScrollGeometryChange(for: CGFloat.self) { geo in
                     geo.contentOffset.x
@@ -292,7 +314,7 @@ struct ProgramGuideView: View {
                 .onScrollGeometryChange(for: CGFloat.self) { geo in
                     geo.contentOffset.y
                 } action: { _, new in
-                    verticalScrollOffset = new
+                    updateVerticalOffset(new)
                 }
                 .onChange(of: horizontalScrollResetToken) { _, _ in
                     resetHorizontalScrollPosition(proxy: proxy)
@@ -358,6 +380,7 @@ struct ProgramGuideView: View {
                             minuteHeight: minuteHeight,
                             width: channelColumnWidth,
                             totalHeight: timelineHeight,
+                            visibleRange: visibleRange,
                             onProgramTapped: { program in
                                 selectedProgram = ProgramSelection(
                                     program: program, service: channel.service)
@@ -489,9 +512,10 @@ struct ProgramGuideView: View {
     private func refreshCurrentTime(at date: Date = Date()) async {
         nowLineDate = date
 
-        let currentAnchorTime = anchorTime(for: date)
+        let currentAnchorTime = Self.anchorTime(for: date)
         if let lastAnchorTime, currentAnchorTime != lastAnchorTime {
             self.lastAnchorTime = currentAnchorTime
+            updateVisibleRange()
             await reloadPrograms()
             updateDisplayChannels()
         } else if lastAnchorTime == nil {
@@ -509,6 +533,7 @@ struct ProgramGuideView: View {
         let x = min(max(offsetTracker.horizontalOffset, 0), maxX)
 
         func updateScrollPosition(toY y: CGFloat) {
+            updateVerticalOffset(y)
             if maxX > 0 {
                 scrollPosition = ScrollPosition(x: x, y: y)
             } else {
@@ -560,7 +585,8 @@ struct ProgramGuideView: View {
         )
         let anchorViewportY = min(
             max(
-                sectionHeaderHeight + anchoredTimelineY - verticalScrollOffset,
+                sectionHeaderHeight + anchoredTimelineY
+                    - verticalOffsetTracker.verticalOffset,
                 sectionHeaderHeight
             ),
             viewportHeight
@@ -577,7 +603,7 @@ struct ProgramGuideView: View {
         )
 
         minuteHeight = updatedMinuteHeight
-        verticalScrollOffset = updatedVerticalOffset
+        updateVerticalOffset(updatedVerticalOffset)
 
         let maximumHorizontalOffset = max(contentWidth - viewportWidth, 0)
         let horizontalOffset = min(
@@ -589,6 +615,25 @@ struct ProgramGuideView: View {
         } else {
             scrollPosition = ScrollPosition(y: updatedVerticalOffset)
         }
+    }
+
+    private func updateVerticalOffset(_ offset: CGFloat) {
+        verticalOffsetTracker.verticalOffset = offset
+        updateVisibleRange()
+    }
+
+    private func updateVisibleRange() {
+        guard viewportHeight > sectionHeaderHeight else { return }
+        let updatedRange = ProgramGuideVisibleRange.make(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: minuteHeight,
+            verticalScrollOffset: verticalOffsetTracker.verticalOffset,
+            viewportHeight: viewportHeight,
+            sectionHeaderHeight: sectionHeaderHeight
+        )
+        guard updatedRange != visibleRange else { return }
+        visibleRange = updatedRange
     }
 
     private func updateDisplayChannels() {
