@@ -588,80 +588,52 @@ class CacheStore {
                     WITH requested(serviceId, networkId) AS MATERIALIZED (
                         VALUES \(requestedValues)
                     ),
-                    current_start AS MATERIALIZED (
-                        SELECT s.serviceId, s.networkId,
-                               (
-                                   SELECT MIN(candidateStart)
-                                   FROM (
-                                       SELECT MIN(p.startAt) AS candidateStart
-                                       FROM program p INDEXED BY index_program_on_serviceId_networkId_endAt_startAt
-                                       WHERE p.serviceId = s.serviceId
-                                         AND p.networkId = s.networkId
-                                         AND p.startAt < :now
-                                         AND p.endAt > :now
-                                       UNION ALL
-                                       SELECT MIN(p.startAt) AS candidateStart
-                                       FROM program p INDEXED BY index_program_on_serviceId_networkId_zeroDuration_startAt
-                                       WHERE p.serviceId = s.serviceId
-                                         AND p.networkId = s.networkId
-                                         AND p.startAt < :now
-                                         AND p.duration = 0
-                                   )
-                               ) AS startAt
-                        FROM requested s
-                    ),
-                    current_program AS (
-                        SELECT p.*
-                        FROM program p
-                        INNER JOIN current_start s
-                            ON p.serviceId = s.serviceId
-                           AND p.networkId = s.networkId
-                           AND p.startAt = s.startAt
-                        WHERE p.rowid = (
+                    selected(rowid) AS MATERIALIZED (
+                        SELECT (
                             SELECT latest.rowid
                             FROM program latest
                             WHERE latest.serviceId = s.serviceId
                               AND latest.networkId = s.networkId
-                              AND latest.startAt = s.startAt
+                              AND latest.startAt = (
+                                  SELECT MIN(candidateStart)
+                                  FROM (
+                                      SELECT MIN(p.startAt) AS candidateStart
+                                      FROM program p INDEXED BY index_program_on_serviceId_networkId_endAt_startAt
+                                      WHERE p.serviceId = s.serviceId
+                                        AND p.networkId = s.networkId
+                                        AND p.startAt < :now
+                                        AND p.endAt > :now
+                                      UNION ALL
+                                      SELECT MIN(p.startAt) AS candidateStart
+                                      FROM program p INDEXED BY index_program_on_serviceId_networkId_zeroDuration_startAt
+                                      WHERE p.serviceId = s.serviceId
+                                        AND p.networkId = s.networkId
+                                        AND p.startAt < :now
+                                        AND p.duration = 0
+                                  )
+                              )
                               AND latest.startAt < :now
                               AND (latest.endAt > :now OR latest.duration = 0)
-                            ORDER BY latest.updatedAt DESC
+                            ORDER BY latest.updatedAt DESC, latest.rowid DESC
                             LIMIT 1
                         )
-                    ),
-                    next_start AS MATERIALIZED (
-                        SELECT s.serviceId, s.networkId,
-                               (
-                                   SELECT p.startAt
-                                   FROM program p
-                                   WHERE p.serviceId = s.serviceId
-                                     AND p.networkId = s.networkId
-                                     AND p.startAt >= :now
-                                   ORDER BY p.startAt ASC
-                                   LIMIT 1
-                               ) AS startAt
                         FROM requested s
-                    ),
-                    next_program AS (
-                        SELECT p.*
-                        FROM program p
-                        INNER JOIN next_start s
-                            ON p.serviceId = s.serviceId
-                           AND p.networkId = s.networkId
-                           AND p.startAt = s.startAt
-                        WHERE p.rowid = (
-                            SELECT latest.rowid
-                            FROM program latest
-                            WHERE latest.serviceId = s.serviceId
-                              AND latest.networkId = s.networkId
-                              AND latest.startAt = s.startAt
-                            ORDER BY latest.updatedAt DESC
+                        UNION ALL
+                        SELECT (
+                            SELECT p.rowid
+                            FROM program p
+                            WHERE p.serviceId = s.serviceId
+                              AND p.networkId = s.networkId
+                              AND p.startAt >= :now
+                            ORDER BY p.startAt ASC, p.updatedAt DESC, p.rowid DESC
                             LIMIT 1
                         )
+                        FROM requested s
                     )
-                    SELECT * FROM current_program
-                    UNION ALL
-                    SELECT * FROM next_program
+                    SELECT p.*
+                    FROM selected s
+                    INNER JOIN program p ON p.rowid = s.rowid
+                    WHERE s.rowid IS NOT NULL
                     """
                 return try Program.fetchAll(
                     db, sql: sql, arguments: statementArguments)
