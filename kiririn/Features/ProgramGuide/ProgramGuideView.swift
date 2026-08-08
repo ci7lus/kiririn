@@ -733,7 +733,8 @@ struct ProgramGuideView: View {
     private var timeRuler: some View {
         let markers = timeMarkers()
 
-        return LazyVStack(spacing: 0) {
+        // 48行だけなので、拡大縮小後に古い行高を保持するLazy Stackを使わない。
+        return VStack(spacing: 0) {
             ForEach(markers, id: \.self) { mark in
                 let isHour = Calendar.current.component(.minute, from: mark) == 0
 
