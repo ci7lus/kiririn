@@ -88,7 +88,7 @@ struct PluginOverlayView: View {
 
     var body: some View {
         // アクティブな全プレイヤーの状態を追跡するハッシュを生成し、これを元に再描画と同期をトリガーさせる。
-        // 再生位置(time)は頻繁すぎるため除外するが、番組変更や再生/停止、シーク可否、映像表示領域の変化は網羅する。
+        // 通常の再生時間・再生位置は除外し、再生状態、シークバー操作、再生対象、映像表示領域の変化を追跡する。
         let stateHash =
             appModel.activePlayerStates.map {
                 let stageRect = $0.dataBroadcastSession?.stageRect
@@ -97,6 +97,8 @@ struct PluginOverlayView: View {
                     $0.id,
                     $0.currentPlayable?.id ?? "none",
                     String($0.playbackStatus.isPlaying),
+                    String($0.isScrubbing),
+                    String($0.scrubPosition ?? -1),
                     String($0.currentPlayable?.isSeekable ?? false),
                     String($0.bmlContentVisible),
                     String(describing: stageRect),

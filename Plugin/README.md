@@ -1,4 +1,6 @@
-# kiririn プラグイン仕様
+# kiririn v0.3.0 プラグイン仕様
+
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 
 kiririnのプラグインは、WebKitのWebExtensionを基盤にしています。プラグイン固有の機能は`window.kiririn`で提供し、それ以外はWebKitが実装するWebExtension APIを利用します。
 
@@ -346,6 +348,8 @@ interface PlayerPlaybackState {
   isPlaying: boolean;
   time: number;
   position: number;
+  isScrubbing: boolean;
+  scrubPosition: number | null;
   rate: number;
   televisionDisplayRect: PlayerDisplayRect;
   videoDisplayRect: PlayerDisplayRect;
@@ -361,6 +365,8 @@ interface PlayerDisplayRect {
 
 - `time`: 現在時刻の秒数です。
 - `position`: 0〜1の正規化された再生位置です。MPEG-TSなどでバイト位置が利用できる場合は、その正規化値が優先されます。
+- `isScrubbing`: ネイティブのシークバーをドラッグ中かどうかです。
+- `scrubPosition`: ドラッグ中のシークバー位置です。0〜1の値を取り、ドラッグ中以外は`null`です。シークバーの表示位置を表すため、MPEG-TSなどでは`position`と一致しない場合があります。
 - `rate`: 再生速度です。
 - `televisionDisplayRect`: プレイヤー表示領域内で、テレビ画面またはデータ放送コンテンツが占める矩形です。
 - `videoDisplayRect`: プレイヤー表示領域内で、映像が実際に表示されている矩形です。
@@ -399,6 +405,8 @@ getPlayerStatus(playerID: string): PlayerPlaybackState | null;
 `getFocusedPlayerID()`はアプリ全体でフォーカスされているプレイヤーを返します。フォーカス対象が閉じられた場合、`onFocusedPlayerIDChange`には`null`が渡され、その後`onPlayerClosed`が呼ばれます。
 
 `getPlayable`と`getPlayerStatus`は対象がなければ`null`を返します。再生状態は頻繁に変わるため、必要な値だけUIへ反映してください。
+
+シークバーのドラッグ開始・終了はすぐに通知します。ドラッグ中の位置更新は、Bridge負荷を抑えるため最大500msに1回です。
 
 ### 再生操作
 
@@ -440,7 +448,7 @@ interface KiririnRuntimeInfo {
 const runtime = window.kiririn.getRuntimeInfo();
 ```
 
-現在の`bridgeVersion`は`5`です。Bridgeの互換性を判定するときは、この値と`appVersion`を確認してください。
+現在の`bridgeVersion`は`6`です。Bridgeの互換性を判定するときは、この値と`appVersion`を確認してください。
 
 `osVersion`は`ProcessInfo.processInfo.operatingSystemVersionString`、`appVersion`は`CFBundleShortVersionString`、`buildVersion`は`CFBundleVersion`です。`bundleIdentifier`や`appVersion`は取得できない環境では`null`になります。
 

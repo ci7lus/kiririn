@@ -24,8 +24,6 @@
         @State private var isPointerOverBottomController = false
         @State private var titleControllerFrame = CGRect.zero
         @State private var isPlayerFullscreen = false
-        @State private var isSeeking = false
-        @State private var seekValue: Double = 0
         @State private var isCursorHidden = false
         @State private var seekFeedbackText = ""
         @State private var isSeekFeedbackVisible = false
@@ -51,11 +49,13 @@
 
         private var displayDuration: Double { playerState.currentPlayable?.length ?? 0 }
         private var displayProgress: Double {
-            if isSeeking { return seekValue }
+            if let scrubPosition = playerState.scrubPosition { return Double(scrubPosition) }
             return Double(playerState.playbackStatus.position)
         }
         private var displayTime: Double {
-            if isSeeking, displayDuration > 0 { return displayDuration * seekValue }
+            if let scrubPosition = playerState.scrubPosition, displayDuration > 0 {
+                return displayDuration * Double(scrubPosition)
+            }
             return playerState.playbackStatus.time
         }
 
@@ -364,14 +364,14 @@
                             value: Binding(
                                 get: { displayProgress },
                                 set: { newValue in
-                                    seekValue = newValue
+                                    playerState.updateScrubbing(to: Float(newValue))
                                 }
                             ),
                             range: 0...1,
                             scale: scale,
                             onEditingChanged: { editing in
                                 if editing {
-                                    isSeeking = true
+                                    playerState.beginScrubbing(at: Float(displayProgress))
                                 } else {
                                     finishSeek()
                                 }
@@ -934,14 +934,14 @@
         }
 
         private func finishSeek() {
-            if isSeeking {
+            if playerState.isScrubbing, let seekValue = playerState.scrubPosition {
                 if displayDuration > 0 {
                     playerState.seek(toTime: displayTime)
                 } else {
-                    playerState.seek(to: Float(seekValue))
+                    playerState.seek(to: seekValue)
                 }
             }
-            isSeeking = false
+            _ = playerState.endScrubbing()
         }
 
         private func showVolumeFeedback() {
