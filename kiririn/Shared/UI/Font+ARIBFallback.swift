@@ -36,7 +36,7 @@ extension Font {
         return descriptors.first
     }()
 
-    static func systemWithARIBFallback(
+    @MainActor static func systemWithARIBFallback(
         _ style: Font.TextStyle,
         weight: Font.Weight = .regular
     ) -> Font {
@@ -44,14 +44,17 @@ extension Font {
         return cachedARIBFont(size: preferredFont.pointSize, weight: weight)
     }
 
-    static func systemWithARIBFallback(
+    @MainActor static func systemWithARIBFallback(
         size: CGFloat,
         weight: Font.Weight = .regular
     ) -> Font {
         cachedARIBFont(size: size, weight: weight)
     }
 
-    private static func cachedARIBFont(size: CGFloat, weight: Font.Weight) -> Font {
+    @MainActor private static func cachedARIBFont(
+        size: CGFloat,
+        weight: Font.Weight
+    ) -> Font {
         let platformWeight = platformFontWeight(for: weight)
         let key = ARIBFontCacheKey(size: size, weight: platformWeight.rawValue)
         if let cachedFont = aribFontCache[key] {

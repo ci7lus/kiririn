@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 nonisolated struct ProgramGuideVisibleRange: Equatable, Sendable {

@@ -39,13 +39,15 @@ struct ProgramChannelColumnView: View, Equatable {
     }
 
     var body: some View {
+        let renderedProgramIndices = visibleProgramIndices
+
         ZStack(alignment: .topLeading) {
             // 絶対Y座標で配置する番組セルの原点を列の左上に固定する。
             Color.clear
                 .frame(width: width, height: totalHeight)
                 .allowsHitTesting(false)
 
-            ForEach(visibleProgramIndices, id: \.self) { index in
+            ForEach(renderedProgramIndices, id: \.self) { index in
                 ProgramCellWrapper(
                     program: programs[index],
                     timelineStart: timelineStart,
@@ -67,14 +69,15 @@ struct ProgramChannelColumnView: View, Equatable {
         }
         .onTapGesture(coordinateSpace: .local) { location in
             let tappedY = location.y
-            if let program = programs.first(where: { program in
+            if let index = renderedProgramIndices.first(where: { index in
+                let program = programs[index]
                 let start = max(program.startAt, timelineStart)
                 let rawEnd = program.endAt > program.startAt ? program.endAt : timelineEnd
                 let end = min(rawEnd, timelineEnd)
                 guard end > start else { return false }
                 return tappedY >= yOffset(for: start) && tappedY < yOffset(for: end)
             }) {
-                onProgramTapped(program)
+                onProgramTapped(programs[index])
             }
         }
     }
