@@ -28,6 +28,8 @@ final class AppModel {
     let playerState: PlayerState
     let pluginStore: PluginStore
     let remoteControlService: RemoteControlService
+    @ObservationIgnored
+    private let mediaPlaybackCoordinator: MediaPlaybackCoordinator
     private(set) var cacheStore: CacheStore?
 
     var activePlayerStates: [PlayerState] = []
@@ -77,6 +79,7 @@ final class AppModel {
         focusedPlayerID = playerState.id
         pluginStore = PluginStore()
         remoteControlService = RemoteControlService()
+        mediaPlaybackCoordinator = MediaPlaybackCoordinator()
         pluginStore.onLocalFolderManifestChanged = { [weak self] pluginID in
             guard let self else { return }
             self.syncPluginsToPlayer()
@@ -84,6 +87,7 @@ final class AppModel {
         }
         playerState.plugins = pluginStore.plugins
         remoteControlService.configure(appModel: self)
+        mediaPlaybackCoordinator.configure(appModel: self)
     }
 
     func setupIfNeeded() {
