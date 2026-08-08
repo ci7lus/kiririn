@@ -27,8 +27,7 @@ struct ProgramGuideView: View {
     @State private var scrollPosition = ScrollPosition()
     @State private var viewportHeight: CGFloat = 600
     @State private var viewportWidth: CGFloat = 0
-    @State private var verticalOffsetTracker = VerticalOffsetTracker()
-    @State private var visibleRange: ProgramGuideVisibleRange
+    @State private var viewportModel: ProgramGuideViewportModel
     @State private var minuteHeight: CGFloat
     @State private var offsetTracker = HorizontalOffsetTracker()
     @State private var horizontalScrollResetToken = 0
@@ -124,14 +123,16 @@ struct ProgramGuideView: View {
                 value: timelineHours,
                 to: initialTimelineStart
             ) ?? initialTimelineStart
-        self._visibleRange = State(
-            initialValue: ProgramGuideVisibleRange.make(
-                timelineStart: initialTimelineStart,
-                timelineEnd: initialTimelineEnd,
-                minuteHeight: defaultMinuteHeight,
-                verticalScrollOffset: 0,
-                viewportHeight: 600,
-                sectionHeaderHeight: sectionHeaderHeight
+        self._viewportModel = State(
+            initialValue: ProgramGuideViewportModel(
+                visibleRange: ProgramGuideVisibleRange.make(
+                    timelineStart: initialTimelineStart,
+                    timelineEnd: initialTimelineEnd,
+                    minuteHeight: defaultMinuteHeight,
+                    verticalScrollOffset: 0,
+                    viewportHeight: 600,
+                    sectionHeaderHeight: sectionHeaderHeight
+                )
             )
         )
     }
@@ -214,7 +215,7 @@ struct ProgramGuideView: View {
                 guard minuteHeight != defaultMinuteHeight else { return }
                 let previousTimelineHeight = CGFloat(timelineHours * 60) * minuteHeight
                 let visibleContentY =
-                    verticalOffsetTracker.verticalOffset
+                    viewportModel.verticalOffset
                     + (viewportHeight - sectionHeaderHeight) / 2
                 let anchorY = min(max(visibleContentY / previousTimelineHeight, 0), 1)
                 let factor = defaultMinuteHeight / minuteHeight
@@ -344,7 +345,7 @@ struct ProgramGuideView: View {
                 }
                 .zIndex(3000)
 
-            HStack(spacing: 0) {
+            LazyHStack(spacing: 0) {
                 ForEach(displayChannels) { channel in
                     serviceHeaderCell(for: channel.service)
                         .id(channel.id)
@@ -369,37 +370,19 @@ struct ProgramGuideView: View {
                 }
                 .zIndex(1500)
 
-            ZStack(alignment: .topLeading) {
-                LazyHStack(alignment: .top, spacing: 0) {
-                    ForEach(displayChannels) { channel in
-                        ProgramChannelColumnView(
-                            channelId: channel.id,
-                            programs: channel.programs,
-                            timelineStart: timelineStart,
-                            timelineEnd: timelineEnd,
-                            minuteHeight: minuteHeight,
-                            width: channelColumnWidth,
-                            totalHeight: timelineHeight,
-                            visibleRange: visibleRange,
-                            onProgramTapped: { program in
-                                selectedProgram = ProgramSelection(
-                                    program: program, service: channel.service)
-                            }
-                        )
-                        .equatable()
-                        .id(channel.id)
-                    }
-                }
-                if nowLineYOffset >= 0 && nowLineYOffset < timelineHeight {
-                    Rectangle()
-                        .fill(Color.accentColor)
-                        .opacity(timelineOffsetHours == 0 ? 1.0 : 0.5)
-                        .frame(width: max(viewportWidth, contentWidth) - timeRulerWidth, height: 3)
-                        .offset(y: nowLineYOffset - 1.5)
-                        .allowsHitTesting(false)
-                        .zIndex(1800)
-                }
-            }
+            ProgramGuideChannelGridView(
+                channels: displayChannels,
+                timelineStart: timelineStart,
+                timelineEnd: timelineEnd,
+                minuteHeight: minuteHeight,
+                channelColumnWidth: channelColumnWidth,
+                timelineHeight: timelineHeight,
+                nowLineYOffset: nowLineYOffset,
+                nowLineOpacity: timelineOffsetHours == 0 ? 1.0 : 0.5,
+                nowLineWidth: max(viewportWidth, contentWidth) - timeRulerWidth,
+                viewportModel: viewportModel,
+                selectedProgram: $selectedProgram
+            )
         }
     }
 
@@ -586,7 +569,7 @@ struct ProgramGuideView: View {
         let anchorViewportY = min(
             max(
                 sectionHeaderHeight + anchoredTimelineY
-                    - verticalOffsetTracker.verticalOffset,
+                    - viewportModel.verticalOffset,
                 sectionHeaderHeight
             ),
             viewportHeight
@@ -604,6 +587,7 @@ struct ProgramGuideView: View {
 
         minuteHeight = updatedMinuteHeight
         updateVerticalOffset(updatedVerticalOffset)
+        updateVisibleRange()
 
         let maximumHorizontalOffset = max(contentWidth - viewportWidth, 0)
         let horizontalOffset = min(
@@ -618,22 +602,24 @@ struct ProgramGuideView: View {
     }
 
     private func updateVerticalOffset(_ offset: CGFloat) {
-        verticalOffsetTracker.verticalOffset = offset
-        updateVisibleRange()
-    }
-
-    private func updateVisibleRange() {
-        guard viewportHeight > sectionHeaderHeight else { return }
-        let updatedRange = ProgramGuideVisibleRange.make(
+        viewportModel.updateVerticalOffset(
+            offset,
             timelineStart: timelineStart,
             timelineEnd: timelineEnd,
             minuteHeight: minuteHeight,
-            verticalScrollOffset: verticalOffsetTracker.verticalOffset,
             viewportHeight: viewportHeight,
             sectionHeaderHeight: sectionHeaderHeight
         )
-        guard updatedRange != visibleRange else { return }
-        visibleRange = updatedRange
+    }
+
+    private func updateVisibleRange() {
+        viewportModel.updateVisibleRange(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: minuteHeight,
+            viewportHeight: viewportHeight,
+            sectionHeaderHeight: sectionHeaderHeight
+        )
     }
 
     private func updateDisplayChannels() {
@@ -747,7 +733,7 @@ struct ProgramGuideView: View {
     private var timeRuler: some View {
         let markers = timeMarkers()
 
-        return VStack(spacing: 0) {
+        return LazyVStack(spacing: 0) {
             ForEach(markers, id: \.self) { mark in
                 let isHour = Calendar.current.component(.minute, from: mark) == 0
 

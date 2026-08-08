@@ -19,14 +19,16 @@ private struct PlaybackServerSelectionDialogModifier: ViewModifier {
             ),
             titleVisibility: .visible
         ) {
-            let candidates =
-                showsOnlyConnectedCandidates
-                ? manager.connectedPlaybackCandidates(for: service)
-                : manager.playbackCandidates(for: service)
-            ForEach(candidates, id: \.serverId) { candidate in
-                Button(manager.serverFullDisplayName(candidate.serverId)) {
-                    selectedService = nil
-                    onSelect(candidate)
+            if selectedService?.id == service.id {
+                let candidates =
+                    showsOnlyConnectedCandidates
+                    ? manager.connectedPlaybackCandidates(for: service)
+                    : manager.playbackCandidates(for: service)
+                ForEach(candidates, id: \.serverId) { candidate in
+                    Button(manager.serverFullDisplayName(candidate.serverId)) {
+                        selectedService = nil
+                        onSelect(candidate)
+                    }
                 }
             }
             Button("キャンセル", role: .cancel) {
@@ -54,11 +56,13 @@ private struct ReconnectionServerSelectionDialogModifier: ViewModifier {
             ),
             titleVisibility: .visible
         ) {
-            let candidates = manager.reconnectionCandidates(for: service)
-            ForEach(candidates, id: \.serverId) { candidate in
-                Button(manager.serverFullDisplayName(candidate.serverId)) {
-                    selectedService = nil
-                    onSelect(candidate.serverId)
+            if selectedService?.id == service.id {
+                let candidates = manager.reconnectionCandidates(for: service)
+                ForEach(candidates, id: \.serverId) { candidate in
+                    Button(manager.serverFullDisplayName(candidate.serverId)) {
+                        selectedService = nil
+                        onSelect(candidate.serverId)
+                    }
                 }
             }
             Button("キャンセル", role: .cancel) {

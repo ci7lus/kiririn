@@ -374,4 +374,64 @@ struct KiririnTests {
             )
         )
     }
+
+    @Test func programGuideVisibleRangeDoesNotRefreshDuringSmallScrolls() {
+        let timelineStart = Date(timeIntervalSince1970: 0)
+        let timelineEnd = timelineStart.addingTimeInterval(24 * 60 * 60)
+        let initialRange = ProgramGuideVisibleRange.make(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: 0,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+        let needsRefresh = initialRange.needsRefresh(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: 52 + 30 * 2.5,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+
+        #expect(!needsRefresh)
+    }
+
+    @Test func programGuideVisibleRangeRefreshesNearBufferEdge() {
+        let timelineStart = Date(timeIntervalSince1970: 0)
+        let timelineEnd = timelineStart.addingTimeInterval(24 * 60 * 60)
+        let initialRange = ProgramGuideVisibleRange.make(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: 0,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+        let verticalScrollOffset = 52 + 190 * 2.5
+        let needsRefresh = initialRange.needsRefresh(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: verticalScrollOffset,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+        let refreshedRange = ProgramGuideVisibleRange.make(
+            timelineStart: timelineStart,
+            timelineEnd: timelineEnd,
+            minuteHeight: 2.5,
+            verticalScrollOffset: verticalScrollOffset,
+            viewportHeight: 552,
+            sectionHeaderHeight: 52
+        )
+
+        #expect(needsRefresh)
+        #expect(refreshedRange != initialRange)
+        #expect(
+            refreshedRange.end
+                == timelineStart.addingTimeInterval(600 * 60)
+        )
+    }
 }

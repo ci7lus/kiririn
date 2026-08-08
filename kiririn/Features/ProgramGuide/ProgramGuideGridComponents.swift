@@ -4,10 +4,6 @@ final class HorizontalOffsetTracker {
     var horizontalOffset: CGFloat = 0
 }
 
-final class VerticalOffsetTracker {
-    var verticalOffset: CGFloat = 0
-}
-
 struct ProgramChannelColumnView: View, Equatable {
     let channelId: String
     let programs: [Program]
@@ -31,11 +27,6 @@ struct ProgramChannelColumnView: View, Equatable {
         CGFloat(date.timeIntervalSince(timelineStart) / 60.0) * minuteHeight
     }
 
-    private var timeMarkerOffsets: [CGFloat] {
-        let count = Int((timelineEnd.timeIntervalSince(timelineStart) / 60) / 30)
-        return (0...count).map { CGFloat($0 * 30) * minuteHeight }
-    }
-
     private var visibleProgramIndices: [Int] {
         programs.indices.filter { index in
             let program = programs[index]
@@ -48,25 +39,7 @@ struct ProgramChannelColumnView: View, Equatable {
     }
 
     var body: some View {
-        let markerOffsets = timeMarkerOffsets
-
         ZStack(alignment: .topLeading) {
-            Color.kiririnSystemBackground
-
-            Canvas { context, size in
-                for y in markerOffsets {
-                    context.fill(
-                        Path(CGRect(x: 0, y: y, width: size.width, height: 1)),
-                        with: .color(Color.kiririnSeparator.opacity(0.25))
-                    )
-                }
-                context.fill(
-                    Path(CGRect(x: 0, y: 0, width: 1, height: size.height)),
-                    with: .color(Color.kiririnSeparator.opacity(0.6))
-                )
-            }
-            .allowsHitTesting(false)
-
             ForEach(visibleProgramIndices, id: \.self) { index in
                 ProgramCellWrapper(
                     program: programs[index],
@@ -80,6 +53,12 @@ struct ProgramChannelColumnView: View, Equatable {
         }
         .frame(width: width, height: totalHeight)
         .clipped()
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(Color.kiririnSeparator.opacity(0.6))
+                .frame(width: 1)
+                .allowsHitTesting(false)
+        }
         .onTapGesture(coordinateSpace: .local) { location in
             let tappedY = location.y
             if let program = programs.first(where: { program in
