@@ -40,6 +40,11 @@ struct ProgramChannelColumnView: View, Equatable {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
+            // 絶対Y座標で配置する番組セルの原点を列の左上に固定する。
+            Color.clear
+                .frame(width: width, height: totalHeight)
+                .allowsHitTesting(false)
+
             ForEach(visibleProgramIndices, id: \.self) { index in
                 ProgramCellWrapper(
                     program: programs[index],
@@ -51,8 +56,9 @@ struct ProgramChannelColumnView: View, Equatable {
                 .equatable()
             }
         }
-        .frame(width: width, height: totalHeight)
+        .frame(width: width, height: totalHeight, alignment: .topLeading)
         .clipped()
+        .contentShape(.rect)
         .overlay(alignment: .leading) {
             Rectangle()
                 .fill(Color.kiririnSeparator.opacity(0.6))
