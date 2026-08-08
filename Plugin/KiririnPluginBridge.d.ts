@@ -1,5 +1,7 @@
 /**
- * kiririn のプラグインページで利用できる app-specific bridge です。
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * kiririn v0.3.0 のプラグインページで利用できる app-specific bridge です。
  *
  * このファイルが説明するのは `window.kiririn` だけです。
  * WebExtension 標準 API は WebKit が提供するものを利用してください。
@@ -67,6 +69,10 @@ export interface PlayerPlaybackState {
     time: number;
     position: number;
     rate: number;
+    /** ネイティブのシークバーをドラッグ中かどうかです。 */
+    isScrubbing: boolean;
+    /** ドラッグ中のシークバー位置です。ドラッグ中以外は`null`です。 */
+    scrubPosition: number | null;
     /**
      * プレイヤー領域内でテレビ画面として使われる描画領域の正規化座標です。
      * データ放送表示中はデータ放送コンテンツの描画領域、それ以外は全面を示します。

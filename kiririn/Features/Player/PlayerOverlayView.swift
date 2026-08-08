@@ -49,7 +49,6 @@ struct PlayerOverlayView_iOS: View {
     @State private var isInfoSheetVisible = true
     @State private var lowerTabSelection = "caption"
     @State private var selectedPluginID: UUID?
-    @State private var scrubPosition: Float?
     @State private var initialScrubTime: Double?
     @State private var initialScrubPosition: Float?
     @State private var seekFeedbackText = ""
@@ -89,7 +88,7 @@ struct PlayerOverlayView_iOS: View {
 
     private var displayTime: Double {
         if playerState.isScrubbing,
-            let pos = scrubPosition,
+            let pos = playerState.scrubPosition,
             let initPos = initialScrubPosition,
             let initTime = initialScrubTime,
             displayDuration > 0
@@ -109,7 +108,7 @@ struct PlayerOverlayView_iOS: View {
     }
 
     private var displayProgress: Double {
-        if playerState.isScrubbing, let scrub = scrubPosition {
+        if playerState.isScrubbing, let scrub = playerState.scrubPosition {
             return Double(scrub)
         }
         return Double(playerState.playbackStatus.position)
@@ -2183,10 +2182,10 @@ struct PlayerOverlayView_iOS: View {
         if !playerState.isScrubbing {
             initialScrubPosition = playerState.playbackStatus.position
             initialScrubTime = playerState.playbackStatus.time
+            playerState.beginScrubbing(at: initialScrubPosition ?? 0)
         }
-        playerState.isScrubbing = true
         let newProgress = min(max(0, relativeX / availableWidth), 1)
-        scrubPosition = Float(newProgress)
+        playerState.updateScrubbing(to: Float(newProgress))
     }
 
     private func updateScrubFromThumbDrag(translationX: CGFloat, availableWidth: CGFloat) {
@@ -2199,24 +2198,25 @@ struct PlayerOverlayView_iOS: View {
         } else {
             baseProgress =
                 initialScrubPosition
-                ?? scrubPosition
+                ?? playerState.scrubPosition
                 ?? playerState.playbackStatus.position
         }
-        playerState.isScrubbing = true
+        if !playerState.isScrubbing {
+            playerState.beginScrubbing(at: baseProgress)
+        }
         let newProgress = min(max(0, CGFloat(baseProgress) + translationX / availableWidth), 1)
-        scrubPosition = Float(newProgress)
+        playerState.updateScrubbing(to: Float(newProgress))
     }
 
     private func finishScrub() {
-        if playerState.isScrubbing, let scrub = scrubPosition {
+        if playerState.isScrubbing, let scrub = playerState.scrubPosition {
             if displayDuration > 0 {
                 playerState.seek(toTime: displayTime)
             } else {
                 playerState.seek(to: scrub)
             }
         }
-        playerState.isScrubbing = false
-        scrubPosition = nil
+        _ = playerState.endScrubbing()
         initialScrubPosition = nil
         initialScrubTime = nil
     }

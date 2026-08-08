@@ -293,6 +293,27 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             }
         }
     }
+    /// シークバーをドラッグ中の表示位置。ドラッグ中以外は`nil`です。
+    var scrubPosition: Float?
+
+    func beginScrubbing(at position: Float) {
+        guard position.isFinite else { return }
+        isScrubbing = true
+        updateScrubbing(to: position)
+    }
+
+    func updateScrubbing(to position: Float) {
+        guard isScrubbing, position.isFinite else { return }
+        scrubPosition = min(max(position, 0), 1)
+    }
+
+    func endScrubbing() -> Float? {
+        guard isScrubbing || scrubPosition != nil else { return nil }
+        let position = scrubPosition
+        scrubPosition = nil
+        isScrubbing = false
+        return position
+    }
 
     func reloadPlugins() {
         pluginReloadToken += 1
@@ -1290,6 +1311,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     }
 
     func stop() {
+        _ = endScrubbing()
         player?.stop()
         isPlaybackLoading = false
         isPlaybackSeeking = false
@@ -1299,6 +1321,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     }
 
     func cleanup(releasePlayer: Bool = false, releaseSecurityScope: Bool = false) {
+        _ = endScrubbing()
         dataBroadcastSession?.stop()
         dataBroadcastSession = nil
         savePlaybackPositionIfNeeded()

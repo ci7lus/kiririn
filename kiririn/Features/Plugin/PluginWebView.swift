@@ -188,7 +188,7 @@ struct PluginWebView: PluginWebViewRepresentable {
             "appVersion": appVersion ?? NSNull(),
             "buildVersion": buildVersion,
             "bundleIdentifier": bundle.bundleIdentifier ?? NSNull(),
-            "bridgeVersion": 5,
+            "bridgeVersion": 6,
             "displayAreaType": displayArea.rawValue,
             "playerID": runtimePlayerID,
         ]
@@ -250,20 +250,31 @@ struct PluginWebView: PluginWebViewRepresentable {
         into webView: WKWebView, coordinator: Coordinator, force: Bool = false
     ) {
         let statuses = appModel.activePlayerStates.compactMap(makePlayerStatusSchema)
+        let containsScrubbingStatus = appModel.activePlayerStates.contains(where: \.isScrubbing)
         guard
             let data = try? JSONSerialization.data(
                 withJSONObject: statuses, options: [.sortedKeys]),
             let json = String(data: data, encoding: .utf8)
         else { return }
 
-        if !force, let last = coordinator.lastInjectedStatusesJson, last == json {
+        if !force, let last = coordinator.lastInjectedStatusesJson, last == json,
+            coordinator.pendingStatusesJson == nil
+        {
             return
         }
-        coordinator.lastInjectedStatusesJson = json
 
-        let js =
-            "if(window.kiririn && window.kiririn._onPlayerStatusesChange) window.kiririn._onPlayerStatusesChange(\(json));"
-        webView.evaluateJavaScript(js)
+        if force || !containsScrubbingStatus || !coordinator.lastInjectedStatusesContainedScrubbing
+        {
+            coordinator.cancelPendingStatusInjection()
+            coordinator.injectStatuses(
+                json, containsScrubbing: containsScrubbingStatus, into: webView)
+        } else {
+            coordinator.queueStatusInjection(
+                json,
+                containsScrubbing: containsScrubbingStatus,
+                into: webView
+            )
+        }
     }
 
     private func injectFocus(into webView: WKWebView, coordinator: Coordinator, force: Bool = false)
@@ -296,6 +307,8 @@ struct PluginWebView: PluginWebViewRepresentable {
             "isPlaying": status.isPlaying,
             "time": status.time,
             "position": status.bytePosition > 0 ? status.bytePosition : status.position,
+            "isScrubbing": state.isScrubbing,
+            "scrubPosition": state.scrubPosition ?? NSNull(),
             "rate": status.rate,
             "televisionDisplayRect": displayRects.television,
             "videoDisplayRect": displayRects.video,
@@ -564,6 +577,11 @@ struct PluginWebView: PluginWebViewRepresentable {
         var lastReloadKey: PluginReloadKey?
         var lastInjectedPlayablesJson: String?
         var lastInjectedStatusesJson: String?
+        var lastInjectedStatusesContainedScrubbing = false
+        var lastStatusInjectionDate: Date?
+        var pendingStatusesJson: String?
+        var pendingStatusesContainedScrubbing = false
+        var pendingStatusInjectionTask: Task<Void, Never>?
         var lastInjectedFocusedPlayerID: String?
         var lastInjectedPlayerIDs: Set<String>?
         var lastInjectedDeeplinkToken: Int = 0
@@ -580,11 +598,59 @@ struct PluginWebView: PluginWebViewRepresentable {
             self.onCrash = onCrash
         }
 
+        func injectStatuses(
+            _ json: String,
+            containsScrubbing: Bool,
+            into webView: WKWebView
+        ) {
+            lastInjectedStatusesJson = json
+            lastInjectedStatusesContainedScrubbing = containsScrubbing
+            lastStatusInjectionDate = .now
+
+            let js =
+                "if(window.kiririn && window.kiririn._onPlayerStatusesChange) window.kiririn._onPlayerStatusesChange(\(json));"
+            webView.evaluateJavaScript(js)
+        }
+
+        func queueStatusInjection(
+            _ json: String,
+            containsScrubbing: Bool,
+            into webView: WKWebView
+        ) {
+            pendingStatusesJson = json
+            pendingStatusesContainedScrubbing = containsScrubbing
+            guard pendingStatusInjectionTask == nil else { return }
+
+            let elapsed = lastStatusInjectionDate.map { Date.now.timeIntervalSince($0) } ?? 0
+            let delay = max(0, 0.5 - elapsed)
+            let task = Task { @MainActor [weak self, weak webView] in
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled else { return }
+                guard let self, let webView, let json = self.pendingStatusesJson else { return }
+                let containsScrubbing = self.pendingStatusesContainedScrubbing
+                self.pendingStatusesJson = nil
+                self.pendingStatusesContainedScrubbing = false
+                self.pendingStatusInjectionTask = nil
+                self.injectStatuses(json, containsScrubbing: containsScrubbing, into: webView)
+            }
+            pendingStatusInjectionTask = task
+        }
+
+        func cancelPendingStatusInjection() {
+            pendingStatusInjectionTask?.cancel()
+            pendingStatusInjectionTask = nil
+            pendingStatusesJson = nil
+            pendingStatusesContainedScrubbing = false
+        }
+
         func prepareForPageLoad(pageURL: String?, reloadKey: PluginReloadKey) {
             lastLoadedPageURL = pageURL
             lastReloadKey = reloadKey
             lastInjectedPlayablesJson = nil
             lastInjectedStatusesJson = nil
+            lastInjectedStatusesContainedScrubbing = false
+            lastStatusInjectionDate = nil
+            cancelPendingStatusInjection()
             lastInjectedFocusedPlayerID = nil
             lastInjectedPlayerIDs = nil
             wantsCaptureEvents = false
@@ -600,6 +666,9 @@ struct PluginWebView: PluginWebViewRepresentable {
             announcedCaptureEvents.removeAll()
             lastInjectedPlayablesJson = nil
             lastInjectedStatusesJson = nil
+            lastInjectedStatusesContainedScrubbing = false
+            lastStatusInjectionDate = nil
+            cancelPendingStatusInjection()
             lastInjectedFocusedPlayerID = nil
             lastInjectedPlayerIDs = nil
             wantsCaptureEvents = false
