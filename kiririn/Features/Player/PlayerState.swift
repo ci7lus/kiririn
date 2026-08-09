@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import KppxKit
 import Logging
 import OrderedCollections
@@ -374,9 +375,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     }
 
     private var pendingCapturePath: URL?
-    private var pendingPluginOverlayTask: Task<CGImage?, Never>?
-    private var pendingDataBroadcastSnapshotTask: Task<DataBroadcastCaptureSnapshot?, Never>?
-    private var pendingDataBroadcastLayout: DataBroadcastCaptureLayout?
+    private var pendingDataBroadcastCapture = false
     private var pendingOverlayManifestIDs: [String] = []
     private let vlcLogForwarder = VLCLogForwarder()
 
@@ -1712,123 +1711,29 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         let tempURL = tempDir.appendingPathComponent(fileName)
         pendingCapturePath = tempURL
 
-        let videoSize = player.videoSize
-        let snapshotHeight: Int32 = videoSize.height > 0 ? Int32(videoSize.height) : 1080
-
-        let displayAspectRatio = Self.calculateDisplayAspectRatio(
-            pixelWidth: videoSize.width,
-            pixelHeight: videoSize.height,
-            media: player.media
-        )
-        let snapshotWidth: Int32 = max(1, Int32(Double(snapshotHeight) * displayAspectRatio))
-
-        let dataBroadcastLayout: DataBroadcastCaptureLayout?
-        if bmlContentVisible, let session = dataBroadcastSession {
-            dataBroadcastLayout = session.captureLayout(outputHeight: CGFloat(snapshotHeight))
-            if let dataBroadcastLayout {
-                pendingDataBroadcastSnapshotTask = Task { @MainActor in
-                    await session.takeCaptureSnapshot(layout: dataBroadcastLayout)
-                }
-                pendingDataBroadcastLayout = dataBroadcastLayout
-            } else {
-                pendingDataBroadcastSnapshotTask = nil
-                pendingDataBroadcastLayout = nil
-            }
-        } else {
-            dataBroadcastLayout = nil
-            pendingDataBroadcastSnapshotTask = nil
-            pendingDataBroadcastLayout = nil
-        }
-
-        if CaptureService.shared.shouldCompositePluginOverlay && !visibleOverlayPlugins.isEmpty {
-            let playerID = self.id
-            pendingOverlayManifestIDs = visibleOverlayPlugins.map(\.manifestID)
-            let compositedDataBroadcastLayout =
-                CaptureService.shared.shouldCompositeDataBroadcast ? dataBroadcastLayout : nil
-            let snapshotSize =
-                compositedDataBroadcastLayout?.canvasSize
-                ?? CGSize(width: CGFloat(snapshotWidth), height: CGFloat(snapshotHeight))
-            let snapshotAspectRatio = Double(snapshotSize.width / snapshotSize.height)
-            pendingPluginOverlayTask = Task { @MainActor in
-                await PluginOverlaySnapshotRegistry.shared.takeCompositeSnapshot(
-                    for: playerID,
-                    targetSize: snapshotSize,
-                    targetAspectRatio: snapshotAspectRatio,
-                    targetFrame: nil
-                )
-            }
-        } else {
-            pendingPluginOverlayTask = nil
-            pendingOverlayManifestIDs = []
-        }
-
-        // 常に通常サイズで動画スナップショットを取得する
-        let videoSnapshotWidth = snapshotWidth
-        let videoSnapshotHeight = snapshotHeight
+        pendingDataBroadcastCapture =
+            CaptureService.shared.shouldCompositeDataBroadcast
+            && bmlContentVisible
+        pendingOverlayManifestIDs =
+            CaptureService.shared.shouldCompositePluginOverlay && !visibleOverlayPlugins.isEmpty
+            ? visibleOverlayPlugins.map(\.manifestID)
+            : []
 
         player.saveVideoSnapshot(
-            at: tempURL.path, withWidth: videoSnapshotWidth, andHeight: videoSnapshotHeight)
+            at: tempURL.path, withWidth: 0, andHeight: 0)
     }
 
-    nonisolated private static func calculateDisplayAspectRatio(
-        pixelWidth: CGFloat,
-        pixelHeight: CGFloat,
-        media: VLCMedia?
-    ) -> Double {
-        guard pixelWidth > 0, pixelHeight > 0 else {
-            return 16.0 / 9.0
-        }
+    nonisolated private static func captureImageSize(at url: URL) -> CGSize? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+                as? [CFString: Any],
+            let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+            let height = properties[kCGImagePropertyPixelHeight] as? NSNumber
+        else { return nil }
 
-        let parRatio = pixelWidth / pixelHeight
-        let sarRatio = extractSampleAspectRatio(from: media?.videoTracks ?? [])
-
-        return Double(parRatio) * sarRatio
-    }
-
-    nonisolated private static func extractSampleAspectRatio(from videoTracks: [VLCMedia.Track])
-        -> Double
-    {
-        let candidates = videoTracks.compactMap { track -> VLCMedia.VideoTrack? in
-            guard track.type == .video else { return nil }
-            return track.video
-        }
-        let selectedVideoTrack = candidates.first(where: { $0.frameRate >= 1 }) ?? candidates.first
-
-        guard let selectedVideoTrack else {
-            return 1.0
-        }
-
-        let denominator = numericValue(from: selectedVideoTrack.sourceAspectRatioDenominator) ?? 0
-        let numerator = numericValue(from: selectedVideoTrack.sourceAspectRatio) ?? 0
-
-        guard denominator > 0, numerator > 0 else {
-            return 1.0
-        }
-
-        return numerator / denominator
-    }
-
-    nonisolated private static func numericValue(from value: Any) -> Double? {
-        switch value {
-        case let double as Double:
-            return double
-        case let float as Float:
-            return Double(float)
-        case let int as Int:
-            return Double(int)
-        case let int32 as Int32:
-            return Double(int32)
-        case let int64 as Int64:
-            return Double(int64)
-        case let uint as UInt:
-            return Double(uint)
-        case let uint32 as UInt32:
-            return Double(uint32)
-        case let uint64 as UInt64:
-            return Double(uint64)
-        default:
-            return nil
-        }
+        let size = CGSize(width: width.doubleValue, height: height.doubleValue)
+        guard size.width > 0, size.height > 0 else { return nil }
+        return size
     }
 
     func toggleRecording() {
@@ -2179,24 +2084,36 @@ extension PlayerState {
                     ? currentPlayable?.initialNetworkTime?.addingTimeInterval(playbackTime)
                         ?? Date() : Date()
 
+                let captureSize = Self.captureImageSize(at: path)
+
                 var overlayImage: CGImage? = nil
-                if let overlayTask = pendingPluginOverlayTask {
-                    overlayImage = await overlayTask.value
-                    pendingPluginOverlayTask = nil
-                }
                 let overlayManifestIDs = pendingOverlayManifestIDs
 
                 var dataBroadcastOverlayImage: CGImage?
                 var dataBroadcastLayout: DataBroadcastCaptureLayout? = nil
-                if CaptureService.shared.shouldCompositeDataBroadcast,
-                    let snapshotTask = pendingDataBroadcastSnapshotTask,
-                    let snapshot = await snapshotTask.value
+                if pendingDataBroadcastCapture,
+                    let captureSize,
+                    let session = dataBroadcastSession,
+                    let layout = session.captureLayout(outputHeight: captureSize.height),
+                    let snapshot = await session.takeCaptureSnapshot(layout: layout)
                 {
                     dataBroadcastOverlayImage = snapshot.image
                     dataBroadcastLayout = snapshot.layout
                 }
-                pendingDataBroadcastSnapshotTask = nil
-                pendingDataBroadcastLayout = nil
+
+                if CaptureService.shared.shouldCompositePluginOverlay,
+                    !overlayManifestIDs.isEmpty,
+                    let captureSize
+                {
+                    let targetSize = dataBroadcastLayout?.canvasSize ?? captureSize
+                    let targetAspectRatio = Double(targetSize.width / targetSize.height)
+                    overlayImage = await PluginOverlaySnapshotRegistry.shared.takeCompositeSnapshot(
+                        for: id,
+                        targetSize: targetSize,
+                        targetAspectRatio: targetAspectRatio,
+                        targetFrame: nil
+                    )
+                }
 
                 try? await CaptureService.shared.saveCapture(
                     tempURL: path,
@@ -2211,6 +2128,7 @@ extension PlayerState {
                     dataBroadcastLayout: dataBroadcastLayout
                 )
                 pendingCapturePath = nil
+                pendingDataBroadcastCapture = false
                 pendingOverlayManifestIDs = []
             }
         }
