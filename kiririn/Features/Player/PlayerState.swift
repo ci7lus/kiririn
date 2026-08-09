@@ -2077,60 +2077,67 @@ extension PlayerState {
 
     nonisolated func mediaPlayerSnapshot(_ notification: Notification) {
         Task { @MainActor in
-            if let path = pendingCapturePath {
-                let playbackTime = Double(max(0, player?.time.intValue ?? 0)) / 1000.0
-                let broadcastTime =
-                    (currentPlayable?.isSeekable ?? false)
-                    ? currentPlayable?.initialNetworkTime?.addingTimeInterval(playbackTime)
-                        ?? Date() : Date()
-
-                let captureSize = Self.captureImageSize(at: path)
-
-                var overlayImage: CGImage? = nil
-                let overlayManifestIDs = pendingOverlayManifestIDs
-
-                var dataBroadcastOverlayImage: CGImage?
-                var dataBroadcastLayout: DataBroadcastCaptureLayout? = nil
-                if pendingDataBroadcastCapture,
-                    let captureSize,
-                    let session = dataBroadcastSession,
-                    let layout = session.captureLayout(outputHeight: captureSize.height),
-                    let snapshot = await session.takeCaptureSnapshot(layout: layout)
-                {
-                    dataBroadcastOverlayImage = snapshot.image
-                    dataBroadcastLayout = snapshot.layout
-                }
-
-                if CaptureService.shared.shouldCompositePluginOverlay,
-                    !overlayManifestIDs.isEmpty,
-                    let captureSize
-                {
-                    let targetSize = dataBroadcastLayout?.canvasSize ?? captureSize
-                    let targetAspectRatio = Double(targetSize.width / targetSize.height)
-                    overlayImage = await PluginOverlaySnapshotRegistry.shared.takeCompositeSnapshot(
-                        for: id,
-                        targetSize: targetSize,
-                        targetAspectRatio: targetAspectRatio,
-                        targetFrame: nil
-                    )
-                }
-
-                try? await CaptureService.shared.saveCapture(
-                    tempURL: path,
-                    programName: currentPlayable?.title,
-                    serviceName: currentPlayable?.serviceName,
-                    playerID: id,
-                    caption: caption,
-                    broadcastTime: broadcastTime,
-                    overlayImage: overlayImage,
-                    overlayPluginManifestIDs: overlayManifestIDs,
-                    dataBroadcastOverlayImage: dataBroadcastOverlayImage,
-                    dataBroadcastLayout: dataBroadcastLayout
-                )
+            guard let path = pendingCapturePath else { return }
+            defer {
                 pendingCapturePath = nil
                 pendingDataBroadcastCapture = false
                 pendingOverlayManifestIDs = []
             }
+
+            let playbackTime = Double(max(0, player?.time.intValue ?? 0)) / 1000.0
+            let broadcastTime =
+                (currentPlayable?.isSeekable ?? false)
+                ? currentPlayable?.initialNetworkTime?.addingTimeInterval(playbackTime)
+                    ?? Date() : Date()
+
+            let captureSize = Self.captureImageSize(at: path)
+            let overlayManifestIDs = pendingOverlayManifestIDs
+            if captureSize == nil,
+                pendingDataBroadcastCapture || !overlayManifestIDs.isEmpty
+            {
+                logger.warning("capture composition skipped: image size unavailable")
+            }
+
+            var overlayImage: CGImage? = nil
+
+            var dataBroadcastOverlayImage: CGImage?
+            var dataBroadcastLayout: DataBroadcastCaptureLayout? = nil
+            if pendingDataBroadcastCapture,
+                let captureSize,
+                let session = dataBroadcastSession,
+                let layout = session.captureLayout(outputHeight: captureSize.height),
+                let snapshot = await session.takeCaptureSnapshot(layout: layout)
+            {
+                dataBroadcastOverlayImage = snapshot.image
+                dataBroadcastLayout = snapshot.layout
+            }
+
+            if CaptureService.shared.shouldCompositePluginOverlay,
+                !overlayManifestIDs.isEmpty,
+                let captureSize
+            {
+                let targetSize = dataBroadcastLayout?.canvasSize ?? captureSize
+                let targetAspectRatio = Double(targetSize.width / targetSize.height)
+                overlayImage = await PluginOverlaySnapshotRegistry.shared.takeCompositeSnapshot(
+                    for: id,
+                    targetSize: targetSize,
+                    targetAspectRatio: targetAspectRatio,
+                    targetFrame: nil
+                )
+            }
+
+            try? await CaptureService.shared.saveCapture(
+                tempURL: path,
+                programName: currentPlayable?.title,
+                serviceName: currentPlayable?.serviceName,
+                playerID: id,
+                caption: caption,
+                broadcastTime: broadcastTime,
+                overlayImage: overlayImage,
+                overlayPluginManifestIDs: overlayManifestIDs,
+                dataBroadcastOverlayImage: dataBroadcastOverlayImage,
+                dataBroadcastLayout: dataBroadcastLayout
+            )
         }
     }
 
