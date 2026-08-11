@@ -3,7 +3,7 @@ set -euo pipefail
 
 # VLCKit
 # https://github.com/neneka/vlckit/releases
-REVISION="202608090657"
+REVISION="202608110911"
 VLCKIT_URL="https://github.com/neneka/vlckit/releases/download/$REVISION/VLCKit-iOS-REPLACEWITHVERSION.dmg"
 VLCKIT_DEST="./Packages/VLCKit"
 FRAMEWORK_DEST="${VLCKIT_DEST}/VLCKit.xcframework"

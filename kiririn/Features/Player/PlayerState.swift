@@ -355,6 +355,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             "--no-snapshot-preview",
             "--snapshot-format=jpg",
             "--aribcaption-font=Hiragino Maru Gothic ProN,Rounded M+ 1m WadaLab comp ARIB,Apple Symbols",
+            "--prefetch-buffer-size=2048",
             "--verbose=1",
         ]
         #if os(macOS)
