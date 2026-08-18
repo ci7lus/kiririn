@@ -85,17 +85,42 @@ jobs:
 
             - name: Build archive
               run: |
+                  git_commit_hash="$(git rev-parse --short=7 HEAD)"
+                  archive_path="$RUNNER_TEMP/${{ matrix.platform.id }}/kiririn-${{ matrix.platform.id }}.xcarchive"
+
+                  echo "Archiving commit $git_commit_hash"
                   xcodebuild archive \
                     -project "$PROJECT" \
                     -scheme "$SCHEME" \
                     -destination "${{ matrix.platform.destination }}" \
-                    -archivePath "$RUNNER_TEMP/${{ matrix.platform.id }}/kiririn-${{ matrix.platform.id }}.xcarchive" \
+                    -archivePath "$archive_path" \
                     -derivedDataPath "$RUNNER_TEMP/DerivedData" \
                     -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
                     -skipPackagePluginValidation \
                     CODE_SIGNING_ALLOWED=NO \
                     CODE_SIGNING_REQUIRED=NO \
-                    CODE_SIGN_IDENTITY=""
+                    CODE_SIGN_IDENTITY="" \
+                    KIRIRIN_GIT_COMMIT_HASH="$git_commit_hash"
+
+                  app_path="$(find "$archive_path/Products/Applications" -type d -name '*.app' -print -quit)"
+                  if [ -z "$app_path" ]; then
+                    echo "::error::No .app found in $archive_path/Products/Applications"
+                    exit 1
+                  fi
+
+                  if [ -f "$app_path/Contents/Info.plist" ]; then
+                    info_plist="$app_path/Contents/Info.plist"
+                  else
+                    info_plist="$app_path/Info.plist"
+                  fi
+
+                  actual_git_hash="$(/usr/bin/plutil -extract KiririnGitCommitHash raw -o - "$info_plist" 2>/dev/null || true)"
+                  if [ "$actual_git_hash" != "$git_commit_hash" ]; then
+                    echo "::error::KiririnGitCommitHash is missing or incorrect in $info_plist (expected $git_commit_hash, got ${actual_git_hash:-<missing>})"
+                    exit 1
+                  fi
+
+                  echo "Verified KiririnGitCommitHash=$actual_git_hash"
 
             - name: Create XCArchive ZIP
               run: |
