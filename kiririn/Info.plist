@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>KiririnGitCommitHash</key>
+	<string>$(KIRIRIN_GIT_COMMIT_HASH)</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>ローカルネットワーク上のサーバーとの通信と、リモコンに使用します。</string>
 	<key>NSBonjourServices</key>
