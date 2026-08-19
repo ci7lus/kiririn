@@ -1,3 +1,5 @@
+
+
 # kiririn
 
 kiririn は macOS/iOS 上において、デジタル放送の視聴を行うプログラムの実装を研究する目的で頒布される研究資料です。<br>
@@ -85,6 +87,6 @@ macOS 版の公証や TestFlight 配布のための各種手続きについて�
 
 MPL 2.0
 
-### [web](./web/)
+### [web/bml](./web/bm/)
 
 MIT
