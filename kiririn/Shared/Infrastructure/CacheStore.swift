@@ -732,7 +732,7 @@ class CacheStore {
         }
     }
 
-    func removeCaptureHistoryBatch(limit: Int) async -> [CaptureHistoryItem]? {
+    func removeCaptureHistoryBatch(limit: Int) async throws -> [CaptureHistoryItem] {
         guard limit > 0 else { return [] }
         do {
             return try await dbQueue.write { db in
@@ -751,7 +751,7 @@ class CacheStore {
         } catch {
             logger.error("Failed to remove capture history batch: \(error)")
             reportDatabaseFailureIfNeeded(operation: "remove capture history batch", error: error)
-            return nil
+            throw error
         }
     }
 

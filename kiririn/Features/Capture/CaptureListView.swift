@@ -211,13 +211,21 @@ struct CaptureListView: View {
                 }
             }
         }
-        .onReceive(service.didClearHistory) { _ in
-            withAnimation {
-                items.removeAll()
-                offset = 0
-                hasMore = false
-                selectedIDs.removeAll()
-                isSelectionMode = false
+        .onReceive(service.didFinishClearingHistory) { result in
+            switch result {
+            case .cleared:
+                withAnimation {
+                    items.removeAll()
+                    offset = 0
+                    hasMore = false
+                    selectedIDs.removeAll()
+                    isSelectionMode = false
+                }
+            case .failed, .cancelled:
+                guard isTabActive else { return }
+                Task {
+                    await loadInitial()
+                }
             }
         }
         .onReceive(service.didUpdateCapture) { updatedItem in

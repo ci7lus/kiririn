@@ -34,6 +34,12 @@ struct PluginCaptureBlob: Sendable {
     let mimeType: String
 }
 
+nonisolated enum CaptureHistoryClearResult: Sendable, Equatable {
+    case cleared
+    case failed
+    case cancelled
+}
+
 @MainActor
 final class CaptureService: ObservableObject {
     static let shared = CaptureService()
@@ -72,7 +78,7 @@ final class CaptureService: ObservableObject {
 
     let didAddCapture = PassthroughSubject<(playerID: String?, CaptureHistoryItem), Never>()
     let didUpdateCapture = PassthroughSubject<CaptureHistoryItem, Never>()
-    let didClearHistory = PassthroughSubject<Void, Never>()
+    let didFinishClearingHistory = PassthroughSubject<CaptureHistoryClearResult, Never>()
     let didCaptureForPlugin = PassthroughSubject<PluginCaptureEvent, Never>()
 
     private static let folderBookmarkKey = "kiririn.capture.folder.bookmark"
@@ -326,26 +332,36 @@ final class CaptureService: ObservableObject {
             searchText: searchText, limit: limit, offset: offset) ?? []
     }
 
-    func clearHistory() async {
-        guard let cacheStore else {
-            didClearHistory.send(())
-            return
+    @discardableResult
+    func clearHistory() async -> CaptureHistoryClearResult {
+        var result: CaptureHistoryClearResult = .cleared
+        defer {
+            didFinishClearingHistory.send(result)
         }
+        guard let cacheStore else { return result }
+
         let batchSize = 200
         while true {
-            guard let items = await cacheStore.removeCaptureHistoryBatch(limit: batchSize) else {
-                return
+            let items: [CaptureHistoryItem]
+            do {
+                items = try await cacheStore.removeCaptureHistoryBatch(limit: batchSize)
+            } catch is CancellationError {
+                result = .cancelled
+                return result
+            } catch {
+                result = .failed
+                return result
             }
-            guard !items.isEmpty else {
-                didClearHistory.send(())
-                return
-            }
+            guard !items.isEmpty else { return result }
             for item in items {
                 for url in item.allFileURLs {
                     deleteCaptureFile(at: url)
                 }
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                result = .cancelled
+                return result
+            }
         }
     }
 
