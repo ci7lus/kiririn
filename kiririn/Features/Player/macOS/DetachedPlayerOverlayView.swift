@@ -7,6 +7,7 @@
 
     struct DetachedPlayerOverlayView_macOS: View {
         private static let overlayCoordinateSpaceName = "DetachedPlayerOverlay"
+        private static let backgroundDoubleClickMaximumDistance: CGFloat = 8
 
         @State var playerState: PlayerState
         let appModel: AppModel
@@ -23,6 +24,8 @@
         @State private var isPointerOverTitleController = false
         @State private var isPointerOverBottomController = false
         @State private var titleControllerFrame = CGRect.zero
+        @State private var lastBackgroundTap: BackgroundTap?
+        @State private var activationTapSuppressionDeadline: TimeInterval?
         @State private var isPlayerFullscreen = false
         @State private var isCursorHidden = false
         @State private var seekFeedbackText = ""
@@ -93,7 +96,7 @@
                             if let session = playerState.dataBroadcastSession {
                                 // Visibility is content-driven (ARIB invisible state):
                                 // the content shows itself on DataButton. Mouse input
-                                // never reaches this layer anyway - WindowDragSurface
+                                // never reaches this layer anyway - the input surface
                                 // sits above it in the ZStack; BML is keyboard-only.
                                 BMLOverlayView_macOS(session: session)
                                     .id(ObjectIdentifier(session.webView))
@@ -133,12 +136,11 @@
                         .contentShape(Rectangle())
                         .gesture(WindowDragGesture())
                         .simultaneousGesture(
-                            TapGesture(count: 2)
-                                .onEnded {
-                                    onToggleFullscreen()
+                            SpatialTapGesture()
+                                .onEnded { tap in
+                                    handleBackgroundTap(at: tap.location)
                                 }
                         )
-                        .allowsWindowActivationEvents()
                         .contextMenu {
                             Button {
                                 isAlwaysOnTop.toggle()
@@ -220,6 +222,24 @@
                         for: NSWindow.didExitFullScreenNotification)
                 ) { notification in
                     updateFullscreenState(false, from: notification)
+                }
+                .onReceive(
+                    NotificationCenter.default.publisher(
+                        for: NSWindow.didResignKeyNotification)
+                ) { notification in
+                    guard let window = notification.object as? NSWindow,
+                        window === playerWindow
+                    else {
+                        return
+                    }
+                    lastBackgroundTap = nil
+                    activationTapSuppressionDeadline = nil
+                }
+                .onReceive(
+                    NotificationCenter.default.publisher(
+                        for: NSWindow.didBecomeKeyNotification)
+                ) { notification in
+                    recordWindowActivationTap(from: notification)
                 }
                 .onChange(of: playerState.isRecording) { oldValue, newValue in
                     if newValue {
@@ -622,6 +642,8 @@
                 return
             }
             isPlayerFullscreen = isFullscreen
+            lastBackgroundTap = nil
+            activationTapSuppressionDeadline = nil
         }
 
         /// 全キーボードショートカットの置き場。コントロールバーのボタンには
@@ -777,6 +799,68 @@
                 NSCursor.unhide()
             }
             isCursorHidden = hidden
+        }
+
+        private func handleBackgroundTap(at location: CGPoint) {
+            let timestamp = ProcessInfo.processInfo.systemUptime
+            if let activationTapSuppressionDeadline {
+                self.activationTapSuppressionDeadline = nil
+                guard timestamp > activationTapSuppressionDeadline else {
+                    lastBackgroundTap = nil
+                    return
+                }
+            }
+
+            let tap = BackgroundTap(
+                timestamp: timestamp,
+                location: location
+            )
+            guard let lastBackgroundTap,
+                isDoubleClick(tap, after: lastBackgroundTap)
+            else {
+                self.lastBackgroundTap = tap
+                return
+            }
+
+            self.lastBackgroundTap = nil
+            onToggleFullscreen()
+        }
+
+        private func isDoubleClick(_ tap: BackgroundTap, after previousTap: BackgroundTap) -> Bool {
+            let interval = tap.timestamp - previousTap.timestamp
+            guard interval >= 0, interval <= NSEvent.doubleClickInterval else { return false }
+
+            let horizontalDistance = tap.location.x - previousTap.location.x
+            let verticalDistance = tap.location.y - previousTap.location.y
+            let distance = hypot(horizontalDistance, verticalDistance)
+            return distance <= Self.backgroundDoubleClickMaximumDistance
+        }
+
+        private func recordWindowActivationTap(from notification: Notification) {
+            guard let window = notification.object as? NSWindow,
+                window === playerWindow,
+                NSEvent.pressedMouseButtons & 1 != 0,
+                !isPointerOverBottomController,
+                playerState.dataBroadcastSession?.inputRequest == nil,
+                !isPointerOverStandardWindowButton(in: window)
+            else { return }
+
+            lastBackgroundTap = nil
+            activationTapSuppressionDeadline =
+                ProcessInfo.processInfo.systemUptime + NSEvent.doubleClickInterval
+        }
+
+        private func isPointerOverStandardWindowButton(in window: NSWindow) -> Bool {
+            let location = window.mouseLocationOutsideOfEventStream
+            let buttonTypes: [NSWindow.ButtonType] = [
+                .closeButton,
+                .miniaturizeButton,
+                .zoomButton,
+            ]
+            return buttonTypes.contains { buttonType in
+                guard let button = window.standardWindowButton(buttonType) else { return false }
+                return button.convert(button.bounds, to: nil).contains(location)
+            }
         }
 
         private var volumeIconName: String {
@@ -979,6 +1063,11 @@
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: task)
         }
 
+    }
+
+    private struct BackgroundTap {
+        let timestamp: TimeInterval
+        let location: CGPoint
     }
 
     /// 再生オプションメニュー（macOS 分離プレイヤー用）。
