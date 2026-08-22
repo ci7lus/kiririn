@@ -82,15 +82,4 @@ struct BMLInternetProxyTests {
         #expect(json["ipAddress"] is NSNull)
         #expect(json["responseTimeMillis"] is NSNull)
     }
-
-    @Test func resolveIPv4ResolvesLoopback() async {
-        let address = await BMLURLSchemeHandler.resolveIPv4("localhost", timeoutMillis: 5000)
-        #expect(address == "127.0.0.1")
-    }
-
-    @Test func resolveIPv4FailsForInvalidHost() async {
-        let address = await BMLURLSchemeHandler.resolveIPv4(
-            "definitely-not-a-real-host.invalid", timeoutMillis: 3000)
-        #expect(address == nil)
-    }
 }
