@@ -184,9 +184,15 @@ final class CaptureService: ObservableObject {
                 overlayPluginManifestIDs: overlayPluginManifestIDs
             )
         {
+            let supersededCompositePath = currentBasePath
             currentBasePath = compositePath
             effectiveOverlayPluginManifestIDs = overlayPluginManifestIDs
             hasComposite = true
+            if supersededCompositePath != savedPath,
+                supersededCompositePath != compositePath
+            {
+                deleteCaptureFile(at: captureFileURL(for: supersededCompositePath))
+            }
         }
 
         if hasComposite {
@@ -321,15 +327,26 @@ final class CaptureService: ObservableObject {
     }
 
     func clearHistory() async {
-        let allItems =
-            await cacheStore?.fetchCaptureHistory(searchText: "", limit: 10000, offset: 0) ?? []
-        for item in allItems {
-            for url in item.allFileURLs {
-                deleteCaptureFile(at: url)
-            }
+        guard let cacheStore else {
+            didClearHistory.send(())
+            return
         }
-        await cacheStore?.clearCaptureHistory()
-        didClearHistory.send(())
+        let batchSize = 200
+        while true {
+            guard let items = await cacheStore.removeCaptureHistoryBatch(limit: batchSize) else {
+                return
+            }
+            guard !items.isEmpty else {
+                didClearHistory.send(())
+                return
+            }
+            for item in items {
+                for url in item.allFileURLs {
+                    deleteCaptureFile(at: url)
+                }
+            }
+            guard !Task.isCancelled else { return }
+        }
     }
 
     func deleteHistoryItem(_ item: CaptureHistoryItem) async {
@@ -440,11 +457,18 @@ final class CaptureService: ObservableObject {
         guard url.startAccessingSecurityScopedResource() else {
             throw CaptureError.folderAccessDenied
         }
+        var didTransferScopeOwnership = false
+        defer {
+            if !didTransferScopeOwnership {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
         let bookmarkData = try url.bookmarkData(
             options: .securityScoped, includingResourceValuesForKeys: nil, relativeTo: nil)
         UserDefaults.standard.set(bookmarkData, forKey: Self.folderBookmarkKey)
         activeScopedFolderURL = url
         captureFolder = url
+        didTransferScopeOwnership = true
     }
 
     func resetToSandbox() {
@@ -454,6 +478,17 @@ final class CaptureService: ObservableObject {
     }
 
     // MARK: - External File Access
+
+    private func captureFileURL(for path: String) -> URL {
+        if path.hasPrefix("/") {
+            return URL(fileURLWithPath: path)
+        }
+        let documentsURL = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        )[0]
+        return documentsURL.appendingPathComponent(path)
+    }
 
     private func requiresScopedAccess(for url: URL) -> Bool {
         guard let scopedURL = activeScopedFolderURL else { return false }
@@ -488,10 +523,26 @@ final class CaptureService: ObservableObject {
         let didAccess = shouldAccess ? url.startAccessingSecurityScopedResource() : false
         defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
         return await Task.detached(priority: .utility) {
+            guard !Task.isCancelled,
+                let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                let cgImage = CGImageSourceCreateThumbnailAtIndex(
+                    source,
+                    0,
+                    [
+                        kCGImageSourceCreateThumbnailFromImageAlways: true,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
+                        kCGImageSourceThumbnailMaxPixelSize: 640,
+                        kCGImageSourceShouldCacheImmediately: true,
+                    ] as CFDictionary
+                )
+            else { return nil }
             #if canImport(UIKit)
-                return UIImage(contentsOfFile: url.path)
+                return UIImage(cgImage: cgImage)
             #elseif canImport(AppKit)
-                return NSImage(contentsOfFile: url.path)
+                return NSImage(
+                    cgImage: cgImage,
+                    size: NSSize(width: cgImage.width, height: cgImage.height)
+                )
             #else
                 return nil
             #endif
@@ -502,25 +553,28 @@ final class CaptureService: ObservableObject {
         let shouldAccess = requiresScopedAccess(for: url)
         let didAccess = shouldAccess ? url.startAccessingSecurityScopedResource() : false
         defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
-        return await Task.detached(priority: .utility) {
-            let asset = AVURLAsset(url: url)
-            let imageGenerator = AVAssetImageGenerator(asset: asset)
-            imageGenerator.appliesPreferredTrackTransform = true
-            let time = CMTime(seconds: 1, preferredTimescale: 60)
-            do {
-                let (cgImage, _) = try await imageGenerator.image(at: time)
-                #if canImport(UIKit)
-                    return UIImage(cgImage: cgImage)
-                #elseif canImport(AppKit)
-                    let size = NSSize(width: cgImage.width, height: cgImage.height)
-                    return NSImage(cgImage: cgImage, size: size)
-                #else
-                    return nil
-                #endif
-            } catch {
+        guard !Task.isCancelled else { return nil }
+        let asset = AVURLAsset(url: url)
+        let imageGenerator = AVAssetImageGenerator(asset: asset)
+        imageGenerator.appliesPreferredTrackTransform = true
+        imageGenerator.maximumSize = CGSize(width: 640, height: 360)
+        let time = CMTime(seconds: 1, preferredTimescale: 60)
+        do {
+            let (cgImage, _) = try await imageGenerator.image(at: time)
+            guard !Task.isCancelled else { return nil }
+            #if canImport(UIKit)
+                return UIImage(cgImage: cgImage)
+            #elseif canImport(AppKit)
+                return NSImage(
+                    cgImage: cgImage,
+                    size: NSSize(width: cgImage.width, height: cgImage.height)
+                )
+            #else
                 return nil
-            }
-        }.value
+            #endif
+        } catch {
+            return nil
+        }
     }
 
     private func generateFileName(programName: String?, serviceName: String?, extension ext: String)
@@ -548,14 +602,7 @@ final class CaptureService: ObservableObject {
         overlayPluginManifestIDs: [String],
         dataBroadcastLayout: DataBroadcastCaptureLayout? = nil
     ) async throws -> String? {
-        let baseURL: URL
-        if savedPath.hasPrefix("/") {
-            baseURL = URL(fileURLWithPath: savedPath)
-        } else {
-            let documentsURL = FileManager.default.urls(
-                for: .documentDirectory, in: .userDomainMask)[0]
-            baseURL = documentsURL.appendingPathComponent(savedPath)
-        }
+        let baseURL = captureFileURL(for: savedPath)
 
         guard
             let tempURL = await Task.detached(

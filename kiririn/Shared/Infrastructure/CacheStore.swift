@@ -732,6 +732,29 @@ class CacheStore {
         }
     }
 
+    func removeCaptureHistoryBatch(limit: Int) async -> [CaptureHistoryItem]? {
+        guard limit > 0 else { return [] }
+        do {
+            return try await dbQueue.write { db in
+                let items = try CaptureHistoryItem.all()
+                    .order(CaptureHistoryItem.Columns.date.desc)
+                    .limit(limit)
+                    .fetchAll(db)
+                guard !items.isEmpty else { return [] }
+                let ids = items.map(\.id)
+                _ =
+                    try CaptureHistoryItem
+                    .filter(ids.contains(CaptureHistoryItem.Columns.id))
+                    .deleteAll(db)
+                return items
+            }
+        } catch {
+            logger.error("Failed to remove capture history batch: \(error)")
+            reportDatabaseFailureIfNeeded(operation: "remove capture history batch", error: error)
+            return nil
+        }
+    }
+
     func fetchCaptureHistory(searchText: String, limit: Int, offset: Int) async
         -> [CaptureHistoryItem]
     {
