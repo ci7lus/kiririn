@@ -73,14 +73,14 @@
                                     player: player,
                                     isPipEnabled: playerState.isPipEnabled,
                                     isPlaying: playerState.isPlaying,
-                                    onPipAvailableChanged: { available in
-                                        if playerState.isPipAvailable != available {
-                                            playerState.isPipAvailable = available
+                                    onPipAvailableChanged: { [weak playerState] available in
+                                        if playerState?.isPipAvailable != available {
+                                            playerState?.isPipAvailable = available
                                         }
                                     },
-                                    onPipEnabledChanged: { enabled in
-                                        if playerState.isPipEnabled != enabled {
-                                            playerState.isPipEnabled = enabled
+                                    onPipEnabledChanged: { [weak playerState] enabled in
+                                        if playerState?.isPipEnabled != enabled {
+                                            playerState?.isPipEnabled = enabled
                                         }
                                     }
                                 )

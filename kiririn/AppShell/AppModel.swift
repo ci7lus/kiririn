@@ -210,16 +210,21 @@ final class AppModel {
 
     func playImportedFile(_ url: URL, securityScoped: Bool = true) {
         logger.info("playImportedFile url=\(url.absoluteString), securityScoped=\(securityScoped)")
+        let didStartSecurityScope: Bool
         if securityScoped {
-            if url.startAccessingSecurityScopedResource() {
-                playerState.adoptSecurityScopedPlaybackURL(url)
+            didStartSecurityScope = url.startAccessingSecurityScopedResource()
+            if didStartSecurityScope {
                 logger.debug("security scope granted for \(url.absoluteString)")
             } else {
-                playerState.adoptSecurityScopedPlaybackURL(nil)
                 logger.warning("security scope denied for \(url.absoluteString)")
             }
         } else {
-            playerState.adoptSecurityScopedPlaybackURL(nil)
+            didStartSecurityScope = false
+        }
+        defer {
+            if didStartSecurityScope {
+                url.stopAccessingSecurityScopedResource()
+            }
         }
 
         let bookmarkData =
