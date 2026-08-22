@@ -174,7 +174,9 @@ final class DataBroadcastSession {
 
     private var sseTask: Task<Void, Never>?
     private var stateFetchTask: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Never>?
     private var started = false
+    private var lifecycleID = UUID()
     private var isReady = false
     private var pendingMessages: [String] = []
     private var consecutiveFailures = 0
@@ -212,6 +214,7 @@ final class DataBroadcastSession {
         case transient(String)
     }
     private var fetchQueue: [FetchRequest] = []
+    private var fetchTasks: [String: Task<Void, Never>] = [:]
     private var delivered: Set<String> = []
     private var inflight: Set<String> = []
     private var activeFetchCount = 0
@@ -261,23 +264,33 @@ final class DataBroadcastSession {
     /// callers don't need to track whether they've already called this.
     func startIfIdle() {
         guard !started else { return }
+        lifecycleID = UUID()
         started = true
         status = .connecting
+        let expectedLifecycleID = lifecycleID
         sendProgramInfo(asInit: true)
-        fetchInitialState()
-        connectSSE()
-        startReconciliation()
+        fetchInitialState(lifecycleID: expectedLifecycleID)
+        connectSSE(lifecycleID: expectedLifecycleID)
+        startReconciliation(lifecycleID: expectedLifecycleID)
     }
 
     func stop() {
+        lifecycleID = UUID()
         started = false
         stateFetchTask?.cancel()
         stateFetchTask = nil
         hasReceivedLiveSnapshot = false
         sseTask?.cancel()
         sseTask = nil
+        reconnectTask?.cancel()
+        reconnectTask = nil
         reconcileTask?.cancel()
         reconcileTask = nil
+        for task in fetchTasks.values {
+            task.cancel()
+        }
+        fetchTasks.removeAll()
+        activeFetchCount = 0
         receivingClearTask?.cancel()
         receivingClearTask = nil
         isReceiving = false
@@ -295,8 +308,6 @@ final class DataBroadcastSession {
         inputRequest = nil
         consecutiveFailures = 0
         sseClient.cancelAll()
-        // In-flight fetch Tasks capture `self` weakly and are cheap
-        // no-ops if this session is deallocated before they complete.
         fetchQueue.removeAll()
         inflight.removeAll()
         delivered.removeAll()
@@ -304,6 +315,11 @@ final class DataBroadcastSession {
         fetchFailureCounts.removeAll()
         notReadyCounts.removeAll()
         abandonedFetches.removeAll()
+        pendingMessages.removeAll(keepingCapacity: false)
+        isReady = false
+        webView.stopLoading()
+        scriptMessageProxy.session = nil
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "bml")
         status = .idle
     }
 
@@ -331,32 +347,34 @@ final class DataBroadcastSession {
     /// module prefetch start immediately instead of waiting for the first
     /// SSE `snapshot` event. Best-effort: a 404 (no live session, no cache)
     /// or any transport error just falls back to the SSE-only path.
-    private func fetchInitialState() {
+    private func fetchInitialState(lifecycleID: UUID) {
         stateFetchTask?.cancel()
+        var request = URLRequest(url: endpoint.stateURL)
+        for (field, value) in endpoint.headers {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
+        let logger = logger
         stateFetchTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            var request = URLRequest(url: self.endpoint.stateURL)
-            for (field, value) in self.endpoint.headers {
-                request.setValue(value, forHTTPHeaderField: field)
-            }
             let data: Data
             do {
                 let (responseData, response) = try await URLSession.shared.data(for: request)
                 guard let http = response as? HTTPURLResponse else {
-                    self.logger.debug("initial state fetch: non-HTTP response")
+                    logger.debug("initial state fetch: non-HTTP response")
                     return
                 }
                 guard (200...299).contains(http.statusCode) else {
-                    self.logger.debug(
+                    logger.debug(
                         "initial state fetch: non-2xx status \(http.statusCode)")
                     return
                 }
                 data = responseData
             } catch {
-                self.logger.debug("initial state fetch failed: \(error)")
+                logger.debug("initial state fetch failed: \(error)")
                 return
             }
-            guard !Task.isCancelled, self.started, !self.hasReceivedLiveSnapshot else { return }
+            guard !Task.isCancelled, let self, self.started,
+                self.lifecycleID == lifecycleID, !self.hasReceivedLiveSnapshot
+            else { return }
             guard let snapshot = try? JSONDecoder().decode(MahironSnapshot.self, from: data) else {
                 self.logger.warning("failed to decode initial state response")
                 return
@@ -369,22 +387,28 @@ final class DataBroadcastSession {
 
     // MARK: - SSE
 
-    private func connectSSE() {
+    private func connectSSE(lifecycleID: UUID) {
         sseTask?.cancel()
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        let sseClient = sseClient
+        let eventsURL = endpoint.eventsURL
+        let headers = endpoint.headers
+        let logger = logger
         sseTask = Task { @MainActor [weak self] in
-            guard let self else { return }
             do {
                 var receivedAnyEvent = false
-                for try await event in self.sseClient.events(
-                    url: self.endpoint.eventsURL, headers: self.endpoint.headers)
-                {
-                    guard !Task.isCancelled else { return }
+                for try await event in sseClient.events(url: eventsURL, headers: headers) {
+                    guard !Task.isCancelled, let self, self.started,
+                        self.lifecycleID == lifecycleID
+                    else { return }
                     receivedAnyEvent = true
                     // Connection is alive; reset backoff so the next drop
                     // starts with a short delay again.
                     self.consecutiveFailures = 0
                     self.handle(event)
                 }
+                guard let self, self.started, self.lifecycleID == lifecycleID else { return }
                 // Stream ended cleanly (server closed it).
                 // If we never received any event, the server likely doesn't
                 // support this endpoint or has no data - don't reconnect.
@@ -394,16 +418,18 @@ final class DataBroadcastSession {
                     )
                     self.status = .unsupported
                 } else {
-                    self.maybeReconnect(reason: "stream ended")
+                    self.maybeReconnect(reason: "stream ended", lifecycleID: lifecycleID)
                 }
             } catch is CancellationError {
                 // Expected on stop()/teardown.
             } catch let SSEClientError.httpError(statusCode) where statusCode == 404 {
-                self.logger.info("data-broadcast events not supported (404)")
+                guard let self, self.started, self.lifecycleID == lifecycleID else { return }
+                logger.info("data-broadcast events not supported (404)")
                 self.status = .unsupported
             } catch {
-                self.logger.warning("data-broadcast SSE error: \(error)")
-                self.maybeReconnect(reason: "\(error)")
+                guard let self, self.started, self.lifecycleID == lifecycleID else { return }
+                logger.warning("data-broadcast SSE error: \(error)")
+                self.maybeReconnect(reason: "\(error)", lifecycleID: lifecycleID)
             }
         }
     }
@@ -412,8 +438,8 @@ final class DataBroadcastSession {
     /// Gives up after too many consecutive failures without a successful
     /// event in between. Servers that returned 404 are already marked
     /// `.unsupported` and never reach here.
-    private func maybeReconnect(reason: String) {
-        guard started, status != .unsupported else { return }
+    private func maybeReconnect(reason: String, lifecycleID: UUID) {
+        guard started, self.lifecycleID == lifecycleID, status != .unsupported else { return }
         consecutiveFailures += 1
         let maxAttempts = 10
         guard consecutiveFailures <= maxAttempts else {
@@ -424,10 +450,15 @@ final class DataBroadcastSession {
         logger.info(
             "data-broadcast reconnecting in \(Int(delay))s (attempt \(consecutiveFailures)/\(maxAttempts)): \(reason)"
         )
-        Task { @MainActor [weak self] in
+        reconnectTask?.cancel()
+        let expectedLifecycleID = lifecycleID
+        reconnectTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(delay))
-            guard let self, self.started else { return }
-            self.connectSSE()
+            guard !Task.isCancelled, let self,
+                self.started, self.lifecycleID == expectedLifecycleID
+            else { return }
+            self.reconnectTask = nil
+            self.connectSSE(lifecycleID: expectedLifecycleID)
         }
     }
 
@@ -537,17 +568,30 @@ final class DataBroadcastSession {
         while activeFetchCount < maxConcurrentFetches, !fetchQueue.isEmpty {
             let request = fetchQueue.removeFirst()
             activeFetchCount += 1
-            Task { @MainActor [weak self] in
-                await self?.performFetch(request, attempt: 1)
+            let expectedLifecycleID = lifecycleID
+            let task = Task { @MainActor [weak self] in
+                await self?.performFetch(
+                    request, attempt: 1, lifecycleID: expectedLifecycleID)
+                guard let self,
+                    self.started, self.lifecycleID == expectedLifecycleID
+                else { return }
+                self.activeFetchCount = max(0, self.activeFetchCount - 1)
+                self.fetchTasks[request.key] = nil
+                self.drainFetchQueue()
             }
+            fetchTasks[request.key] = task
         }
     }
 
-    private func performFetch(_ request: FetchRequest, attempt: Int) async {
+    private func performFetch(
+        _ request: FetchRequest, attempt: Int, lifecycleID: UUID
+    ) async {
         let key = request.key
+        guard isCurrentLifecycle(lifecycleID) else { return }
         do {
             let startedAt = ContinuousClock.now
             let files = try await fetchModuleFiles(request)
+            guard isCurrentLifecycle(lifecycleID) else { return }
             let elapsed = ContinuousClock.now - startedAt
             inflight.remove(key)
             delivered.insert(key)
@@ -558,6 +602,7 @@ final class DataBroadcastSession {
             )
             postModuleResources(request, files: files)
         } catch let failure as ModuleFetchFailure {
+            guard isCurrentLifecycle(lifecycleID) else { return }
             switch failure {
             case .permanent(let reason):
                 abandonedFetches.insert(key)
@@ -578,21 +623,26 @@ final class DataBroadcastSession {
             case .transient(let reason):
                 if attempt < 2 {
                     try? await Task.sleep(for: .seconds(1))
-                    await performFetch(request, attempt: attempt + 1)
+                    await performFetch(
+                        request, attempt: attempt + 1, lifecycleID: lifecycleID)
                     return
                 }
                 recordFetchFailure(request, reason: reason)
             }
         } catch {
+            guard isCurrentLifecycle(lifecycleID) else { return }
             if attempt < 2 {
                 try? await Task.sleep(for: .seconds(1))
-                await performFetch(request, attempt: attempt + 1)
+                await performFetch(
+                    request, attempt: attempt + 1, lifecycleID: lifecycleID)
                 return
             }
             recordFetchFailure(request, reason: "\(error)")
         }
-        activeFetchCount -= 1
-        drainFetchQueue()
+    }
+
+    private func isCurrentLifecycle(_ lifecycleID: UUID) -> Bool {
+        !Task.isCancelled && started && self.lifecycleID == lifecycleID
     }
 
     private func recordFetchFailure(_ request: FetchRequest, reason: String) {
@@ -729,12 +779,14 @@ final class DataBroadcastSession {
     /// every known complete module that hasn't been delivered yet (schedule()
     /// dedupes against delivered/inflight/abandoned, so passes are cheap
     /// no-ops in the steady state).
-    private func startReconciliation() {
+    private func startReconciliation(lifecycleID: UUID) {
         reconcileTask?.cancel()
         reconcileTask = Task { @MainActor [weak self] in
             while true {
                 try? await Task.sleep(for: .seconds(5))
-                guard !Task.isCancelled, let self, self.started else { return }
+                guard !Task.isCancelled, let self,
+                    self.started, self.lifecycleID == lifecycleID
+                else { return }
                 self.reconcile()
             }
         }
