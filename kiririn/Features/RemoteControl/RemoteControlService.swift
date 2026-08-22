@@ -25,6 +25,13 @@ final class RemoteControlService {
     private(set) var lastErrorMessage: String?
     var selectedPlayerID: String?
 
+    var isReconnecting: Bool {
+        if case .reconnecting = connectionStatus {
+            return true
+        }
+        return false
+    }
+
     private let defaults: UserDefaults
     private let trustedPeerStore: RemoteTrustedPeerStore
     private let dispatcher = RemotePlayerCommandDispatcher()
@@ -63,6 +70,11 @@ final class RemoteControlService {
     private var isAuthenticated = false
     private var authenticatedConnectionID: String?
     private var awaitingAuthenticationAcceptanceConnectionID: String?
+    private var reconnectingControllerPeerID: String?
+    private var reconnectingControllerPeerName: String?
+    private var reconnectingDisconnectPendingID: String?
+    private var reconnectionTask: Task<Void, Never>?
+    private var isApplicationInBackground = false
     private var pairingFailureCount = 0
     private var snapshotTask: Task<Void, Never>?
     private var lastSentSnapshots: [RemotePlayerSnapshot] = []
@@ -108,6 +120,36 @@ final class RemoteControlService {
         pairingFailureCount = 0
     }
 
+    func handleAppDidEnterBackground() {
+        isApplicationInBackground = true
+        reconnectionTask?.cancel()
+        reconnectionTask = nil
+
+        guard operationMode == .controller,
+            isAuthenticated,
+            let connectionID = authenticatedConnectionID ?? currentConnectionID
+        else {
+            return
+        }
+        rememberControllerForReconnection(connectionID: connectionID)
+    }
+
+    func handleAppDidBecomeActive() {
+        isApplicationInBackground = false
+
+        guard operationMode == .controller,
+            let connectionID = reconnectingControllerPeerID
+        else {
+            return
+        }
+
+        if isAuthenticated, authenticatedConnectionID == connectionID {
+            beginControllerReconnection(connectionID: connectionID)
+        } else if currentConnectionID == nil {
+            scheduleControllerReconnection(after: .milliseconds(0))
+        }
+    }
+
     func startBrowsing() {
         guard
             operationMode != .controller
@@ -124,27 +166,36 @@ final class RemoteControlService {
             connectionStatus = .failed("登録済み端末をKeychainから読み込めませんでした")
             return
         }
+        let preservesRemotePlayers = reconnectingControllerPeerID != nil
         operationMode = .controller
-        resetConnectionState()
+        resetConnectionState(preservingRemotePlayers: preservesRemotePlayers)
         discoveredPeers = []
-        connectionStatus = .browsing
+        if preservesRemotePlayers {
+            connectionStatus = .reconnecting(reconnectingControllerPeerName ?? "接続先")
+        } else {
+            connectionStatus = .browsing
+        }
         transport.stopAdvertising()
+        reconnectionTask?.cancel()
+        reconnectionTask = nil
         transport.startBrowsing()
     }
 
     func stopBrowsing() {
         transport.stopBrowsing()
-        if !isAuthenticated {
-            if currentConnectionID != nil {
-                transport.disconnect()
-                resetConnectionState()
-            }
-            operationMode = .idle
-            connectionStatus = .idle
+        guard !isAuthenticated, !isApplicationInBackground else { return }
+
+        if currentConnectionID != nil {
+            transport.disconnect()
         }
+        clearControllerReconnection()
+        resetConnectionState()
+        operationMode = .idle
+        connectionStatus = .idle
     }
 
     func connect(to peer: RemoteDiscoveredPeer) {
+        clearControllerReconnection()
         operationMode = .controller
         currentConnectionID = peer.id
         connectionStatus = .connecting(peerID: peer.id, displayName: peer.displayName)
@@ -153,6 +204,7 @@ final class RemoteControlService {
     }
 
     func disconnect() {
+        clearControllerReconnection()
         transport.disconnect()
         resetConnectionState()
         if operationMode == .controller {
@@ -282,6 +334,7 @@ final class RemoteControlService {
             return
         }
         operationMode = .receiver
+        clearControllerReconnection()
         resetConnectionState()
         rotatePairingPIN()
         transport.stopBrowsing()
@@ -292,6 +345,7 @@ final class RemoteControlService {
         transport.stopAdvertising()
         transport.disconnect()
         operationMode = .idle
+        clearControllerReconnection()
         resetConnectionState()
         connectionStatus = .idle
     }
@@ -307,6 +361,7 @@ final class RemoteControlService {
                     $0.displayName.localizedCompare($1.displayName) == .orderedAscending
                 }
             }
+            reconnect(to: peer)
         case .lost(let connectionID):
             discoveredPeers.removeAll { $0.id == connectionID }
         case .connecting(let connectionID):
@@ -318,7 +373,11 @@ final class RemoteControlService {
                 discoveredPeers.first(where: { $0.id == connectionID })?.displayName
                 ?? remoteIdentity?.displayName
                 ?? "接続先"
-            connectionStatus = .connecting(peerID: connectionID, displayName: name)
+            if reconnectingControllerPeerID == connectionID {
+                connectionStatus = .reconnecting(reconnectingControllerPeerName ?? name)
+            } else {
+                connectionStatus = .connecting(peerID: connectionID, displayName: name)
+            }
         case .connected(let connectionID):
             guard currentConnectionID == nil || currentConnectionID == connectionID else {
                 return
@@ -335,17 +394,45 @@ final class RemoteControlService {
             guard currentConnectionID == nil || currentConnectionID == connectionID else {
                 return
             }
-            resetConnectionState()
-            if operationMode == .controller {
-                connectionStatus = .browsing
-                transport.startBrowsing()
+
+            if reconnectingDisconnectPendingID == connectionID {
+                reconnectingDisconnectPendingID = nil
+                scheduleControllerReconnection(after: .milliseconds(0))
+                return
+            }
+
+            let shouldReconnect =
+                operationMode == .controller
+                && (reconnectingControllerPeerID == connectionID
+                    || (isAuthenticated && authenticatedConnectionID == connectionID))
+            if shouldReconnect {
+                rememberControllerForReconnection(connectionID: connectionID)
+                let name = reconnectingControllerPeerName ?? "接続先"
+                resetConnectionState(preservingRemotePlayers: true)
+                connectionStatus = .reconnecting(name)
+                scheduleControllerReconnection(after: .milliseconds(0))
             } else {
-                connectionStatus = .idle
+                resetConnectionState()
+                if operationMode == .controller {
+                    connectionStatus = .browsing
+                    transport.startBrowsing()
+                } else {
+                    connectionStatus = .idle
+                }
             }
         case .received(let data, let connectionID):
             guard currentConnectionID == connectionID else { return }
             handleReceivedData(data, connectionID: connectionID)
         case .failed(let message):
+            if operationMode == .controller,
+                reconnectingControllerPeerID != nil
+            {
+                let name = reconnectingControllerPeerName ?? "接続先"
+                resetConnectionState(preservingRemotePlayers: true)
+                connectionStatus = .reconnecting(name)
+                scheduleControllerReconnection(after: .seconds(1))
+                return
+            }
             lastErrorMessage = message
             connectionStatus = .failed(message)
         }
@@ -691,6 +778,7 @@ final class RemoteControlService {
         authenticatedConnectionID = connectionID
         awaitingAuthenticationAcceptanceConnectionID = nil
         transport.stopBrowsing()
+        clearControllerReconnection()
         pairingRequest = nil
         pairingChallenge = nil
         let name = remoteIdentity?.displayName ?? "Mac"
@@ -832,11 +920,12 @@ final class RemoteControlService {
     private func rejectConnection(message: String) {
         lastErrorMessage = message
         connectionStatus = .failed(message)
+        clearControllerReconnection()
         transport.disconnect()
         resetConnectionState()
     }
 
-    private func resetConnectionState() {
+    private func resetConnectionState(preservingRemotePlayers: Bool = false) {
         snapshotTask?.cancel()
         snapshotTask = nil
         currentConnectionID = nil
@@ -848,11 +937,88 @@ final class RemoteControlService {
         isAuthenticated = false
         authenticatedConnectionID = nil
         awaitingAuthenticationAcceptanceConnectionID = nil
-        remotePlayers = []
-        selectedPlayerID = nil
+        if !preservingRemotePlayers {
+            remotePlayers = []
+            selectedPlayerID = nil
+        }
         lastSentSnapshots = []
         processedCommandResponses.removeAll()
         processedCommandOrder.removeAll()
+    }
+
+    private func reconnect(to peer: RemoteDiscoveredPeer) {
+        guard operationMode == .controller,
+            currentConnectionID == nil,
+            reconnectingControllerPeerID == peer.id
+        else {
+            return
+        }
+
+        reconnectionTask?.cancel()
+        reconnectionTask = nil
+        reconnectingControllerPeerName = peer.displayName
+        currentConnectionID = peer.id
+        connectionStatus = .reconnecting(peer.displayName)
+        transport.connect(to: peer.id)
+    }
+
+    private func beginControllerReconnection(connectionID: String) {
+        rememberControllerForReconnection(connectionID: connectionID)
+        let name = reconnectingControllerPeerName ?? "接続先"
+        resetConnectionState(preservingRemotePlayers: true)
+        connectionStatus = .reconnecting(name)
+        reconnectingDisconnectPendingID = connectionID
+        transport.disconnect()
+        scheduleControllerReconnection(after: .milliseconds(250))
+    }
+
+    private func rememberControllerForReconnection(connectionID: String) {
+        let existingName =
+            reconnectingControllerPeerID == connectionID
+            ? reconnectingControllerPeerName
+            : nil
+        reconnectingControllerPeerID = connectionID
+        reconnectingControllerPeerName =
+            remoteIdentity?.displayName
+            ?? existingName
+            ?? discoveredPeers.first(where: { $0.id == connectionID })?.displayName
+            ?? "接続先"
+    }
+
+    private func scheduleControllerReconnection(after delay: Duration) {
+        guard !isApplicationInBackground,
+            operationMode == .controller,
+            reconnectingControllerPeerID != nil
+        else {
+            return
+        }
+
+        reconnectionTask?.cancel()
+        reconnectionTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled,
+                let self
+            else {
+                return
+            }
+            self.reconnectionTask = nil
+            guard !self.isApplicationInBackground,
+                self.operationMode == .controller,
+                self.reconnectingControllerPeerID != nil,
+                self.currentConnectionID == nil
+            else {
+                return
+            }
+            self.transport.startBrowsing()
+        }
+    }
+
+    private func clearControllerReconnection() {
+        reconnectionTask?.cancel()
+        reconnectionTask = nil
+        reconnectingControllerPeerID = nil
+        reconnectingControllerPeerName = nil
+        reconnectingDisconnectPendingID = nil
     }
 
     private func commandErrorMessage(_ error: RemoteCommandError) -> String {

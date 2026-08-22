@@ -171,12 +171,19 @@ struct ContentView: View {
                 showCacheDatabaseFailureToast()
             }
             .onChange(of: scenePhase) { _, newPhase in
-                guard newPhase == .active else { return }
-                if playerState.isPipEnabled {
-                    playerState.isPipEnabled = false
-                }
-                Task {
-                    await manager.handleAppDidBecomeActive()
+                switch newPhase {
+                case .active:
+                    appModel.remoteControlService.handleAppDidBecomeActive()
+                    if playerState.isPipEnabled {
+                        playerState.isPipEnabled = false
+                    }
+                    Task {
+                        await manager.handleAppDidBecomeActive()
+                    }
+                case .background:
+                    appModel.remoteControlService.handleAppDidEnterBackground()
+                default:
+                    break
                 }
             }
             .onOpenURL { url in

@@ -1,19 +1,38 @@
 #if os(iOS)
     import SwiftUI
 
-    struct RemoteOptionControls: View {
+    struct RemoteOptionControls: View, Equatable {
         let player: RemotePlayerSnapshot
         let send: (RemoteControlCommand) -> Void
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.player.id == rhs.player.id
+                && lhs.player.capabilities == rhs.player.capabilities
+                && lhs.player.rate == rhs.player.rate
+                && lhs.player.audioTracks == rhs.player.audioTracks
+                && lhs.player.selectedAudioTrackSelection
+                    == rhs.player.selectedAudioTrackSelection
+                && lhs.player.videoTracks == rhs.player.videoTracks
+                && lhs.player.selectedVideoTrackID == rhs.player.selectedVideoTrackID
+        }
 
         var body: some View {
             HStack(spacing: 8) {
                 if player.capabilities.contains(.rate) {
                     Menu {
-                        ForEach(PlayerPlaybackOptionCatalog.rateOptions, id: \.self) { rate in
-                            Button(PlayerPlaybackOptionCatalog.rateLabel(rate)) {
-                                send(.setRate(rate))
+                        Picker(
+                            "再生速度",
+                            selection: Binding<Float>(
+                                get: { player.rate },
+                                set: { send(.setRate($0)) }
+                            )
+                        ) {
+                            ForEach(PlayerPlaybackOptionCatalog.rateOptions, id: \.self) { rate in
+                                Text(PlayerPlaybackOptionCatalog.rateLabel(rate))
+                                    .tag(rate)
                             }
                         }
+                        .labelsHidden()
                     } label: {
                         optionLabel(
                             title: "速度",
