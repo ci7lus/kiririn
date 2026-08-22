@@ -142,6 +142,9 @@ struct PluginWebView: PluginWebViewRepresentable {
         uiView.stopLoading()
         uiView.uiDelegate = nil
         uiView.navigationDelegate = nil
+        let contentController = uiView.configuration.userContentController
+        contentController.removeScriptMessageHandler(forName: "kiririn")
+        contentController.removeAllUserScripts()
 
         if let parent = coordinator.parent,
             parent.displayArea == .overlay,
@@ -591,6 +594,7 @@ struct PluginWebView: PluginWebViewRepresentable {
         var wantsCaptureEvents = false
         var pendingDeeplinkEvents: [URL] = []
         var announcedCaptureEvents: [String: PluginCaptureEvent] = [:]
+        var announcedCaptureEventOrder: [String] = []
         var captureEventCancellable: AnyCancellable?
         var onCrash: (@MainActor () -> Void)?
         private let logger = Logger(label: "PluginBridge")
@@ -656,6 +660,8 @@ struct PluginWebView: PluginWebViewRepresentable {
             lastInjectedFocusedPlayerID = nil
             lastInjectedPlayerIDs = nil
             wantsCaptureEvents = false
+            announcedCaptureEvents.removeAll()
+            announcedCaptureEventOrder.removeAll()
             isPageReady = false
         }
 
@@ -666,6 +672,7 @@ struct PluginWebView: PluginWebViewRepresentable {
             onCrash = nil
             pendingDeeplinkEvents.removeAll()
             announcedCaptureEvents.removeAll()
+            announcedCaptureEventOrder.removeAll()
             lastInjectedPlayablesJson = nil
             lastInjectedStatusesJson = nil
             lastInjectedStatusesContainedScrubbing = false
@@ -761,7 +768,14 @@ struct PluginWebView: PluginWebViewRepresentable {
 
         @MainActor
         private func dispatchPluginCaptureEvent(_ event: PluginCaptureEvent) {
+            if announcedCaptureEvents[event.captureID] == nil {
+                announcedCaptureEventOrder.append(event.captureID)
+            }
             announcedCaptureEvents[event.captureID] = event
+            while announcedCaptureEventOrder.count > 100 {
+                let expiredID = announcedCaptureEventOrder.removeFirst()
+                announcedCaptureEvents.removeValue(forKey: expiredID)
+            }
             let payload: [String: Any] = [
                 "playerID": event.playerID,
                 "captureID": event.captureID,
@@ -923,7 +937,11 @@ struct PluginWebView: PluginWebViewRepresentable {
                 let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
                 alert.addAction(
                     UIAlertAction(title: "OK", style: .default) { _ in completionHandler() })
-                findParentViewController(of: webView)?.present(alert, animated: true)
+                guard let presenter = findParentViewController(of: webView) else {
+                    completionHandler()
+                    return
+                }
+                presenter.present(alert, animated: true)
             #endif
         }
 
@@ -950,7 +968,11 @@ struct PluginWebView: PluginWebViewRepresentable {
                     UIAlertAction(title: "キャンセル", style: .cancel) { _ in completionHandler(false) })
                 alert.addAction(
                     UIAlertAction(title: "OK", style: .default) { _ in completionHandler(true) })
-                findParentViewController(of: webView)?.present(alert, animated: true)
+                guard let presenter = findParentViewController(of: webView) else {
+                    completionHandler(false)
+                    return
+                }
+                presenter.present(alert, animated: true)
             #endif
         }
 
@@ -988,7 +1010,11 @@ struct PluginWebView: PluginWebViewRepresentable {
                     UIAlertAction(title: "OK", style: .default) { _ in
                         completionHandler(alert.textFields?.first?.text)
                     })
-                findParentViewController(of: webView)?.present(alert, animated: true)
+                guard let presenter = findParentViewController(of: webView) else {
+                    completionHandler(nil)
+                    return
+                }
+                presenter.present(alert, animated: true)
             #endif
         }
 
