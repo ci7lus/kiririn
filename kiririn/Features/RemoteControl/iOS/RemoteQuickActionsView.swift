@@ -1,7 +1,7 @@
 #if os(iOS)
     import SwiftUI
 
-    struct RemoteQuickActionsView: View {
+    struct RemoteQuickActionsView: View, Equatable {
         let service: RemoteControlService
         let player: RemotePlayerSnapshot
         let send: (RemoteControlCommand) -> Void
@@ -14,6 +14,16 @@
             GridItem(.flexible()),
             GridItem(.flexible()),
         ]
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.player.id == rhs.player.id
+                && lhs.player.capabilities == rhs.player.capabilities
+                && lhs.player.isSubtitleEnabled == rhs.player.isSubtitleEnabled
+                && lhs.player.isPipEnabled == rhs.player.isPipEnabled
+                && lhs.player.isRecording == rhs.player.isRecording
+                && lhs.player.isFullscreen == rhs.player.isFullscreen
+                && lhs.player.isAlwaysOnTop == rhs.player.isAlwaysOnTop
+        }
 
         var body: some View {
             LazyVGrid(columns: columns, spacing: 8) {

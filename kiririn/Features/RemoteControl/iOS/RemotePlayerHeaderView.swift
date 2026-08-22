@@ -1,8 +1,15 @@
 #if os(iOS)
     import SwiftUI
 
-    struct RemotePlayerHeaderView: View {
+    struct RemotePlayerHeaderView: View, Equatable {
         let player: RemotePlayerSnapshot
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.player.id == rhs.player.id
+                && lhs.player.title == rhs.player.title
+                && lhs.player.serviceName == rhs.player.serviceName
+                && lhs.player.isRecording == rhs.player.isRecording
+        }
 
         var body: some View {
             HStack(spacing: 12) {

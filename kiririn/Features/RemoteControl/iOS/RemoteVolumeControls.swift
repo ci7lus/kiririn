@@ -1,11 +1,17 @@
 #if os(iOS)
     import SwiftUI
 
-    struct RemoteVolumeControls: View {
+    struct RemoteVolumeControls: View, Equatable {
         let player: RemotePlayerSnapshot
         let send: (RemoteControlCommand) -> Void
         @State private var volume = 100.0
         @State private var isAdjustingVolume = false
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.player.id == rhs.player.id
+                && lhs.player.volume == rhs.player.volume
+                && lhs.player.isMuted == rhs.player.isMuted
+        }
 
         var body: some View {
             HStack(spacing: 10) {
