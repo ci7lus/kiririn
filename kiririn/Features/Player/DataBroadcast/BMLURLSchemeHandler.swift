@@ -24,6 +24,53 @@ private final class BMLProxySessionDelegate: NSObject, URLSessionDelegate, @unch
     }
 }
 
+private nonisolated final class BMLDNSResolutionGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<String?, Never>?
+    private var timeoutTask: Task<Void, Never>?
+    private var didFinish = false
+
+    func install(continuation: CheckedContinuation<String?, Never>) {
+        lock.lock()
+        let shouldResume = didFinish
+        if !shouldResume {
+            self.continuation = continuation
+        }
+        lock.unlock()
+        if shouldResume {
+            continuation.resume(returning: nil)
+        }
+    }
+
+    func install(timeoutTask: Task<Void, Never>) {
+        lock.lock()
+        let shouldCancel = didFinish
+        if !shouldCancel {
+            self.timeoutTask = timeoutTask
+        }
+        lock.unlock()
+        if shouldCancel {
+            timeoutTask.cancel()
+        }
+    }
+
+    func finish(with result: String?) {
+        lock.lock()
+        guard !didFinish else {
+            lock.unlock()
+            return
+        }
+        didFinish = true
+        let continuation = self.continuation
+        self.continuation = nil
+        let timeoutTask = self.timeoutTask
+        self.timeoutTask = nil
+        lock.unlock()
+        timeoutTask?.cancel()
+        continuation?.resume(returning: result)
+    }
+}
+
 final class BMLURLSchemeHandler: NSObject, WKURLSchemeHandler {
     static let scheme = "kiririn-bml"
     static let host = "app"
@@ -268,38 +315,55 @@ final class BMLURLSchemeHandler: NSObject, WKURLSchemeHandler {
     /// キャンセルできないので、タイムアウト時はブロック中のスレッドを見捨てて
     /// 先に帰る(解決が終われば勝手に片付く)。
     static func resolveIPv4(_ host: String, timeoutMillis: Int) async -> String? {
-        await withTaskGroup(of: String?.self) { group in
-            group.addTask {
-                var hints = addrinfo()
-                hints.ai_family = AF_INET
-                hints.ai_socktype = SOCK_STREAM
-                var result: UnsafeMutablePointer<addrinfo>?
-                guard getaddrinfo(host, nil, &hints, &result) == 0, let info = result else {
-                    return nil
+        let boundedTimeout = min(max(timeoutMillis, 0), 60_000)
+        let gate = BMLDNSResolutionGate()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                gate.install(continuation: continuation)
+                guard !Task.isCancelled else {
+                    gate.finish(with: nil)
+                    return
                 }
-                defer { freeaddrinfo(info) }
-                var pointer: UnsafeMutablePointer<addrinfo>? = info
-                while let current = pointer {
-                    if current.pointee.ai_family == AF_INET, let addr = current.pointee.ai_addr {
-                        var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-                        var sin = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
-                            $0.pointee.sin_addr
-                        }
-                        if inet_ntop(AF_INET, &sin, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil {
-                            return String(cString: buffer)
-                        }
+                DispatchQueue.global(qos: .utility).async {
+                    gate.finish(with: lookupIPv4(host))
+                }
+                let timeoutTask = Task {
+                    do {
+                        try await Task.sleep(for: .milliseconds(boundedTimeout))
+                    } catch {
+                        return
                     }
-                    pointer = current.pointee.ai_next
+                    gate.finish(with: nil)
                 }
-                return nil
+                gate.install(timeoutTask: timeoutTask)
             }
-            group.addTask {
-                try? await Task.sleep(for: .milliseconds(max(0, timeoutMillis)))
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+        } onCancel: {
+            gate.finish(with: nil)
         }
+    }
+
+    private static func lookupIPv4(_ host: String) -> String? {
+        var hints = addrinfo()
+        hints.ai_family = AF_INET
+        hints.ai_socktype = SOCK_STREAM
+        var result: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(host, nil, &hints, &result) == 0, let info = result else {
+            return nil
+        }
+        defer { freeaddrinfo(info) }
+        var pointer: UnsafeMutablePointer<addrinfo>? = info
+        while let current = pointer {
+            if current.pointee.ai_family == AF_INET, let addr = current.pointee.ai_addr {
+                var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+                var sin = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+                    $0.pointee.sin_addr
+                }
+                if inet_ntop(AF_INET, &sin, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil {
+                    return String(cString: buffer)
+                }
+            }
+            pointer = current.pointee.ai_next
+        }
+        return nil
     }
 }

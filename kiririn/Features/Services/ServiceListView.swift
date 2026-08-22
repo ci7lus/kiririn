@@ -34,6 +34,7 @@ struct ServiceListView: View {
     @State private var groupedServices: [(String, [ServiceListItem])] = []
     @State private var refreshState = ServiceListRefreshState()
     @State private var isBuildingList = true
+    @Environment(\.isTabActive) private var isTabActive
 
     private struct ServiceDisplayGroup {
         let id: String
@@ -114,18 +115,29 @@ struct ServiceListView: View {
                 searchText: Bindable(viewModel).searchText
             )
         )
-        .task {
+        .task(id: isTabActive) {
+            guard isTabActive else {
+                refreshState.rebuildTask?.cancel()
+                refreshState.rebuildTask = nil
+                return
+            }
             triggerRebuild()
             await startMinuteAlignedRefreshLoop()
         }
+        .onDisappear {
+            refreshState.rebuildTask?.cancel()
+            refreshState.rebuildTask = nil
+        }
         .onChange(of: viewModel.searchText) {
+            guard isTabActive else { return }
             triggerRebuild()
         }
         .onChange(of: manager.isCacheReady) { _, isReady in
-            guard isReady else { return }
+            guard isTabActive, isReady else { return }
             triggerRebuild()
         }
         .onChange(of: manager.serviceListServices) {
+            guard isTabActive else { return }
             triggerRebuild(after: serviceListRebuildDebounce)
         }
         .sheet(isPresented: $showingFavoriteOrderingSheet) {
@@ -675,8 +687,8 @@ struct ServiceListView: View {
             for: snapshotServices,
             at: date
         )
-        guard !Task.isCancelled,
-            playerState.currentPlayable?.id == expectedPlayableID,
+        guard !Task.isCancelled else { return }
+        guard playerState.currentPlayable?.id == expectedPlayableID,
             Set(servicesForProgramSnapshot().map { serviceKey(for: $0) }) == snapshotServiceKeys
         else {
             await triggerRebuild().value

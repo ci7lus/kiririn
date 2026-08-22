@@ -82,8 +82,7 @@ final class AppModel {
         mediaPlaybackCoordinator = MediaPlaybackCoordinator()
         pluginStore.onLocalFolderManifestChanged = { [weak self] pluginID in
             guard let self else { return }
-            self.syncPluginsToPlayer()
-            self.reloadPluginInAllPlayerStates(id: pluginID.uuidString)
+            self.syncPluginsToPlayer(forceReloadPluginIDs: [pluginID])
         }
         playerState.plugins = pluginStore.plugins
         remoteControlService.configure(appModel: self)
@@ -164,13 +163,51 @@ final class AppModel {
         }
     #endif
 
-    func syncPluginsToPlayer() {
+    func syncPluginsToPlayer(forceReloadPluginIDs: Set<UUID> = []) {
+        let previousPluginsByID = Dictionary(
+            uniqueKeysWithValues: playerState.plugins.map { ($0.id, $0) }
+        )
+        let previouslyEnabledPluginIDs = Set(
+            playerState.plugins.lazy
+                .filter { $0.isEnabled && !$0.isBlocked }
+                .map(\.id)
+        )
         pluginStore.refreshPluginsFromFiles()
         let currentPlugins = pluginStore.plugins
+        let enabledPluginIDs = Set(
+            currentPlugins.lazy
+                .filter { $0.isEnabled && !$0.isBlocked }
+                .map(\.id)
+        )
+        let currentPluginsByID = Dictionary(
+            uniqueKeysWithValues: currentPlugins.map { ($0.id, $0) }
+        )
+        let changedEnabledPluginIDs = Set(
+            enabledPluginIDs.filter { pluginID in
+                guard let previous = previousPluginsByID[pluginID],
+                    let current = currentPluginsByID[pluginID]
+                else { return false }
+                return previous != current
+            })
+        let invalidatedPluginIDs =
+            previouslyEnabledPluginIDs.subtracting(enabledPluginIDs)
+            .union(changedEnabledPluginIDs)
+            .union(forceReloadPluginIDs)
+        for pluginID in invalidatedPluginIDs {
+            ExtensionPluginRuntimeRegistry.shared.invalidate(pluginID: pluginID)
+        }
         playerState.plugins = currentPlugins
 
-        for state in activePlayerStates {
+        for state in activePlayerStates where state !== playerState {
             state.plugins = currentPlugins
+        }
+
+        let reloadedPluginIDs =
+            changedEnabledPluginIDs
+            .union(forceReloadPluginIDs)
+            .intersection(enabledPluginIDs)
+        for pluginID in reloadedPluginIDs {
+            reloadPluginTokenInAllPlayerStates(id: pluginID.uuidString)
         }
     }
 
@@ -186,6 +223,10 @@ final class AppModel {
         if let pluginID = UUID(uuidString: id) {
             ExtensionPluginRuntimeRegistry.shared.invalidate(pluginID: pluginID)
         }
+        reloadPluginTokenInAllPlayerStates(id: id)
+    }
+
+    private func reloadPluginTokenInAllPlayerStates(id: String) {
         playerState.reloadPlugin(id: id)
         for state in activePlayerStates where state !== playerState {
             state.reloadPlugin(id: id)
@@ -210,16 +251,21 @@ final class AppModel {
 
     func playImportedFile(_ url: URL, securityScoped: Bool = true) {
         logger.info("playImportedFile url=\(url.absoluteString), securityScoped=\(securityScoped)")
+        let didStartSecurityScope: Bool
         if securityScoped {
-            if url.startAccessingSecurityScopedResource() {
-                playerState.adoptSecurityScopedPlaybackURL(url)
+            didStartSecurityScope = url.startAccessingSecurityScopedResource()
+            if didStartSecurityScope {
                 logger.debug("security scope granted for \(url.absoluteString)")
             } else {
-                playerState.adoptSecurityScopedPlaybackURL(nil)
                 logger.warning("security scope denied for \(url.absoluteString)")
             }
         } else {
-            playerState.adoptSecurityScopedPlaybackURL(nil)
+            didStartSecurityScope = false
+        }
+        defer {
+            if didStartSecurityScope {
+                url.stopAccessingSecurityScopedResource()
+            }
         }
 
         let bookmarkData =

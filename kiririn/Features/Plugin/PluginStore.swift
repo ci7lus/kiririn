@@ -234,9 +234,21 @@ class PluginStore {
         [:]
     @ObservationIgnored private var localManifestWatcherPaths: [UUID: String] = [:]
     @ObservationIgnored private var pendingLocalManifestReloads: [UUID: DispatchWorkItem] = [:]
+    #if os(macOS)
+        private struct LocalFolderSecurityScope {
+            let url: URL
+            let resourceBasePath: String
+            let bookmark: Data?
+        }
+
+        @ObservationIgnored private var localFolderSecurityScopes:
+            [UUID: LocalFolderSecurityScope] =
+                [:]
+    #endif
 
     var plugins: [PluginDefinition] {
         didSet {
+            releaseStaleLocalFolderSecurityScopes()
             persistPlugins()
             syncLocalManifestWatchers()
         }
@@ -305,6 +317,7 @@ class PluginStore {
     }
 
     deinit {
+        releaseAllLocalFolderSecurityScopes()
         stopAllLocalManifestWatchers()
     }
 
@@ -624,7 +637,8 @@ class PluginStore {
         )
         source.setEventHandler { [weak self] in
             guard let self else { return }
-            let events = source.data
+            guard let watchedSource = self.localManifestWatchers[pluginID] else { return }
+            let events = watchedSource.data
             let shouldReload =
                 events.contains(.write)
                 || events.contains(.delete)
@@ -647,7 +661,10 @@ class PluginStore {
         pendingLocalManifestReloads[pluginID]?.cancel()
         pendingLocalManifestReloads[pluginID] = nil
         localManifestWatcherPaths[pluginID] = nil
-        localManifestWatchers.removeValue(forKey: pluginID)?.cancel()
+        if let source = localManifestWatchers.removeValue(forKey: pluginID) {
+            source.setEventHandler {}
+            source.cancel()
+        }
     }
 
     private func stopAllLocalManifestWatchers() {
@@ -657,6 +674,7 @@ class PluginStore {
         pendingLocalManifestReloads = [:]
         localManifestWatcherPaths = [:]
         for source in localManifestWatchers.values {
+            source.setEventHandler {}
             source.cancel()
         }
         localManifestWatchers = [:]
@@ -1205,6 +1223,15 @@ class PluginStore {
 
     private func localFolderResourceBaseURL(for plugin: PluginDefinition) throws -> URL {
         if plugin.sourceType == .localFolder {
+            #if os(macOS)
+                if let activeScope = localFolderSecurityScopes[plugin.id],
+                    activeScope.resourceBasePath == plugin.resourceBasePath,
+                    activeScope.bookmark == plugin.resourceBookmark
+                {
+                    return activeScope.url
+                }
+                releaseLocalFolderSecurityScope(for: plugin.id)
+            #endif
             if let bookmark = plugin.resourceBookmark {
                 var isStale = false
                 #if os(macOS)
@@ -1221,7 +1248,14 @@ class PluginStore {
                     bookmarkDataIsStale: &isStale
                 )
                 #if os(macOS)
-                    _ = resolvedURL.startAccessingSecurityScopedResource()
+                    guard resolvedURL.startAccessingSecurityScopedResource() else {
+                        throw CocoaError(.fileReadNoPermission)
+                    }
+                    localFolderSecurityScopes[plugin.id] = LocalFolderSecurityScope(
+                        url: resolvedURL,
+                        resourceBasePath: plugin.resourceBasePath,
+                        bookmark: plugin.resourceBookmark
+                    )
                 #endif
                 return resolvedURL
             }
@@ -1230,6 +1264,40 @@ class PluginStore {
         }
 
         return pluginDirectoryURL.appending(path: plugin.resourceBasePath)
+    }
+
+    private func releaseStaleLocalFolderSecurityScopes() {
+        #if os(macOS)
+            let stalePluginIDs = localFolderSecurityScopes.keys.filter { pluginID in
+                guard let plugin = plugins.first(where: { $0.id == pluginID }) else {
+                    return true
+                }
+                return plugin.sourceType != .localFolder
+                    || localFolderSecurityScopes[pluginID]?.resourceBasePath
+                        != plugin.resourceBasePath
+                    || localFolderSecurityScopes[pluginID]?.bookmark != plugin.resourceBookmark
+            }
+            for pluginID in stalePluginIDs {
+                releaseLocalFolderSecurityScope(for: pluginID)
+            }
+        #endif
+    }
+
+    private func releaseLocalFolderSecurityScope(for pluginID: UUID) {
+        #if os(macOS)
+            guard let scope = localFolderSecurityScopes.removeValue(forKey: pluginID) else {
+                return
+            }
+            scope.url.stopAccessingSecurityScopedResource()
+        #endif
+    }
+
+    private func releaseAllLocalFolderSecurityScopes() {
+        #if os(macOS)
+            for pluginID in Array(localFolderSecurityScopes.keys) {
+                releaseLocalFolderSecurityScope(for: pluginID)
+            }
+        #endif
     }
 
     private func extractedResourceBaseURL(

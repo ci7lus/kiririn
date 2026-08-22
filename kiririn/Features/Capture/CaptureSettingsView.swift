@@ -6,6 +6,7 @@ struct CaptureSettingsView: View {
     @ObservedObject private var captureService = CaptureService.shared
     @State private var isFolderPickerPresented = false
     @State private var isShowingClearAllAlert = false
+    @State private var isShowingClearHistoryFailureAlert = false
 
     #if os(macOS)
         @AppStorage(GlobalCaptureHotKeyManager.defaultsKeyCodeKey) private
@@ -109,11 +110,19 @@ struct CaptureSettingsView: View {
             Button("キャンセル", role: .cancel) {}
             Button("全て消去", role: .destructive) {
                 Task {
-                    await captureService.clearHistory()
+                    let result = await captureService.clearHistory()
+                    if result == .failed {
+                        isShowingClearHistoryFailureAlert = true
+                    }
                 }
             }
         } message: {
             Text("本当に全てのキャプチャ履歴を消去しますか? この操作は元に戻せません。")
+        }
+        .alert("履歴を消去できませんでした", isPresented: $isShowingClearHistoryFailureAlert) {
+            Button("OK") {}
+        } message: {
+            Text("一部の履歴が残っている可能性があります。もう一度お試しください。")
         }
         .fileImporter(
             isPresented: $isFolderPickerPresented,

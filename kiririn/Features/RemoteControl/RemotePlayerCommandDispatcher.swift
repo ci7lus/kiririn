@@ -13,8 +13,16 @@ protocol RemotePlayerWindowEndpoint: AnyObject {
 
 @MainActor
 final class RemotePlayerCommandDispatcher {
+    private final class WindowEndpointReference {
+        weak var value: (any RemotePlayerWindowEndpoint)?
+
+        init(_ value: any RemotePlayerWindowEndpoint) {
+            self.value = value
+        }
+    }
+
     private weak var appModel: AppModel?
-    private var windowEndpoints: [String: any RemotePlayerWindowEndpoint] = [:]
+    private var windowEndpoints: [String: WindowEndpointReference] = [:]
 
     func configure(appModel: AppModel) {
         self.appModel = appModel
@@ -24,7 +32,7 @@ final class RemotePlayerCommandDispatcher {
         _ endpoint: any RemotePlayerWindowEndpoint,
         forPlayerID playerID: String
     ) {
-        windowEndpoints[playerID] = endpoint
+        windowEndpoints[playerID] = WindowEndpointReference(endpoint)
     }
 
     func unregisterWindowEndpoint(forPlayerID playerID: String) {
@@ -64,10 +72,10 @@ final class RemotePlayerCommandDispatcher {
         case .setVolume(let volume):
             guard volume.isFinite, (0...200).contains(volume) else { return .invalidValue }
             state.setVolume(volume)
-            windowEndpoints[request.playerID]?.showVolumeFeedback()
+            windowEndpoint(for: request.playerID)?.showVolumeFeedback()
         case .setMuted(let enabled):
             state.setMuted(enabled)
-            windowEndpoints[request.playerID]?.showVolumeFeedback()
+            windowEndpoint(for: request.playerID)?.showVolumeFeedback()
         case .selectAudioTrack(let remoteSelection):
             if let remoteSelection {
                 guard
@@ -106,17 +114,17 @@ final class RemotePlayerCommandDispatcher {
         case .pressBMLKey(let keyCode):
             guard state.pressBMLKey(keyCode) else { return .unavailable }
         case .setFullscreen(let enabled):
-            guard let endpoint = windowEndpoints[request.playerID] else {
+            guard let endpoint = windowEndpoint(for: request.playerID) else {
                 return .unsupported
             }
             return endpoint.setFullscreen(enabled)
         case .setAlwaysOnTop(let enabled):
-            guard let endpoint = windowEndpoints[request.playerID] else {
+            guard let endpoint = windowEndpoint(for: request.playerID) else {
                 return .unsupported
             }
             return endpoint.setAlwaysOnTop(enabled)
         case .close:
-            guard let endpoint = windowEndpoints[request.playerID] else {
+            guard let endpoint = windowEndpoint(for: request.playerID) else {
                 return .unsupported
             }
             return endpoint.close()
@@ -130,8 +138,17 @@ final class RemotePlayerCommandDispatcher {
         }
     }
 
+    private func windowEndpoint(for playerID: String) -> (any RemotePlayerWindowEndpoint)? {
+        guard let reference = windowEndpoints[playerID] else { return nil }
+        guard let endpoint = reference.value else {
+            windowEndpoints.removeValue(forKey: playerID)
+            return nil
+        }
+        return endpoint
+    }
+
     private func makeSnapshot(for state: PlayerState) -> RemotePlayerSnapshot {
-        let windowSnapshot = windowEndpoints[state.id]?.snapshot
+        let windowSnapshot = windowEndpoint(for: state.id)?.snapshot
         let status = state.playbackStatus
         let duration = state.currentPlayable?.length ?? 0
 

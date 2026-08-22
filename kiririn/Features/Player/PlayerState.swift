@@ -338,8 +338,35 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     private var didApplyInitialPlaybackRestore = false
     private var didObservePlayingForRestore = false
     private var didObservePlaybackProgressForRestore = false
+    private var playbackStartTask: Task<Void, Never>?
+    private var playbackStartID: UUID?
+    private var playbackTransitionTask: Task<Void, Never>?
+    private var trackLoadingTask: Task<Void, Never>?
+    private var playbackMetadataTask: Task<Void, Never>?
+    private var playbackMetadataTaskID: UUID?
+    private var bmlTuneTask: Task<Void, Never>?
     private var restoreAfterPlayingTask: Task<Void, Never>?
+    private var restoreAfterPlayingTaskID: UUID?
+    private var periodicProgramRefreshTask: Task<Void, Never>?
+    private var periodicProgramRefreshTaskID: UUID?
     private var programBootstrapRefreshTask: Task<Void, Never>?
+    private var captionUpdateTask: Task<Void, Never>?
+    private var captionUpdateTaskID: UUID?
+
+    private struct PendingCaptionUpdate {
+        let text: String
+        let time: Double
+        let position: Float
+        let broadcastTime: Date?
+        let deliveryDate: Date
+    }
+
+    private enum ProgramInfoRefreshResult {
+        case clear
+        case update(current: Program?, next: Program?)
+    }
+
+    private var pendingCaptionUpdates: [PendingCaptionUpdate] = []
     private var recordingStartBroadcastTime: Date?
     private let logger = Logger(label: "PlayerState")
     private let fallbackPlaybackErrorMessage = "メディアの読み込みに失敗しました"
@@ -397,23 +424,20 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         switch playableForPlayback.source {
         case .fileURL(let url, let bookmarkData):
             var actualURL = url
-            if securityScopedPlaybackURL != url {
-                releaseSecurityScopedPlaybackURL()
-                var isStale = false
-                if let bookmarkData = bookmarkData,
-                    let resolvedURL = try? URL(
-                        resolvingBookmarkData: bookmarkData, options: .securityScoped,
-                        relativeTo: nil, bookmarkDataIsStale: &isStale)
-                {
-                    actualURL = resolvedURL
-                }
-                if actualURL.startAccessingSecurityScopedResource() {
-                    securityScopedPlaybackURL = actualURL
-                }
+            var isStale = false
+            if let bookmarkData,
+                let resolvedURL = try? URL(
+                    resolvingBookmarkData: bookmarkData, options: .securityScoped,
+                    relativeTo: nil, bookmarkDataIsStale: &isStale)
+            {
+                actualURL = resolvedURL
+            }
+            if actualURL.startAccessingSecurityScopedResource() {
+                securityScopedPlaybackURL = actualURL
             }
             playableForPlayback.streamURL = actualURL
         case .liveService, .recordedFile, .directURL:
-            releaseSecurityScopedPlaybackURL()
+            break
         }
         if case .liveService = playableForPlayback.source {
             // 復元時に保持されている古い番組情報を信用せず、再取得を前提に初期化する
@@ -421,14 +445,12 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             playableForPlayback.overriddenProgram = nil
         }
         currentPlayable = playableForPlayback
+        let expectedPlayableID = playableForPlayback.id
         captionHistory = []
         nextProgram = nil
         setupDataBroadcastSessionIfNeeded()
         startPeriodicRefresh()
         startProgramBootstrapRefreshLoop()
-        Task { @MainActor [weak self] in
-            await self?.refreshProgramInfo()
-        }
         playbackStatus.playableID = playableForPlayback.id
         playbackStatus.rate = playbackRate
         playbackPositionBuffers = (-1, -1)
@@ -440,38 +462,60 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         didObservePlaybackProgressForRestore = false
         restoreAfterPlayingTask?.cancel()
         restoreAfterPlayingTask = nil
+        restoreAfterPlayingTaskID = nil
         mode = .expanded
 
         if player == nil {
             player = makePlayer()
         }
 
-        Task { @MainActor in
+        let headerProvider = playableForPlayback.serverId.flatMap { manager?.providers[$0] }
+        let playbackStartID = UUID()
+        self.playbackStartID = playbackStartID
+        playbackStartTask = Task { @MainActor [weak self] in
             // Fetch fresh auth headers before starting playback.
             // Not gated by isCacheReady; token refresh can happen anytime.
-            if let serverId = currentPlayable?.serverId,
-                let provider = manager?.providers[serverId]
-            {
+            if let provider = headerProvider {
                 do {
                     let freshHeaders = try await provider.fetchHeaders()
-                    if currentPlayable?.serverId == serverId {
-                        currentPlayable?.headers = freshHeaders
+                    guard !Task.isCancelled else { return }
+                    if let self,
+                        self.playbackStartID == playbackStartID,
+                        self.currentPlayable?.id == expectedPlayableID
+                    {
+                        self.currentPlayable?.headers = freshHeaders
                     }
                 } catch {
-                    logger.warning(
+                    guard !Task.isCancelled else { return }
+                    self?.logger.warning(
                         "pre-play header refresh failed, proceeding with existing headers: \(error)"
                     )
                 }
             }
 
-            guard let activePlayable = currentPlayable,
+            guard !Task.isCancelled,
+                let self,
+                self.currentPlayable?.id == expectedPlayableID,
+                self.playbackStartID == playbackStartID,
+                let activePlayable = self.currentPlayable,
+                let player = self.player,
                 let media = VLCMedia(url: activePlayable.streamURL)
             else {
-                isPlaying = false
-                isPlaybackLoading = false
+                if let self, self.playbackStartID == playbackStartID {
+                    self.isPlaying = false
+                    self.isPlaybackLoading = false
+                    self.playbackStartID = nil
+                    self.playbackStartTask = nil
+                }
                 return
             }
-            logger.debug("play(playable: \(activePlayable.streamURL))")
+            defer {
+                if self.playbackStartID == playbackStartID {
+                    self.playbackStartID = nil
+                    self.playbackStartTask = nil
+                }
+            }
+            self.logger.debug("play(playable: \(activePlayable.streamURL))")
 
             for (key, value) in activePlayable.headers {
                 media.addHTTPHeader(withName: key, value: value)
@@ -481,36 +525,106 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
                 ":http-user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) VLC/4.0.0-dev LibVLC/4.0.0-dev kiririn/0.1.0"
             )
 
-            player?.media = media
-            player?.media?.delegate = self
-            player?.rate = playbackRate
-            applyAudioOutput()
-            player?.play()
-            isPlaying = true
-            selectedAudioTrackID = nil
-            selectedVideoTrackID = nil
-            aribSubtitleTrackID = nil
-            selectedTextTrackID = nil
+            player.media = media
+            player.media?.delegate = self
+            player.rate = self.playbackRate
+            self.applyAudioOutput()
+            player.play()
+            self.isPlaying = true
+            self.selectedAudioTrackID = nil
+            self.selectedVideoTrackID = nil
+            self.aribSubtitleTrackID = nil
+            self.selectedTextTrackID = nil
 
-            startControlsAutoHide()
+            self.startControlsAutoHide()
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                guard let self else { return }
-                Task { @MainActor in
-                    self.loadAudioTracks()
-                    self.loadVideoTracks()
-                    self.refreshSubtitleTrack()
-                    self.applySubtitleSelection()
-                }
-            }
+            self.scheduleTrackLoading(
+                for: player,
+                expectedPlayableID: expectedPlayableID
+            )
 
             // Refresh server metadata (record info etc.) asynchronously after playback starts.
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                await self.refreshCurrentPlayableForPlaybackIfReady(
-                    expectedPlayableID: activePlayable.id)
-                await self.refreshProgramInfo()
+            let metadataManager = self.manager
+            let metadataPlayable = activePlayable
+            let metadataLogger = self.logger
+            let metadataTaskID = UUID()
+            self.playbackMetadataTaskID = metadataTaskID
+            self.playbackMetadataTask = Task { @MainActor [weak self] in
+                defer {
+                    self?.finishPlaybackMetadataTask(id: metadataTaskID)
+                }
+
+                let refreshedPlayable = await Self.refreshedPlayableForPlaybackIfReady(
+                    manager: metadataManager,
+                    playable: metadataPlayable,
+                    logger: metadataLogger
+                )
+                guard !Task.isCancelled,
+                    self?.currentPlayable?.id == expectedPlayableID
+                else { return }
+                if let refreshedPlayable {
+                    self?.applyRefreshedPlayable(
+                        refreshedPlayable,
+                        expectedPlayableID: expectedPlayableID
+                    )
+                }
+
+                guard let metadataManager,
+                    let programInfo = await Self.loadProgramInfo(
+                        manager: metadataManager,
+                        playable: refreshedPlayable ?? metadataPlayable
+                    ),
+                    !Task.isCancelled,
+                    self?.currentPlayable?.id == expectedPlayableID
+                else { return }
+                self?.applyProgramInfo(
+                    programInfo,
+                    expectedPlayableID: expectedPlayableID
+                )
             }
+        }
+    }
+
+    private func finishPlaybackMetadataTask(id: UUID) {
+        guard playbackMetadataTaskID == id else { return }
+        playbackMetadataTaskID = nil
+        playbackMetadataTask = nil
+    }
+
+    private func applyRefreshedPlayable(
+        _ refreshedPlayable: Playable,
+        expectedPlayableID: String
+    ) {
+        guard var activePlayable = currentPlayable,
+            activePlayable.id == expectedPlayableID
+        else { return }
+
+        activePlayable.headers = refreshedPlayable.headers
+        if case .recordedFile = activePlayable.source {
+            activePlayable.streamURL = refreshedPlayable.streamURL
+            activePlayable.serverId = refreshedPlayable.serverId
+            activePlayable.source = refreshedPlayable.source
+            activePlayable.program = refreshedPlayable.program
+            activePlayable.service = refreshedPlayable.service
+        }
+        currentPlayable = activePlayable
+    }
+
+    private func scheduleTrackLoading(
+        for player: VLCMediaPlayer,
+        expectedPlayableID: String
+    ) {
+        trackLoadingTask?.cancel()
+        trackLoadingTask = Task { @MainActor [weak self, weak player] in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled, let self, let player,
+                currentPlayable?.id == expectedPlayableID,
+                self.player === player
+            else { return }
+            loadAudioTracks()
+            loadVideoTracks()
+            refreshSubtitleTrack()
+            applySubtitleSelection()
         }
     }
 
@@ -527,6 +641,22 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
     func setPlaying(_ enabled: Bool) {
         guard let player else { return }
+        if playbackStartTask != nil {
+            guard !enabled else { return }
+            cancelPlaybackStartTask()
+            player.pause()
+            isPlaying = false
+            isPlaybackLoading = false
+            playbackStatus.isPlaying = false
+            requestedPlayingState = nil
+            return
+        }
+        if enabled, player.media == nil, currentPlayable != nil {
+            reloadCurrentPlayable()
+            return
+        }
+        playbackTransitionTask?.cancel()
+        playbackTransitionTask = nil
         requestedPlayingState = enabled
         playbackTransitionID = nil
 
@@ -542,17 +672,41 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             requestedPlayingState = nil
             return
         }
+        guard let expectedPlayableID = currentPlayable?.id else {
+            requestedPlayingState = nil
+            return
+        }
 
         let transitionID = UUID()
         playbackTransitionID = transitionID
-        Task { @MainActor [weak self, weak player] in
-            guard let self, let player else { return }
-            await refreshCurrentPlayableHeaders()
-            guard playbackTransitionID == transitionID,
+        let headerProvider = currentPlayable?.serverId.flatMap { manager?.providers[$0] }
+        let taskLogger = logger
+        playbackTransitionTask = Task { @MainActor [weak self, weak player] in
+            let refreshedHeaders: [String: String]?
+            if let headerProvider {
+                do {
+                    refreshedHeaders = try await headerProvider.fetchHeaders()
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    taskLogger.error("Failed to fetch fresh headers: \(error)")
+                    refreshedHeaders = nil
+                }
+            } else {
+                taskLogger.warning(
+                    "Failed to fetch fresh headers: No manager, playable, serverId, or provider")
+                refreshedHeaders = nil
+            }
+
+            guard !Task.isCancelled, let self, let player,
+                playbackTransitionID == transitionID,
                 requestedPlayingState == true,
-                self.player === player
+                self.player === player,
+                currentPlayable?.id == expectedPlayableID
             else {
                 return
+            }
+            if let refreshedHeaders {
+                currentPlayable?.headers = refreshedHeaders
             }
             if let media = player.media, let headers = currentPlayable?.headers {
                 media.removeAllHTTPHeaders()
@@ -573,47 +727,44 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             playbackStatus.rate = playbackRate
             requestedPlayingState = nil
             playbackTransitionID = nil
+            playbackTransitionTask = nil
+            scheduleTrackLoading(
+                for: player,
+                expectedPlayableID: expectedPlayableID
+            )
         }
     }
 
-    private func refreshCurrentPlayableHeaders() async {
-        guard let manager = manager,
-            var playable = currentPlayable,
-            let serverId = playable.serverId,
-            let provider = manager.providers[serverId]
-        else {
-            logger.warning(
-                "Failed to fetch fresh headers: No manager, playable, serverId, or provider")
-            return
-        }
-        do {
-            playable.headers = try await provider.fetchHeaders()
-            self.currentPlayable = playable
-        } catch {
-            logger.error("Failed to fetch fresh headers: \(error)")
-        }
-    }
-
-    private func refreshCurrentPlayableForPlaybackIfReady(expectedPlayableID: String) async {
-        guard currentPlayable?.id == expectedPlayableID else { return }
+    private static func refreshedPlayableForPlaybackIfReady(
+        manager: ServerManager?,
+        playable: Playable,
+        logger: Logger
+    ) async -> Playable? {
         guard let manager, manager.isCacheReady else {
             logger.debug("skip server refresh before playback: cache not ready")
-            return
+            return nil
         }
-        await refreshCurrentPlayableForPlayback()
+        return await refreshedPlayableForPlayback(
+            manager: manager,
+            playable: playable,
+            logger: logger
+        )
     }
 
-    private func refreshCurrentPlayableForPlayback() async {
-        guard let manager = manager,
-            var playable = currentPlayable
-        else { return }
-        guard manager.isCacheReady else { return }
+    private static func refreshedPlayableForPlayback(
+        manager: ServerManager,
+        playable initialPlayable: Playable,
+        logger: Logger
+    ) async -> Playable? {
+        guard manager.isCacheReady else { return nil }
+        var playable = initialPlayable
 
         if case .recordedFile(let recordId, let variantId, let sourceServerId) = playable.source {
             let serverId = playable.serverId ?? sourceServerId
             if let provider = manager.recordingProvider(for: serverId) {
                 do {
                     let record = try await provider.fetchRecord(id: recordId)
+                    guard !Task.isCancelled else { return nil }
                     let variant =
                         record.variants.first(where: { $0.id == variantId })
                         ?? record.variants.first
@@ -630,6 +781,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
                         playable = refreshed
                     }
                 } catch {
+                    guard !Task.isCancelled else { return nil }
                     logger.warning("Failed to refresh recorded playable before playback: \(error)")
                 }
             } else {
@@ -643,13 +795,17 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             let provider = manager.providers[serverId]
         {
             do {
-                playable.headers = try await provider.fetchHeaders()
+                let headers = try await provider.fetchHeaders()
+                guard !Task.isCancelled else { return nil }
+                playable.headers = headers
             } catch {
+                guard !Task.isCancelled else { return nil }
                 logger.error("Failed to fetch fresh headers: \(error)")
             }
         }
 
-        currentPlayable = playable
+        guard !Task.isCancelled else { return nil }
+        return playable
     }
 
     private func resetPlaybackRateToDefault() {
@@ -1151,6 +1307,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     func startPeriodicRefresh() {
         refreshTimer?.invalidate()
         refreshTimer = nil
+        cancelPeriodicProgramRefreshTask()
         guard let playable = currentPlayable,
             case .liveService = playable.source
         else {
@@ -1159,41 +1316,100 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         }
 
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in
-                await self.refreshProgramInfo()
+            Task { @MainActor [weak self] in
+                self?.schedulePeriodicProgramRefresh()
             }
+        }
+    }
+
+    private func schedulePeriodicProgramRefresh() {
+        guard periodicProgramRefreshTask == nil,
+            let manager,
+            let playable = currentPlayable
+        else { return }
+
+        let expectedPlayableID = playable.id
+        let taskID = UUID()
+        periodicProgramRefreshTaskID = taskID
+        periodicProgramRefreshTask = Task { @MainActor [weak self] in
+            defer {
+                self?.finishPeriodicProgramRefreshTask(id: taskID)
+            }
+            guard
+                let result = await Self.loadProgramInfo(
+                    manager: manager,
+                    playable: playable
+                ),
+                !Task.isCancelled,
+                self?.currentPlayable?.id == expectedPlayableID
+            else { return }
+            self?.applyProgramInfo(
+                result,
+                expectedPlayableID: expectedPlayableID
+            )
+        }
+    }
+
+    private func finishPeriodicProgramRefreshTask(id: UUID) {
+        guard periodicProgramRefreshTaskID == id else { return }
+        periodicProgramRefreshTaskID = nil
+        periodicProgramRefreshTask = nil
+    }
+
+    private func cancelPeriodicProgramRefreshTask() {
+        periodicProgramRefreshTask?.cancel()
+        periodicProgramRefreshTask = nil
+        periodicProgramRefreshTaskID = nil
+    }
+
+    private static func loadProgramInfo(
+        manager: ServerManager,
+        playable: Playable
+    ) async -> ProgramInfoRefreshResult? {
+        switch playable.source {
+        case .liveService(let serviceUniqueId):
+            let resolvedService =
+                playable.displayService ?? manager.service(serviceUniqueId: serviceUniqueId)
+            guard let resolvedService else { return .clear }
+            let current = await manager.currentProgram(for: resolvedService)
+            guard !Task.isCancelled else { return nil }
+            let next = await manager.nextProgram(
+                for: resolvedService,
+                currentProgram: current
+            )
+            guard !Task.isCancelled else { return nil }
+            return .update(current: current, next: next)
+        default:
+            return .clear
         }
     }
 
     func refreshProgramInfo() async {
         guard let manager = manager, let playable = currentPlayable else { return }
         let expectedPlayableID = playable.id
-        switch playable.source {
-        case .liveService(let serviceUniqueId):
-            let resolvedService =
-                playable.displayService ?? manager.service(serviceUniqueId: serviceUniqueId)
-            guard let resolvedService else {
-                guard currentPlayable?.id == expectedPlayableID else { return }
-                if nextProgram != nil {
-                    nextProgram = nil
-                }
-                return
-            }
-            let current = await manager.currentProgram(for: resolvedService)
+        guard let result = await Self.loadProgramInfo(manager: manager, playable: playable),
+            !Task.isCancelled,
+            currentPlayable?.id == expectedPlayableID
+        else { return }
+        applyProgramInfo(result, expectedPlayableID: expectedPlayableID)
+    }
+
+    private func applyProgramInfo(
+        _ result: ProgramInfoRefreshResult,
+        expectedPlayableID: String
+    ) {
+        switch result {
+        case .clear:
             guard currentPlayable?.id == expectedPlayableID else { return }
-            let next = await manager.nextProgram(for: resolvedService, currentProgram: current)
+            if nextProgram != nil {
+                nextProgram = nil
+            }
+        case .update(let current, let next):
             applyProgramInfo(
                 current: current,
                 next: next,
                 expectedPlayableID: expectedPlayableID
             )
-        default:
-            guard currentPlayable?.id == expectedPlayableID else { return }
-            if nextProgram != nil {
-                nextProgram = nil
-            }
-            break
         }
     }
 
@@ -1301,7 +1517,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
     func close() {
         savePlaybackPositionIfNeeded()
-        cleanup(releasePlayer: true, releaseSecurityScope: true)
+        cleanup(releasePlayer: true)
         currentPlayable = nil
         nextProgram = nil
         didApplyInitialPlaybackRestore = false
@@ -1312,29 +1528,65 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
     func stop() {
         _ = endScrubbing()
+        savePlaybackPositionIfNeeded()
+        cancelPlaybackOperationTasks()
         player?.stop()
+        if isRecording {
+            player?.stopRecording()
+            isRecording = false
+        }
+        isPlaying = false
         isPlaybackLoading = false
         isPlaybackSeeking = false
         playbackStatus = .init(
-            playerID: self.id, playableID: nil, isPlaying: false, time: 0, position: 0,
+            playerID: self.id, playableID: currentPlayable?.id, isPlaying: false, time: 0,
+            position: 0,
             rate: playbackRate)
     }
 
-    func cleanup(releasePlayer: Bool = false, releaseSecurityScope: Bool = false) {
-        _ = endScrubbing()
-        dataBroadcastSession?.stop()
-        dataBroadcastSession = nil
-        savePlaybackPositionIfNeeded()
+    private func cancelPlaybackStartTask() {
+        playbackStartTask?.cancel()
+        playbackStartTask = nil
+        playbackStartID = nil
+    }
+
+    private func cancelPlaybackOperationTasks() {
+        cancelPlaybackStartTask()
+        playbackTransitionTask?.cancel()
+        playbackTransitionTask = nil
+        trackLoadingTask?.cancel()
+        trackLoadingTask = nil
+        playbackMetadataTask?.cancel()
+        playbackMetadataTask = nil
+        playbackMetadataTaskID = nil
+        bmlTuneTask?.cancel()
+        bmlTuneTask = nil
+        requestedPlayingState = nil
+        playbackTransitionID = nil
         restoreAfterPlayingTask?.cancel()
         restoreAfterPlayingTask = nil
+        restoreAfterPlayingTaskID = nil
         didObservePlayingForRestore = false
         didStartPlayback = false
         didObservePlaybackProgressForRestore = false
         playbackPositionBuffers = (-1, -1)
         playbackPositionLastRotationTime = nil
         playbackPositionActiveBuffer = 0
+    }
+
+    func cleanup(releasePlayer: Bool = false) {
+        _ = endScrubbing()
+        dataBroadcastSession?.stop()
+        dataBroadcastSession = nil
+        savePlaybackPositionIfNeeded()
+        cancelPlaybackOperationTasks()
+        captionUpdateTask?.cancel()
+        captionUpdateTask = nil
+        captionUpdateTaskID = nil
+        pendingCaptionUpdates.removeAll(keepingCapacity: false)
         refreshTimer?.invalidate()
         refreshTimer = nil
+        cancelPeriodicProgramRefreshTask()
         programBootstrapRefreshTask?.cancel()
         programBootstrapRefreshTask = nil
         controlsTimer?.invalidate()
@@ -1369,9 +1621,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             player = nil
         }
 
-        if releaseSecurityScope {
-            releaseSecurityScopedPlaybackURL()
-        }
+        releaseSecurityScopedPlaybackURL()
     }
 
     /// データ放送(BML)対応。実験的機能につき既定はオフ - see
@@ -1410,35 +1660,40 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
     private func handleBMLTuneRequest(_ request: BMLTuneRequest) {
         let expectedPlayableID = currentPlayable?.id
-        Task { @MainActor [weak self] in
-            guard let self, let expectedPlayableID,
-                self.currentPlayable?.id == expectedPlayableID
-            else { return }
+        bmlTuneTask?.cancel()
+        bmlTuneTask = nil
+        guard let expectedPlayableID,
+            currentPlayable?.id == expectedPlayableID
+        else { return }
+        if let currentService = currentPlayable?.displayService,
+            request.matches(currentService)
+        {
+            return
+        }
+        guard let manager,
+            let service = manager.bmlTuneService(
+                for: request,
+                preferredServerId: currentPlayable?.serverId
+            )
+        else {
+            logger.warning("BML tune target is unavailable")
+            return
+        }
+        guard let provider = manager.liveProvider(for: service.serverId) else { return }
+        let taskLogger = logger
 
-            if let currentService = self.currentPlayable?.displayService,
-                request.matches(currentService)
-            {
-                return
-            }
-
-            guard let manager = self.manager,
-                let service = manager.bmlTuneService(
-                    for: request, preferredServerId: self.currentPlayable?.serverId)
-            else {
-                self.logger.warning("BML tune target is unavailable")
-                return
-            }
-
-            guard let provider = manager.liveProvider(for: service.serverId) else { return }
+        bmlTuneTask = Task { @MainActor [weak self] in
             let currentProgram = await manager.currentProgram(for: service)
-            guard self.currentPlayable?.id == expectedPlayableID else { return }
+            guard !Task.isCancelled,
+                self?.currentPlayable?.id == expectedPlayableID
+            else { return }
 
             do {
                 let playable = try provider.buildLiveStreamPlayable(
                     service: service, currentProgram: currentProgram)
-                self.play(playable: playable)
+                self?.play(playable: playable)
             } catch {
-                self.logger.warning("BML tune failed: \(error)")
+                taskLogger.warning("BML tune failed: \(error)")
             }
         }
     }
@@ -1600,10 +1855,11 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         let staleBuffer = playbackPositionActiveBuffer == 0 ? 1 : 0
         let stalePosition =
             staleBuffer == 0 ? playbackPositionBuffers.0 : playbackPositionBuffers.1
-        if stalePosition > 0 {
+        if stalePosition > 0, let cacheStore {
+            let playableID = playable.id
             Task {
-                await cacheStore?.savePlaybackPosition(
-                    playableID: playable.id, position: stalePosition)
+                await cacheStore.savePlaybackPosition(
+                    playableID: playableID, position: stalePosition)
             }
         }
 
@@ -1615,17 +1871,28 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     private func startProgramBootstrapRefreshLoop() {
         programBootstrapRefreshTask?.cancel()
         programBootstrapRefreshTask = nil
-        guard let playable = currentPlayable,
+        guard let manager, let playable = currentPlayable,
             case .liveService = playable.source
         else { return }
+        let expectedPlayableID = playable.id
 
         programBootstrapRefreshTask = Task { @MainActor [weak self] in
-            guard let self else { return }
             let deadline = Date().addingTimeInterval(30)
             while !Task.isCancelled {
-                await self.refreshProgramInfo()
+                guard
+                    let result = await Self.loadProgramInfo(
+                        manager: manager,
+                        playable: playable
+                    ),
+                    !Task.isCancelled,
+                    self?.currentPlayable?.id == expectedPlayableID
+                else { break }
+                self?.applyProgramInfo(
+                    result,
+                    expectedPlayableID: expectedPlayableID
+                )
 
-                if self.currentPlayable?.program != nil {
+                if self?.currentPlayable?.program != nil {
                     break
                 }
                 if Date() >= deadline {
@@ -1656,53 +1923,118 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         }
 
         let expectedID = playable.id
-        restoreAfterPlayingTask = Task { @MainActor in
-            defer { restoreAfterPlayingTask = nil }
+        let taskID = UUID()
+        restoreAfterPlayingTaskID = taskID
+        restoreAfterPlayingTask = Task { @MainActor [weak self] in
+            defer {
+                if self?.restoreAfterPlayingTaskID == taskID {
+                    self?.restoreAfterPlayingTask = nil
+                    self?.restoreAfterPlayingTaskID = nil
+                    self?.logger.debug(
+                        "restore task finished: id=\(expectedID), trigger=\(trigger), didApply=\(self?.didApplyInitialPlaybackRestore == true)"
+                    )
+                }
+            }
+
             try? await Task.sleep(for: .milliseconds(200))
-            guard !Task.isCancelled else { return }
-            await restorePlaybackPositionOnce(for: expectedID)
-            logger.debug(
-                "restore task finished: id=\(expectedID), trigger=\(trigger), didApply=\(didApplyInitialPlaybackRestore)"
+            guard !Task.isCancelled,
+                self?.didApplyInitialPlaybackRestore == false,
+                self?.currentPlayable?.id == expectedID
+            else { return }
+
+            guard let cacheStore = self?.cacheStore else {
+                self?.didApplyInitialPlaybackRestore = true
+                self?.logger.info(
+                    "playback restore skipped: cacheStore not ready id=\(expectedID)")
+                return
+            }
+            let position = await cacheStore.loadPlaybackPosition(playableID: expectedID)
+            guard !Task.isCancelled,
+                self?.currentPlayable?.id == expectedID
+            else { return }
+            self?.didApplyInitialPlaybackRestore = true
+            guard let position else {
+                self?.logger.info("no playback position found: id=\(expectedID)")
+                return
+            }
+            guard !Task.isCancelled, position > 0, position < 1 else {
+                if !Task.isCancelled {
+                    self?.logger.info(
+                        "playback position skipped by range: id=\(expectedID), position=\(position)"
+                    )
+                }
+                return
+            }
+            guard self?.currentPlayable?.id == expectedID,
+                let player = self?.player
+            else { return }
+            player.position = Double(position)
+            self?.logger.info(
+                "restored playback position: id=\(expectedID), requested=\(position)"
             )
         }
     }
 
-    /// `.playing` 状態遷移後に1回だけ呼ばれる再生位置リストア。ポーリングなし。
-    private func restorePlaybackPositionOnce(for playableID: String) async {
-        guard !didApplyInitialPlaybackRestore else { return }
-        guard currentPlayable?.id == playableID else { return }
-        didApplyInitialPlaybackRestore = true
-
-        guard let cacheStore else {
-            logger.info("playback restore skipped: cacheStore not ready id=\(playableID)")
-            return
-        }
-        guard let position = await cacheStore.loadPlaybackPosition(playableID: playableID) else {
-            logger.info("no playback position found: id=\(playableID)")
-            return
-        }
-        guard position > 0, position < 1 else {
-            logger.info(
-                "playback position skipped by range: id=\(playableID), position=\(position)")
-            return
-        }
-        guard currentPlayable?.id == playableID, let player else { return }
-        player.position = Double(position)
-        logger.info(
-            "restored playback position: id=\(playableID), requested=\(position)"
-        )
-    }
-
-    func adoptSecurityScopedPlaybackURL(_ url: URL?) {
-        guard securityScopedPlaybackURL != url else { return }
-        releaseSecurityScopedPlaybackURL()
-        securityScopedPlaybackURL = url
-    }
-
     private func releaseSecurityScopedPlaybackURL() {
-        guard let securityScopedPlaybackURL else { return }
-        securityScopedPlaybackURL.stopAccessingSecurityScopedResource()
-        self.securityScopedPlaybackURL = nil
+        guard let url = securityScopedPlaybackURL else { return }
+        securityScopedPlaybackURL = nil
+        url.stopAccessingSecurityScopedResource()
+    }
+
+    private func scheduleCaptionUpdate(_ text: String) {
+        pendingCaptionUpdates.append(
+            PendingCaptionUpdate(
+                text: text,
+                time: playbackStatus.time,
+                position: playbackStatus.position,
+                broadcastTime: {
+                    if case .liveService = currentPlayable?.source { return Date() }
+                    return nil
+                }(),
+                deliveryDate: Date().addingTimeInterval(1)
+            )
+        )
+        guard captionUpdateTask == nil else { return }
+        let taskID = UUID()
+        captionUpdateTaskID = taskID
+        captionUpdateTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let deliveryDate = self?.pendingCaptionUpdates.first?.deliveryDate else {
+                    break
+                }
+                let delay = max(0, deliveryDate.timeIntervalSinceNow)
+                if delay > 0 {
+                    do {
+                        try await Task.sleep(for: .seconds(delay))
+                    } catch {
+                        break
+                    }
+                }
+                guard !Task.isCancelled else { break }
+                self?.applyNextCaptionUpdate()
+            }
+            guard let self, self.captionUpdateTaskID == taskID else { return }
+            self.captionUpdateTaskID = nil
+            self.captionUpdateTask = nil
+        }
+    }
+
+    private func applyNextCaptionUpdate() {
+        guard !pendingCaptionUpdates.isEmpty else { return }
+        let update = pendingCaptionUpdates.removeFirst()
+        guard caption != update.text else { return }
+        caption = update.text
+        guard !update.text.isEmpty else { return }
+        captionHistory.append(
+            CaptionHistoryItem(
+                text: update.text,
+                time: update.time,
+                position: update.position,
+                broadcastTime: update.broadcastTime
+            ))
+        if captionHistory.count > 100 {
+            captionHistory.removeFirst(captionHistory.count - 100)
+        }
     }
 
     func takeCapture() {
@@ -1876,7 +2208,8 @@ extension PlayerState {
     nonisolated func mediaPlayerStateChanged(_ state: VLCMediaPlayerState) {
         // VLCLibrary.currentErrorMessage is thread-local and must be read on the callback thread.
         let errorMessageOnCallbackThread = (state == .error) ? VLCLibrary.currentErrorMessage : nil
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             // @Observable は同値でも代入のたびに通知するため、値が変わるときだけ書き込む。
             // （.buffering はライブ視聴中に高頻度で発火する）
             switch state {
@@ -1917,7 +2250,8 @@ extension PlayerState {
     }
 
     nonisolated func mediaPlayerTimeChanged(_ notification: Notification) {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             guard let player = player else { return }
             logger.debug(
                 "playback time changed: position=\(player.position), bytePosition=\(player.bytePosition), time=\(player.time.intValue), duration=\(currentPlayable?.length ?? -1)"
@@ -1962,7 +2296,8 @@ extension PlayerState {
     }
 
     nonisolated func mediaPlayerTrackAdded(_ trackId: String, with trackType: VLCMedia.TrackType) {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             if trackType == .audio {
                 refreshAudioTrackState()
             } else if trackType == .video {
@@ -1976,7 +2311,8 @@ extension PlayerState {
 
     nonisolated func mediaPlayerTrackRemoved(_ trackId: String, with trackType: VLCMedia.TrackType)
     {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             if trackType == .audio {
                 refreshAudioTrackState()
             } else if trackType == .video {
@@ -1990,7 +2326,8 @@ extension PlayerState {
 
     nonisolated func mediaPlayerTrackUpdated(_ trackId: String, with trackType: VLCMedia.TrackType)
     {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             if trackType == .text {
                 refreshSubtitleTrack()
                 applySubtitleSelection()
@@ -2005,7 +2342,8 @@ extension PlayerState {
         selectedId: String,
         unselectedId: String
     ) {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             if trackType == .audio {
                 selectedAudioTrackID = selectedId
                 refreshAudioTrackState()
@@ -2025,7 +2363,8 @@ extension PlayerState {
 
     nonisolated func mediaPlayerLengthChanged(_ length: Int64) {
         logger.debug("media player length changed: length=\(length)")
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             if length > 0 {
                 currentPlayable?.length = Double(length) / 1000.0
                 requestPlaybackRestoreIfPossible(trigger: "length.changed")
@@ -2071,13 +2410,15 @@ extension PlayerState {
     }
 
     nonisolated func mediaPlayerStartedRecording(_ player: VLCMediaPlayer) {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             isRecording = true
         }
     }
 
     nonisolated func mediaPlayerSnapshot(_ notification: Notification) {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             guard let path = pendingCapturePath else { return }
             defer {
                 pendingCapturePath = nil
@@ -2144,7 +2485,8 @@ extension PlayerState {
 
     @objc(mediaPlayer:recordingStoppedAtURL:)
     nonisolated func mediaPlayer(_ player: VLCMediaPlayer, recordingStoppedAtURL url: URL?) {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             isRecording = false
             if let url = url {
                 try? await CaptureService.shared.saveRecording(
@@ -2160,26 +2502,8 @@ extension PlayerState {
 
     @objc(mediaPlayer:didUpdateAribText:)
     nonisolated func mediaPlayer(_ player: VLCMediaPlayer, didUpdateAribText text: String) {
-        Task { @MainActor in
-            let time = playbackStatus.time
-            let position = playbackStatus.position
-            let broadcastTime: Date? = {
-                if case .liveService = currentPlayable?.source { return Date() }
-                return nil
-            }()
-            try? await Task.sleep(for: .seconds(1))
-            if self.caption != text {
-                self.caption = text
-                if !text.isEmpty {
-                    let item = CaptionHistoryItem(
-                        text: text, time: time, position: position, broadcastTime: broadcastTime)
-                    captionHistory.append(item)
-                    if captionHistory.count > 100 {
-                        let itemsToRemove = captionHistory.count - 100
-                        captionHistory.removeFirst(itemsToRemove)
-                    }
-                }
-            }
+        Task { @MainActor [weak self] in
+            self?.scheduleCaptionUpdate(text)
         }
     }
 

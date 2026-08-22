@@ -299,14 +299,14 @@ struct PlayerOverlayView_iOS: View {
                     player: player,
                     isPipEnabled: playerState.isPipEnabled,
                     isPlaying: playerState.isPlaying,
-                    onPipAvailableChanged: { isAvailable in
-                        if playerState.isPipAvailable != isAvailable {
-                            playerState.isPipAvailable = isAvailable
+                    onPipAvailableChanged: { [weak playerState] isAvailable in
+                        if playerState?.isPipAvailable != isAvailable {
+                            playerState?.isPipAvailable = isAvailable
                         }
                     },
-                    onPipEnabledChanged: { isEnabled in
-                        if playerState.isPipEnabled != isEnabled {
-                            playerState.isPipEnabled = isEnabled
+                    onPipEnabledChanged: { [weak playerState] isEnabled in
+                        if playerState?.isPipEnabled != isEnabled {
+                            playerState?.isPipEnabled = isEnabled
                         }
                     }
                 )

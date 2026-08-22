@@ -122,4 +122,8 @@ nonisolated final class SSEClient: Sendable {
     func cancelAll() {
         session.invalidateAndCancel()
     }
+
+    deinit {
+        session.invalidateAndCancel()
+    }
 }

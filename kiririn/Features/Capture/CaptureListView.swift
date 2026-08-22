@@ -189,6 +189,10 @@ struct CaptureListView: View {
         .modifier(CaptureSearchableModifier(isEnabled: showsSearch, searchText: $searchText))
         .onChange(of: searchText) {
             searchDebounceTask?.cancel()
+            guard isTabActive else {
+                searchDebounceTask = nil
+                return
+            }
             searchDebounceTask = Task {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard !Task.isCancelled else { return }
@@ -196,6 +200,7 @@ struct CaptureListView: View {
             }
         }
         .onReceive(service.didAddCapture) { (_, newItem) in
+            guard isTabActive else { return }
             if searchText.isEmpty
                 || (newItem.programName?.lowercased().contains(searchText.lowercased()) == true)
                 || (newItem.serviceName?.lowercased().contains(searchText.lowercased()) == true)
@@ -206,16 +211,25 @@ struct CaptureListView: View {
                 }
             }
         }
-        .onReceive(service.didClearHistory) { _ in
-            withAnimation {
-                items.removeAll()
-                offset = 0
-                hasMore = false
-                selectedIDs.removeAll()
-                isSelectionMode = false
+        .onReceive(service.didFinishClearingHistory) { result in
+            switch result {
+            case .cleared:
+                withAnimation {
+                    items.removeAll()
+                    offset = 0
+                    hasMore = false
+                    selectedIDs.removeAll()
+                    isSelectionMode = false
+                }
+            case .failed, .cancelled:
+                guard isTabActive else { return }
+                Task {
+                    await loadInitial()
+                }
             }
         }
         .onReceive(service.didUpdateCapture) { updatedItem in
+            guard isTabActive else { return }
             if let index = items.firstIndex(where: { $0.id == updatedItem.id }) {
                 items[index] = updatedItem
             }
@@ -225,8 +239,23 @@ struct CaptureListView: View {
             selectedIDs = selectedIDs.intersection(ids)
         }
         .quickLookPreview($previewURL)
-        .task {
+        .task(id: isTabActive) {
+            guard isTabActive else {
+                searchDebounceTask?.cancel()
+                searchDebounceTask = nil
+                items.removeAll(keepingCapacity: false)
+                selectedIDs.removeAll()
+                previewURL = nil
+                offset = 0
+                hasMore = true
+                isLoading = false
+                return
+            }
             await loadInitial()
+        }
+        .onDisappear {
+            searchDebounceTask?.cancel()
+            searchDebounceTask = nil
         }
     }
 
@@ -552,30 +581,23 @@ private struct VideoThumbnailView: View {
                     .fill(Color.kiririnSecondarySystemFill)
                 ProgressView()
             } else {
-                videoPlaceholder
+                Rectangle()
+                    .fill(Color.kiririnTertiarySystemFill)
             }
 
-            if image != nil || isTSFile {
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: 32))
-                    .foregroundStyle(.white.opacity(0.8))
-            }
+            Image(systemName: "play.circle.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(.white.opacity(0.8))
         }
-        .task {
-            guard image == nil && !isTSFile else { return }
+        .accessibilityLabel(url.lastPathComponent)
+        .task(id: url) {
+            guard !isTSFile else { return }
             isLoading = true
-            image = await generateThumbnail(at: url)
-            isLoading = false
+            defer { isLoading = false }
+            let loadedImage = await CaptureService.shared.generateVideoThumbnail(from: url)
+            guard !Task.isCancelled else { return }
+            image = loadedImage
         }
-    }
-
-    private var videoPlaceholder: some View {
-        Rectangle()
-            .fill(Color.kiririnTertiarySystemFill)
-    }
-
-    private func generateThumbnail(at url: URL) async -> PlatformImage? {
-        await CaptureService.shared.generateVideoThumbnail(from: url)
     }
 }
 

@@ -27,10 +27,15 @@ import VLCKit
             nsView.bindPlayer(player)
             nsView.applyPipState(isEnabled: isPipEnabled)
         }
+
+        static func dismantleNSView(_ nsView: VLCPlayerView, coordinator: Void) {
+            nsView.unbindPlayer()
+        }
     }
 
     final class VLCPlayerView: NSView {
         private let videoView = GeometrySafeVLCVideoView()
+        private weak var player: VLCMediaPlayer?
 
         var onPipAvailableChanged: ((Bool) -> Void)?
         var onPipEnabledChanged: ((Bool) -> Void)?
@@ -53,6 +58,7 @@ import VLCKit
         }
 
         func bindPlayer(_ player: VLCMediaPlayer) {
+            self.player = player
             if let current = player.drawable as AnyObject?, current !== videoView {
                 player.drawable = videoView
             } else if player.drawable == nil {
@@ -60,6 +66,18 @@ import VLCKit
             }
             onPipAvailableChanged?(false)
             onPipEnabledChanged?(false)
+        }
+
+        func unbindPlayer() {
+            if let player,
+                let drawable = player.drawable as AnyObject?,
+                drawable === videoView
+            {
+                player.drawable = nil
+            }
+            player = nil
+            onPipAvailableChanged = nil
+            onPipEnabledChanged = nil
         }
 
         func applyPipState(isEnabled _: Bool) {
@@ -93,6 +111,10 @@ import VLCKit
             uiView.bindPlayer(player)
             uiView.applyPipState(isEnabled: isPipEnabled)
             uiView.invalidatePipPlaybackState()
+        }
+
+        static func dismantleUIView(_ uiView: VLCPlayerView, coordinator: Void) {
+            uiView.unbindPlayer()
         }
     }
 
@@ -130,6 +152,21 @@ import VLCKit
 
         func invalidatePipPlaybackState() {
             pipController?.invalidatePlaybackState()
+        }
+
+        func unbindPlayer() {
+            pipController?.stopPictureInPicture()
+            pipController?.stateChangeEventHandler = nil
+            pipController = nil
+            if let player,
+                let drawable = player.drawable as AnyObject?,
+                drawable === self
+            {
+                player.drawable = nil
+            }
+            player = nil
+            onPipAvailableChanged = nil
+            onPipEnabledChanged = nil
         }
 
         func mediaController() -> (any VLCPictureInPictureMediaControlling)! {

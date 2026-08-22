@@ -19,6 +19,7 @@ class RecordsViewModel {
     private let limit = 20
     private var loadingThumbnailKeys: Set<String> = []
     private var failedThumbnailKeys: Set<String> = []
+    private var thumbnailLoadGeneration = 0
 
     private func isCancellationError(_ error: Error) -> Bool {
         if error is CancellationError {
@@ -43,12 +44,23 @@ class RecordsViewModel {
         failedThumbnailKeys.contains(thumbnailKey(for: record))
     }
 
+    func releaseTransientData() {
+        thumbnailLoadGeneration &+= 1
+        thumbnailDataByRecordKey.removeAll(keepingCapacity: false)
+        loadingThumbnailKeys.removeAll(keepingCapacity: false)
+        failedThumbnailKeys.removeAll(keepingCapacity: false)
+    }
+
     func playbackPosition(for record: Recorded) -> Float? {
         guard let playableId = record.playableID else { return nil }
         return playbackPositionByPlayableId[playableId]
     }
 
     func loadPlaybackPositions(for records: [Recorded], cacheStore: CacheStore) async {
+        let playableIDs = Set(records.compactMap(\.playableID))
+        playbackPositionByPlayableId = playbackPositionByPlayableId.filter {
+            playableIDs.contains($0.key)
+        }
         await withTaskGroup(of: (String, Float?).self) { group in
             for record in records {
                 guard let playableId = record.playableID else { continue }
@@ -61,12 +73,15 @@ class RecordsViewModel {
             for await (playableId, position) in group {
                 if let position {
                     playbackPositionByPlayableId[playableId] = position
+                } else {
+                    playbackPositionByPlayableId.removeValue(forKey: playableId)
                 }
             }
         }
     }
 
     func loadThumbnailIfNeeded(for record: Recorded, manager: ServerManager) async {
+        let generation = thumbnailLoadGeneration
         guard record.hasThumbnail else { return }
         let key = thumbnailKey(for: record)
         guard thumbnailDataByRecordKey[key] == nil else { return }
@@ -78,17 +93,25 @@ class RecordsViewModel {
         }
 
         loadingThumbnailKeys.insert(key)
-        defer { loadingThumbnailKeys.remove(key) }
+        defer {
+            if thumbnailLoadGeneration == generation {
+                loadingThumbnailKeys.remove(key)
+            }
+        }
 
         do {
-            if let data = try await manager.fetchRecordThumbnail(
-                serverId: record.serverId, id: record.id), !data.isEmpty
-            {
+            let data = try await manager.fetchRecordThumbnail(
+                serverId: record.serverId, id: record.id)
+            guard !Task.isCancelled, thumbnailLoadGeneration == generation else { return }
+            if let data, !data.isEmpty {
                 thumbnailDataByRecordKey[key] = data
             } else {
                 failedThumbnailKeys.insert(key)
             }
         } catch {
+            guard !Task.isCancelled, thumbnailLoadGeneration == generation,
+                !isCancellationError(error)
+            else { return }
             logger.error("failed to get thumbnail: \(error)")
             failedThumbnailKeys.insert(key)
         }
@@ -146,6 +169,10 @@ class RecordsViewModel {
                 }
                 loadingThumbnailKeys = loadingThumbnailKeys.filter { validKeys.contains($0) }
                 failedThumbnailKeys = failedThumbnailKeys.filter { validKeys.contains($0) }
+                let validPlayableIDs = Set(result.records.compactMap(\.playableID))
+                playbackPositionByPlayableId = playbackPositionByPlayableId.filter {
+                    validPlayableIDs.contains($0.key)
+                }
             } else {
                 records.append(contentsOf: result.records)
             }
@@ -171,6 +198,7 @@ class RecordsViewModel {
                 thumbnailDataByRecordKey = [:]
                 loadingThumbnailKeys = []
                 failedThumbnailKeys = []
+                playbackPositionByPlayableId = [:]
                 pageToken = nil
             }
             hasMore = false

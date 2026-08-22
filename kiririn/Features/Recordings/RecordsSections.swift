@@ -17,6 +17,7 @@ struct ServerRecordsView: View {
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
     #endif
+    @Environment(\.isTabActive) private var isTabActive
 
     private var visibleRecords: [Recorded] {
         viewModel.records.filter {
@@ -73,16 +74,18 @@ struct ServerRecordsView: View {
                                 ) {
                                     playRecord(record)
                                 }
+                                .task(id: isTabActive) {
+                                    guard isTabActive else { return }
+                                    await viewModel.loadThumbnailIfNeeded(
+                                        for: record, manager: manager)
+                                }
+                                .task(id: isTabActive) {
+                                    guard isTabActive,
+                                        record.id == visibleRecords.last?.id
+                                    else { return }
+                                    await loadRecords(reset: false)
+                                }
                                 .onAppear {
-                                    Task {
-                                        await viewModel.loadThumbnailIfNeeded(
-                                            for: record, manager: manager)
-                                    }
-                                    if record.id == visibleRecords.last?.id {
-                                        Task {
-                                            await loadRecords(reset: false)
-                                        }
-                                    }
                                     visibleIds.insert(record.id)
                                     if viewModel.hasRestoredScroll { updateTopVisible() }
                                 }
@@ -133,7 +136,13 @@ struct ServerRecordsView: View {
                 await refreshRecords()
             }
         }
-        .task {
+        .task(id: isTabActive) {
+            guard isTabActive else {
+                searchDebounceTask?.cancel()
+                searchDebounceTask = nil
+                viewModel.releaseTransientData()
+                return
+            }
             viewModel.searchText = searchText
             guard !hasCompletedInitialLoad else { return }
             await loadRecords(reset: true)
