@@ -22,6 +22,7 @@
                 service.startBrowsing()
             }
             .onDisappear {
+                guard !service.isReconnecting else { return }
                 service.stopBrowsing()
             }
             .onChange(of: service.pairingRequest) { _, request in
@@ -70,7 +71,7 @@
                         .foregroundStyle(.secondary)
                 }
 
-                if case .connected = service.connectionStatus {
+                if isConnected {
                     Button("切断", role: .destructive) {
                         service.disconnect()
                     }
@@ -109,10 +110,12 @@
         }
 
         private var isConnected: Bool {
-            guard case .connected = service.connectionStatus else {
-                return false
+            switch service.connectionStatus {
+            case .connected, .reconnecting:
+                true
+            default:
+                false
             }
-            return true
         }
 
         private var statusText: String {
@@ -123,6 +126,8 @@
                 "検索中"
             case .connecting(_, let name):
                 "\(name)へ接続中"
+            case .reconnecting(let name):
+                "\(name)へ再接続中…"
             case .pairing(let name):
                 "\(name)とペアリング中"
             case .connected(let name):
@@ -134,7 +139,7 @@
 
         private var isBusy: Bool {
             switch service.connectionStatus {
-            case .connecting, .pairing, .connected:
+            case .connecting, .reconnecting, .pairing, .connected:
                 true
             default:
                 false

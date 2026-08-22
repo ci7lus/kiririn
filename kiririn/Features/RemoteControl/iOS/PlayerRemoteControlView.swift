@@ -18,6 +18,17 @@
                                 service.sendCommand(command, playerID: playerID)
                             }
                         )
+                        .disabled(service.isReconnecting)
+                        .overlay(alignment: .top) {
+                            if service.isReconnecting {
+                                AppFeedbackLabel(
+                                    text: "再接続中…",
+                                    showsProgress: true
+                                )
+                                .padding(.top)
+                                .allowsHitTesting(false)
+                            }
+                        }
                         .padding(.horizontal)
                         .padding(.bottom)
                     }

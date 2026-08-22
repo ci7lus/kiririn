@@ -70,6 +70,7 @@ nonisolated enum RemoteConnectionStatus: Equatable, Sendable {
     case idle
     case browsing
     case connecting(peerID: String, displayName: String)
+    case reconnecting(String)
     case pairing(String)
     case connected(String)
     case failed(String)
