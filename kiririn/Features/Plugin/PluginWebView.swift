@@ -193,7 +193,7 @@ struct PluginWebView: PluginWebViewRepresentable {
             "appVersion": appVersion ?? NSNull(),
             "buildVersion": buildVersion,
             "bundleIdentifier": bundle.bundleIdentifier ?? NSNull(),
-            "bridgeVersion": 6,
+            "bridgeVersion": 7,
             "displayAreaType": displayArea.rawValue,
             "playerID": runtimePlayerID,
         ]
@@ -392,6 +392,7 @@ struct PluginWebView: PluginWebViewRepresentable {
                 _runtimeInfo: \(runtimeInfoString),
                 _safeAreaInsets: \(safeAreaInsetsString),
                 _deeplinkOpenedListeners: [],
+                _openResolvers: Object.create(null),
                 _captureTakenListeners: [],
                 _captureBlobResolvers: Object.create(null),
                 _captureEventsSubscribed: false,
@@ -471,6 +472,14 @@ struct PluginWebView: PluginWebViewRepresentable {
                     window.webkit.messageHandlers.kiririn.postMessage({type: type, data: data});
                 },
 
+                openURL: function(url) {
+                    return this._performOpenURLRequest(url);
+                },
+
+                openService: function(request) {
+                    return this._performOpenServiceRequest(request);
+                },
+
                 play: function(playerID) {
                     window.webkit.messageHandlers.kiririn.postMessage({type: 'player:play', data: {playerID: playerID || null}});
                 },
@@ -493,6 +502,29 @@ struct PluginWebView: PluginWebViewRepresentable {
 
                 getCaptureBlob: function(captureID, variant) {
                     return this._performCaptureBlobRequest(captureID, variant);
+                },
+
+                _resolveOpenRequest: function(requestID) {
+                    const pending = this._openResolvers[requestID];
+                    if (!pending) { return; }
+                    delete this._openResolvers[requestID];
+                    pending.resolve();
+                },
+
+                _rejectOpenRequest: function(requestID, payload) {
+                    const pending = this._openResolvers[requestID];
+                    if (!pending) { return; }
+                    delete this._openResolvers[requestID];
+
+                    const error = new Error(
+                        payload && typeof payload.message === 'string'
+                            ? payload.message
+                            : 'Kiririn open request failed'
+                    );
+                    error.name = payload && payload.name || 'KiririnOpenError';
+                    error.operation = payload && payload.operation;
+                    error.code = payload && payload.code;
+                    pending.reject(error);
                 },
 
                 _resolveCaptureBlob: function(requestID, payload) {
@@ -526,6 +558,53 @@ struct PluginWebView: PluginWebViewRepresentable {
                     pending.reject(new TypeError(message || 'Capture blob request failed'));
                 }
             };
+
+            (function() {
+                let nextOpenRequestID = 0;
+                function bridgeUnavailable() {
+                    return Promise.reject(new TypeError('Kiririn bridge is unavailable'));
+                }
+
+                window.kiririn._performOpenURLRequest = function(url) {
+                    if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.kiririn) {
+                        return bridgeUnavailable();
+                    }
+
+                    return new Promise(function(resolve, reject) {
+                        const requestID = 'open-' + (++nextOpenRequestID);
+                        window.kiririn._openResolvers[requestID] = {
+                            resolve: resolve,
+                            reject: reject
+                        };
+                        window.webkit.messageHandlers.kiririn.postMessage({
+                            type: '_openURLRequest',
+                            data: {
+                                requestID: requestID,
+                                url: url
+                            }
+                        });
+                    });
+                };
+
+                window.kiririn._performOpenServiceRequest = function(request) {
+                    if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.kiririn) {
+                        return bridgeUnavailable();
+                    }
+
+                    const serviceRequest = request && typeof request === 'object' ? request : {};
+                    return new Promise(function(resolve, reject) {
+                        const requestID = 'open-' + (++nextOpenRequestID);
+                        window.kiririn._openResolvers[requestID] = {
+                            resolve: resolve,
+                            reject: reject
+                        };
+                        window.webkit.messageHandlers.kiririn.postMessage({
+                            type: '_openServiceRequest',
+                            data: Object.assign({}, serviceRequest, {requestID: requestID})
+                        });
+                    });
+                };
+            })();
 
             (function() {
                 let nextCaptureBlobRequestID = 0;
@@ -694,7 +773,13 @@ struct PluginWebView: PluginWebViewRepresentable {
                     let type = body["type"] as? String
                 else { return }
 
-                if type == "_captureTakenSubscribe" {
+                if type == "_openURLRequest" {
+                    guard let data = body["data"] as? [String: Any] else { return }
+                    await handleOpenURLRequest(data)
+                } else if type == "_openServiceRequest" {
+                    guard let data = body["data"] as? [String: Any] else { return }
+                    await handleOpenServiceRequest(data)
+                } else if type == "_captureTakenSubscribe" {
                     wantsCaptureEvents = true
                     subscribeToCaptureEventsIfNeeded()
                 } else if type == "_captureBlobRequest" {
@@ -736,6 +821,69 @@ struct PluginWebView: PluginWebViewRepresentable {
                     }
                 }
             }
+        }
+
+        @MainActor
+        private func handleOpenURLRequest(_ data: [String: Any]) async {
+            guard let requestID = data["requestID"] as? String else { return }
+            guard let rawURL = data["url"] as? String else {
+                rejectOpenRequest(requestID: requestID, error: .invalidURL)
+                return
+            }
+            guard let coordinator = parent?.appModel.openRequestCoordinator else {
+                rejectOpenRequest(requestID: requestID, error: .invalidURL)
+                return
+            }
+
+            do {
+                try await coordinator.openURL(rawURL)
+                resolveOpenRequest(requestID: requestID)
+            } catch let error as KiririnOpenError {
+                rejectOpenRequest(requestID: requestID, error: error)
+            } catch {
+                rejectOpenRequest(requestID: requestID, error: .invalidURL)
+            }
+        }
+
+        @MainActor
+        private func handleOpenServiceRequest(_ data: [String: Any]) async {
+            guard let requestID = data["requestID"] as? String else { return }
+            guard let networkId = Self.integerValue(data["networkId"]),
+                let serviceId = Self.integerValue(data["serviceId"])
+            else {
+                rejectOpenRequest(requestID: requestID, error: .invalidService)
+                return
+            }
+
+            let serverId = (data["serverId"] as? String)?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            guard let coordinator = parent?.appModel.openRequestCoordinator else {
+                rejectOpenRequest(requestID: requestID, error: .serviceUnavailable)
+                return
+            }
+
+            do {
+                try await coordinator.openService(
+                    ServiceOpenRequest(
+                        networkId: networkId,
+                        serviceId: serviceId,
+                        preferredServerId: serverId?.isEmpty == false ? serverId : nil
+                    )
+                )
+                resolveOpenRequest(requestID: requestID)
+            } catch let error as KiririnOpenError {
+                rejectOpenRequest(requestID: requestID, error: error)
+            } catch {
+                rejectOpenRequest(requestID: requestID, error: .serviceUnavailable)
+            }
+        }
+
+        nonisolated private static func integerValue(_ value: Any?) -> Int? {
+            guard let number = value as? NSNumber, !(value is Bool) else { return nil }
+            let doubleValue = number.doubleValue
+            guard doubleValue.isFinite, doubleValue.rounded() == doubleValue else { return nil }
+            return Int(exactly: doubleValue)
         }
 
         @MainActor
@@ -867,6 +1015,29 @@ struct PluginWebView: PluginWebViewRepresentable {
 
             evaluateJavaScript(
                 "if (window.kiririn && window.kiririn._rejectCaptureBlob) { window.kiririn._rejectCaptureBlob(\(requestIDLiteral), \(messageLiteral)); }"
+            )
+        }
+
+        private func resolveOpenRequest(requestID: String) {
+            guard let requestIDLiteral = Self.javaScriptStringLiteral(requestID) else { return }
+
+            evaluateJavaScript(
+                "if (window.kiririn && window.kiririn._resolveOpenRequest) { window.kiririn._resolveOpenRequest(\(requestIDLiteral)); }"
+            )
+        }
+
+        private func rejectOpenRequest(requestID: String, error: KiririnOpenError) {
+            guard let requestIDLiteral = Self.javaScriptStringLiteral(requestID),
+                let payloadLiteral = Self.javaScriptObjectLiteral([
+                    "name": "KiririnOpenError",
+                    "operation": error.operation,
+                    "code": error.code,
+                    "message": error.localizedDescription,
+                ])
+            else { return }
+
+            evaluateJavaScript(
+                "if (window.kiririn && window.kiririn._rejectOpenRequest) { window.kiririn._rejectOpenRequest(\(requestIDLiteral), \(payloadLiteral)); }"
             )
         }
 

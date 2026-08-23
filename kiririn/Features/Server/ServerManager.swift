@@ -28,6 +28,27 @@ nonisolated enum ProgramCatalogRefreshPolicy: Sendable {
     case automaticIfDue
     case force
     case forceIgnoringNetwork
+
+    func merged(with other: Self) -> Self {
+        priority >= other.priority ? self : other
+    }
+
+    func satisfies(_ other: Self) -> Bool {
+        priority >= other.priority
+    }
+
+    private var priority: Int {
+        switch self {
+        case .none:
+            0
+        case .automaticIfDue:
+            1
+        case .force:
+            2
+        case .forceIgnoringNetwork:
+            3
+        }
+    }
 }
 
 nonisolated enum ManualProgramCatalogRefreshResult: Sendable, Equatable {
@@ -94,6 +115,10 @@ class ServerManager {
     @ObservationIgnored
     private var periodicProgramRefreshTask: Task<Void, Never>?
     @ObservationIgnored
+    private var connectionTasks: [String: Task<ProgramCatalogRefreshExecutionResult, Never>] = [:]
+    @ObservationIgnored
+    private var requestedConnectionRefreshPolicies: [String: ProgramCatalogRefreshPolicy] = [:]
+    @ObservationIgnored
     private var serverOperationGenerations: [String: Int] = [:]
     @ObservationIgnored
     private var isAutomaticProgramRefreshEvaluationRunning = false
@@ -132,6 +157,9 @@ class ServerManager {
     }
 
     deinit {
+        for task in connectionTasks.values {
+            task.cancel()
+        }
         periodicProgramRefreshTask?.cancel()
         #if !os(macOS)
             networkMonitor?.cancel()
@@ -310,6 +338,52 @@ class ServerManager {
     func connect(
         serverId: String,
         programRefreshPolicy: ProgramCatalogRefreshPolicy = .none
+    ) async -> ProgramCatalogRefreshExecutionResult {
+        if let existingTask = connectionTasks[serverId] {
+            let pendingPolicy = requestedConnectionRefreshPolicies[serverId] ?? .none
+            requestedConnectionRefreshPolicies[serverId] = pendingPolicy.merged(
+                with: programRefreshPolicy
+            )
+            return await existingTask.value
+        }
+
+        requestedConnectionRefreshPolicies[serverId] = programRefreshPolicy
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return ProgramCatalogRefreshExecutionResult.skipped }
+            defer {
+                self.connectionTasks.removeValue(forKey: serverId)
+                self.requestedConnectionRefreshPolicies.removeValue(forKey: serverId)
+            }
+
+            let initialPolicy =
+                self.requestedConnectionRefreshPolicies[serverId]
+                ?? programRefreshPolicy
+            var satisfiedPolicy = initialPolicy
+            var result = await self.performConnect(
+                serverId: serverId,
+                programRefreshPolicy: initialPolicy
+            )
+
+            while let requestedPolicy = self.requestedConnectionRefreshPolicies[serverId],
+                !satisfiedPolicy.satisfies(requestedPolicy),
+                self.connectionStates[serverId]?.status == .connected
+            {
+                result = await self.refreshData(
+                    serverId: serverId,
+                    programRefreshPolicy: requestedPolicy
+                )
+                satisfiedPolicy = requestedPolicy
+            }
+
+            return result
+        }
+        connectionTasks[serverId] = task
+        return await task.value
+    }
+
+    private func performConnect(
+        serverId: String,
+        programRefreshPolicy: ProgramCatalogRefreshPolicy
     ) async -> ProgramCatalogRefreshExecutionResult {
         let generation = operationGeneration(for: serverId)
         guard let provider = providers[serverId],
@@ -949,6 +1023,40 @@ class ServerManager {
 
     func playbackCandidates(for service: TVService) -> [TVService] {
         candidateServices(for: service)
+    }
+
+    func playbackCandidates(
+        networkId: Int,
+        serviceId: Int,
+        preferredServerId: String?
+    ) -> [TVService] {
+        var candidatesByServerId: [String: TVService] = [:]
+        for service in cachedServicesByServer.values.flatMap({ $0 }) {
+            guard service.networkId == networkId,
+                service.serviceId == serviceId,
+                isServerEnabled(service.serverId),
+                serverSupports(.live, serverId: service.serverId)
+            else {
+                continue
+            }
+            candidatesByServerId[service.serverId] = service
+        }
+
+        let sortedCandidates = sortServicesByServerPriority(
+            Array(candidatesByServerId.values)
+        )
+        guard let preferredServerId,
+            let preferredIndex = sortedCandidates.firstIndex(where: {
+                $0.serverId == preferredServerId
+            })
+        else {
+            return sortedCandidates
+        }
+
+        let preferred = sortedCandidates[preferredIndex]
+        return [preferred]
+            + Array(sortedCandidates.prefix(preferredIndex))
+            + Array(sortedCandidates.dropFirst(preferredIndex + 1))
     }
 
     func connectedPlaybackCandidates(for service: TVService) -> [TVService] {

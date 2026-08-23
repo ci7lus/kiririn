@@ -1129,6 +1129,7 @@ struct ServiceRowView: View {
                             .fontWeight(.medium)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                            .serviceOpenLinkContextMenu(for: service)
 
                         if hasDifferentChildProgram {
                             HStack(spacing: 2) {
