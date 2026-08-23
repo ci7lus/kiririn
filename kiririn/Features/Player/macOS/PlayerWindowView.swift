@@ -74,7 +74,7 @@
                 playerState.plugins = newPlugins
             }
             .onAppear {
-                appModel.activePlayerStates.append(playerState)
+                appModel.registerActivePlayerState(playerState)
                 appModel.focusedPlayerID = playerState.id
                 appModel.setupIfNeeded()
                 appModel.configureDetachedPlayerState(playerState)
@@ -125,7 +125,7 @@
             .onDisappear {
                 appModel.remoteControlService.unregisterWindowEndpoint(playerID: playerState.id)
                 remoteEndpoint = nil
-                appModel.activePlayerStates.removeAll { $0 === playerState }
+                appModel.unregisterActivePlayerState(playerState)
                 if appModel.focusedPlayerID == playerState.id {
                     appModel.focusedPlayerID = nil
                 }
@@ -250,11 +250,13 @@
             restorationWaitTask?.cancel()
             restorationWaitTask = nil
             if playerState.currentPlayable?.id == playable.id {
+                appModel.openRequestCoordinator.markOpenRequestStarted(for: playable)
                 logger.debug("playback already active (\(trigger)): id=\(playable.id)")
                 return
             }
             logWindowContext(trigger: trigger, playable: playable)
             playerState.play(playable: playable)
+            appModel.openRequestCoordinator.markOpenRequestStarted(for: playable)
         }
 
         private func scheduleRestorationFallbackIfNeeded() {

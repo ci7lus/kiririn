@@ -431,6 +431,43 @@ seekToTime(time: number, playerID?: string): void;
 - `seekToTime`の`time`は秒数です。負数は0に、再生時間を超える値は再生時間にクランプされます。
 - `seekToTime`はリモートファイルなどで正確な位置への移動を保証しません。
 
+### URL・サービスを開く
+
+```ts
+interface ServiceOpenRequest {
+  networkId: number;
+  serviceId: number;
+  serverId?: string;
+}
+
+openURL(url: string): Promise<void>;
+openService(request: ServiceOpenRequest): Promise<void>;
+```
+
+`openURL`はHTTPまたはHTTPSのメディアURLをプレイヤーで開きます。`file:`、`data:`、`javascript:`、`kiririn:`などのスキームは利用できません。
+
+`openService`は`networkId`と`serviceId`で放送サービスを指定します。`serverId`は優先して使用するサーバーIDですが、指定サーバーが利用できない場合は他のサーバーへフォールバックします。
+
+同じURLまたは同じサービスがすでに再生中、または開く要求中の場合、新しいプレイヤーは作成されません。その場合もPromiseは成功します。Promiseの成功は再生要求の受け付けを示すもので、実際の再生開始までは保証しません。
+
+要求が不正な場合や再生可能な対象がない場合は、`name`が`KiririnOpenError`のErrorでrejectされます。安定した判定には`code`を使用してください。
+
+| operation | code | 意味 |
+| --- | --- | --- |
+| `openURL` | `invalidURL` | URLがHTTPまたはHTTPSのメディアURLではありません |
+| `openService` | `invalidService` | サービスIDが不正です |
+| `openService` | `serviceNotFound` | サービスを提供するサーバーが見つかりません |
+| `openService` | `serviceUnavailable` | サービスは見つかりましたが再生できません |
+
+アプリを外部から開くDeep Linkも`open`配下に統一されています。
+
+```text
+kiririn://open?url=https%3A%2F%2Fexample.com%2Flive.ts
+kiririn://open/service?networkId=32736&serviceId=1024&serverId=server-id
+```
+
+サービス用のDeep Linkは`kiririn://open/service`です。`serverId`は任意の優先サーバー指定で、利用できない場合は他のサーバーへフォールバックします。
+
 ### 実行環境情報
 
 ```ts
@@ -448,7 +485,7 @@ interface KiririnRuntimeInfo {
 const runtime = window.kiririn.getRuntimeInfo();
 ```
 
-現在の`bridgeVersion`は`6`です。Bridgeの互換性を判定するときは、この値と`appVersion`を確認してください。
+現在の`bridgeVersion`は`7`です。Bridgeの互換性を判定するときは、この値と`appVersion`を確認してください。
 
 `osVersion`は`ProcessInfo.processInfo.operatingSystemVersionString`、`appVersion`は`CFBundleShortVersionString`、`buildVersion`は`CFBundleVersion`です。`bundleIdentifier`や`appVersion`は取得できない環境では`null`になります。
 

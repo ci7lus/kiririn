@@ -740,6 +740,7 @@ struct ProgramGuideView: View {
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .lineLimit(1)
+                        .serviceOpenLinkContextMenu(for: service)
 
                     Spacer(minLength: 0)
                 }

@@ -253,6 +253,23 @@ struct ModelBehaviorTests {
         )
     }
 
+    @Test func programCatalogRefreshPolicyMergesToStrongestRequest() {
+        #expect(
+            ProgramCatalogRefreshPolicy.none.merged(with: .automaticIfDue)
+                == .automaticIfDue
+        )
+        #expect(
+            ProgramCatalogRefreshPolicy.automaticIfDue.merged(with: .force)
+                == .force
+        )
+        #expect(
+            ProgramCatalogRefreshPolicy.force.merged(with: .forceIgnoringNetwork)
+                == .forceIgnoringNetwork
+        )
+        #expect(ProgramCatalogRefreshPolicy.force.satisfies(.automaticIfDue))
+        #expect(!ProgramCatalogRefreshPolicy.force.satisfies(.forceIgnoringNetwork))
+    }
+
     @Test func playableSourceLegacyDirectURLArrayDecodesFileURLsAsFileSource() throws {
         let url = URL(filePath: "/tmp/video.ts")
         let jsonData = "{\"directURL\":[\"\(url.absoluteString)\",null]}".data(using: .utf8)!

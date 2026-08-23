@@ -30,6 +30,8 @@ final class AppModel {
     let remoteControlService: RemoteControlService
     @ObservationIgnored
     private let mediaPlaybackCoordinator: MediaPlaybackCoordinator
+    @ObservationIgnored
+    let openRequestCoordinator: PlaybackOpenCoordinator
     private(set) var cacheStore: CacheStore?
 
     var activePlayerStates: [PlayerState] = []
@@ -57,6 +59,8 @@ final class AppModel {
     }
 
     private var didSetupManager = false
+    @ObservationIgnored
+    private var setupTask: Task<Void, Never>?
     #if os(macOS)
         @ObservationIgnored
         private var globalCaptureHotKeyManager: GlobalCaptureHotKeyManager?
@@ -80,11 +84,21 @@ final class AppModel {
         pluginStore = PluginStore()
         remoteControlService = RemoteControlService()
         mediaPlaybackCoordinator = MediaPlaybackCoordinator()
+        let openRequestCoordinator = PlaybackOpenCoordinator(
+            manager: manager,
+            playerState: playerState
+        )
+        self.openRequestCoordinator = openRequestCoordinator
         pluginStore.onLocalFolderManifestChanged = { [weak self] pluginID in
             guard let self else { return }
             self.syncPluginsToPlayer(forceReloadPluginIDs: [pluginID])
         }
         playerState.plugins = pluginStore.plugins
+        openRequestCoordinator.register(playerState)
+        openRequestCoordinator.configureManagerSetupWaiter { [weak self] in
+            guard let self else { return }
+            await self.waitForManagerSetup()
+        }
         remoteControlService.configure(appModel: self)
         mediaPlaybackCoordinator.configure(appModel: self)
     }
@@ -96,7 +110,8 @@ final class AppModel {
             ensureGlobalCaptureHotKeyManager()
         #endif
         logger.debug("setupIfNeeded start: providers=\(manager.providers.count)")
-        Task {
+        setupTask = Task { @MainActor [weak self] in
+            guard let self else { return }
             let cacheStore = CacheStore()
             await installCacheStore(cacheStore)
             await manager.connectAll()
@@ -280,6 +295,22 @@ final class AppModel {
         playerState.play(playable: playable)
     }
 
+    func registerActivePlayerState(_ state: PlayerState) {
+        guard !activePlayerStates.contains(where: { $0 === state }) else { return }
+        activePlayerStates.append(state)
+        openRequestCoordinator.register(state)
+    }
+
+    func unregisterActivePlayerState(_ state: PlayerState) {
+        activePlayerStates.removeAll { $0 === state }
+        openRequestCoordinator.unregister(state)
+    }
+
+    private func waitForManagerSetup() async {
+        setupIfNeeded()
+        await setupTask?.value
+    }
+
     func handleDeepLink(url: URL) {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
             components.scheme?.lowercased() == "kiririn",
@@ -290,7 +321,7 @@ final class AppModel {
 
         switch host {
         case "open":
-            handleOpenDeepLink(components: components)
+            openRequestCoordinator.handleOpenDeepLink(components: components)
         case "plugins":
             handlePluginDeepLink(components: components)
         default:
@@ -327,15 +358,6 @@ final class AppModel {
     func consumePendingPluginDeeplinks(manifestID: String) -> [URL] {
         defer { pendingPluginDeeplinks.removeValue(forKey: manifestID) }
         return pendingPluginDeeplinks[manifestID] ?? []
-    }
-
-    private func handleOpenDeepLink(components: URLComponents) {
-        guard let mediaURL = parseMediaURL(from: components) else {
-            logger.warning("deep link open rejected: invalid media url")
-            return
-        }
-        playDirectURL(mediaURL)
-        logger.info("deep link open accepted: \(mediaURL.absoluteString)")
     }
 
     private func handlePluginDeepLink(components: URLComponents) {
@@ -399,47 +421,4 @@ final class AppModel {
         }
     }
 
-    private func parseMediaURL(from components: URLComponents) -> URL? {
-        guard let rawValue = components.queryItems?.first(where: { $0.name == "url" })?.value else {
-            return nil
-        }
-
-        let candidate = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !candidate.isEmpty else { return nil }
-
-        if let parsedURL = validatedMediaURL(from: candidate) {
-            return parsedURL
-        }
-
-        if let decodedCandidate = candidate.removingPercentEncoding,
-            decodedCandidate != candidate,
-            let parsedURL = validatedMediaURL(from: decodedCandidate)
-        {
-            return parsedURL
-        }
-
-        return nil
-    }
-
-    private func validatedMediaURL(from candidate: String) -> URL? {
-        guard let parsedURL = URL(string: candidate),
-            let scheme = parsedURL.scheme?.lowercased(),
-            scheme == "http" || scheme == "https"
-        else {
-            return nil
-        }
-        return parsedURL
-    }
-
-    private func playDirectURL(_ url: URL) {
-        let playable = Playable(
-            streamURL: url,
-            source: .directURL(url)
-        )
-        #if os(macOS)
-            NotificationCenter.default.post(name: .requestOpenPlayable, object: playable)
-        #else
-            playerState.play(playable: playable)
-        #endif
-    }
 }

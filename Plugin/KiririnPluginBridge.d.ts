@@ -112,6 +112,34 @@ export interface DeeplinkOpenedPayload {
     url: string;
 }
 
+export interface ServiceOpenRequest {
+    networkId: number;
+    serviceId: number;
+    /** 優先して使用するサーバーID。利用できない場合は他のサーバーへフォールバックします。 */
+    serverId?: string;
+}
+
+export type OpenURLErrorCode = "invalidURL";
+
+export type OpenServiceErrorCode =
+    | "invalidService"
+    | "serviceNotFound"
+    | "serviceUnavailable";
+
+export interface KiririnOpenURLError extends Error {
+    readonly name: "KiririnOpenError";
+    readonly operation: "openURL";
+    readonly code: OpenURLErrorCode;
+}
+
+export interface KiririnOpenServiceError extends Error {
+    readonly name: "KiririnOpenError";
+    readonly operation: "openService";
+    readonly code: OpenServiceErrorCode;
+}
+
+export type KiririnOpenError = KiririnOpenURLError | KiririnOpenServiceError;
+
 export type CaptureVariant = "original" | "composite";
 
 export interface CaptureVariantMetadata {
@@ -146,6 +174,11 @@ export interface KiririnPluginBridge {
 
     onDeeplinkOpened(callback: (payload: DeeplinkOpenedPayload) => void): void;
     onCaptureTaken(callback: (payload: CaptureTakenPayload) => void): void;
+
+    /** HTTPまたはHTTPSのメディアURLをプレイヤーで開きます。 */
+    openURL(url: string): Promise<void>;
+    /** 指定した放送サービスをプレイヤーで開きます。 */
+    openService(request: ServiceOpenRequest): Promise<void>;
 
     play(playerID?: string): void;
     pause(playerID?: string): void;
