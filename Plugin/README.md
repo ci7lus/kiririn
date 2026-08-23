@@ -1,4 +1,4 @@
-# kiririn v0.3.0 プラグイン仕様
+# kiririn v0.4.0 プラグイン仕様
 
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 

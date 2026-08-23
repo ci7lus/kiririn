@@ -1,7 +1,7 @@
 /**
  * SPDX-License-Identifier: Apache-2.0
  *
- * kiririn v0.3.0 のプラグインページで利用できる app-specific bridge です。
+ * kiririn v0.4.0 のプラグインページで利用できる app-specific bridge です。
  *
  * このファイルが説明するのは `window.kiririn` だけです。
  * WebExtension 標準 API は WebKit が提供するものを利用してください。
