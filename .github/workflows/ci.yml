@@ -154,6 +154,128 @@ jobs:
 
                   gh release upload "$TAG_NAME" "$ARCHIVE_ZIP" --clobber
 
+    sentry-release:
+        name: Sentry Release
+        if: startsWith(github.ref, 'refs/tags/')
+        needs: build
+        runs-on: macos-26
+        timeout-minutes: 20
+        permissions:
+            contents: read
+        env:
+            SENTRY_ORG: ci7lus
+            SENTRY_PROJECT: kiririn
+            SENTRY_CLI_VERSION: 3.6.2
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+
+            - name: Download iOS XCArchive
+              uses: actions/download-artifact@v8
+              with:
+                  name: kiririn-ios.xcarchive.zip
+                  path: ${{ runner.temp }}/sentry-archives/ios
+                  skip-decompress: true
+
+            - name: Download macOS XCArchive
+              uses: actions/download-artifact@v8
+              with:
+                  name: kiririn-macos.xcarchive.zip
+                  path: ${{ runner.temp }}/sentry-archives/macos
+                  skip-decompress: true
+
+            - name: Extract XCArchives
+              run: |
+                  for platform in ios macos; do
+                    archive_zip="$RUNNER_TEMP/sentry-archives/$platform/kiririn-$platform.xcarchive.zip"
+                    extract_dir="$RUNNER_TEMP/sentry-archives/$platform"
+
+                    if [ ! -f "$archive_zip" ]; then
+                      echo "::error::XCArchive ZIP not found: $archive_zip"
+                      exit 1
+                    fi
+
+                    unzip -q "$archive_zip" -d "$extract_dir"
+                  done
+
+            - name: Resolve Sentry release metadata
+              id: metadata
+              run: |
+                  archive_path="$RUNNER_TEMP/sentry-archives/ios/kiririn-ios.xcarchive"
+                  app_path="$(find "$archive_path/Products/Applications" -type d -name '*.app' -print -quit)"
+                  if [ -z "$app_path" ]; then
+                    echo "::error::No iOS app found in $archive_path"
+                    exit 1
+                  fi
+
+                  info_plist="$app_path/Info.plist"
+                  bundle_identifier="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$info_plist")"
+                  short_version="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$info_plist")"
+                  build_number="$(/usr/bin/plutil -extract CFBundleVersion raw -o - "$info_plist")"
+                  release="${bundle_identifier}@${short_version}"
+
+                  if [ "$GITHUB_REF_NAME" != "v$short_version" ]; then
+                    echo "::error::Tag $GITHUB_REF_NAME does not match app version $short_version"
+                    exit 1
+                  fi
+
+                  macos_app_path="$RUNNER_TEMP/sentry-archives/macos/kiririn-macos.xcarchive/Products/Applications/kiririn.app"
+                  macos_info_plist="$macos_app_path/Contents/Info.plist"
+                  macos_bundle_identifier="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$macos_info_plist")"
+                  macos_short_version="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$macos_info_plist")"
+
+                  if [ "$bundle_identifier" != "$macos_bundle_identifier" ] || [ "$short_version" != "$macos_short_version" ]; then
+                    echo "::error::iOS and macOS archives have different bundle or version metadata"
+                    exit 1
+                  fi
+
+                  {
+                    echo "bundle_identifier=$bundle_identifier"
+                    echo "release=$release"
+                    echo "build_number=$build_number"
+                  } >> "$GITHUB_OUTPUT"
+                  echo "Resolved Sentry release $release (iOS dist $build_number)"
+
+            - name: Create and finalize Sentry release
+              uses: getsentry/action-release@v3
+              env:
+                  SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+                  SENTRY_ORG: ${{ env.SENTRY_ORG }}
+                  SENTRY_PROJECT: ${{ env.SENTRY_PROJECT }}
+              with:
+                  release: ${{ steps.metadata.outputs.release }}
+                  environment: production
+                  finalize: true
+                  set_commits: auto
+                  ignore_missing: true
+
+            - name: Install Sentry CLI
+              env:
+                  INSTALL_PATH: ${{ runner.temp }}/sentry-cli/sentry-cli
+              run: |
+                  mkdir -p "$(dirname "$INSTALL_PATH")"
+                  curl https://sentry.io/get-cli/ -fsSL \
+                    | INSTALL_PATH="$INSTALL_PATH" SENTRY_CLI_VERSION="$SENTRY_CLI_VERSION" sh
+                  dirname "$INSTALL_PATH" >> "$GITHUB_PATH"
+
+            - name: Upload iOS dSYMs
+              env:
+                  SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+                  SENTRY_ORG: ${{ env.SENTRY_ORG }}
+                  SENTRY_PROJECT: ${{ env.SENTRY_PROJECT }}
+                  SENTRY_CLI_BIN: ${{ runner.temp }}/sentry-cli/sentry-cli
+              run: ./misc/upload-dsym-sentry.sh "$RUNNER_TEMP/sentry-archives/ios/kiririn-ios.xcarchive"
+
+            - name: Upload macOS dSYMs
+              env:
+                  SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+                  SENTRY_ORG: ${{ env.SENTRY_ORG }}
+                  SENTRY_PROJECT: ${{ env.SENTRY_PROJECT }}
+                  SENTRY_CLI_BIN: ${{ runner.temp }}/sentry-cli/sentry-cli
+              run: ./misc/upload-dsym-sentry.sh "$RUNNER_TEMP/sentry-archives/macos/kiririn-macos.xcarchive"
+
     package-test:
         name: Test Packages
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
