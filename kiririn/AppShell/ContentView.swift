@@ -441,14 +441,7 @@ struct ContentView: View {
 
     #if os(macOS)
         private var macTabDisplayOrder: [AppTab] {
-            var result: [AppTab] = []
-            if let sel = selectedMacTab, visitedMacTabs.contains(sel) {
-                result.append(sel)
-            }
-            for tab in AppTab.allCases where visitedMacTabs.contains(tab) && tab != selectedMacTab {
-                result.append(tab)
-            }
-            return result
+            AppTab.allCases.filter { visitedMacTabs.contains($0) }
         }
 
         @ViewBuilder
