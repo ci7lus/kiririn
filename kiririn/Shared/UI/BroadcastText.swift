@@ -2,7 +2,7 @@ import ARIBStandardKit
 import SwiftUI
 
 struct BroadcastText: View {
-    private let source: String
+    private let segments: [(text: String, isEnclosed: Bool)]
     private let font: Font
     private let badgeSpacing = "\u{2005}"
 
@@ -11,18 +11,16 @@ struct BroadcastText: View {
         style: Font.TextStyle = .body,
         weight: Font.Weight = .regular
     ) {
-        self.source = source
-        font = .systemWithARIBFallback(style, weight: weight)
+        segments = source.aribBroadcastDisplaySegments()
+        font = .systemWithARIBFallback(for: source, style, weight: weight)
     }
 
     init(_ source: String, size: CGFloat, weight: Font.Weight = .regular) {
-        self.source = source
-        font = .systemWithARIBFallback(size: size, weight: weight)
+        segments = source.aribBroadcastDisplaySegments()
+        font = .systemWithARIBFallback(for: source, size: size, weight: weight)
     }
 
     var body: some View {
-        let segments = source.aribBroadcastDisplaySegments()
-
         if segments.count == 1,
             let segment = segments.first,
             !segment.isEnclosed

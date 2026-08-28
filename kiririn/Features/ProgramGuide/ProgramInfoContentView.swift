@@ -74,7 +74,7 @@ struct ProgramInfoContentView: View {
                 !rawDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             {
                 Text(rawDescription)
-                    .font(.systemWithARIBFallback(.subheadline))
+                    .font(.systemWithARIBFallback(for: rawDescription, .subheadline))
                     .foregroundStyle(.secondary)
                     .contextMenu {
                         if showsCopyContextMenu {
@@ -160,7 +160,7 @@ struct ProgramInfoContentView: View {
         }
 
         var attributedString = AttributedString(mutable)
-        attributedString.font = .systemWithARIBFallback(.subheadline)
+        attributedString.font = .systemWithARIBFallback(for: text, .subheadline)
         return attributedString
     }
 
