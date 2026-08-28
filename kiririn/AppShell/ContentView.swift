@@ -143,7 +143,7 @@ struct ContentView: View {
             .task {
                 appModel.setupIfNeeded()
                 appModel.syncPluginsToPlayer()
-                appModel.remoteControlService.restoreReceiverIfEnabled()
+                await appModel.remoteControlService.restoreReceiverIfEnabled()
             }
             .onChange(of: pluginStore.plugins) { _, _ in
                 appModel.syncPluginsToPlayer()

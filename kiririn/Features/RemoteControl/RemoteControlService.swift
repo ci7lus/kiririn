@@ -36,8 +36,13 @@ final class RemoteControlService {
     private let trustedPeerStore: RemoteTrustedPeerStore
     private let dispatcher = RemotePlayerCommandDispatcher()
     private var identityIsPersistent = true
+    @ObservationIgnored private var resolvedLocalDisplayName: String?
+    @ObservationIgnored private var hasPreparedIdentity = false
+    @ObservationIgnored private var displayNameResolutionTask: Task<String, Never>?
     @ObservationIgnored private lazy var identity: RemoteLocalIdentity = {
-        let displayName = Self.localDisplayName()
+        guard let displayName = resolvedLocalDisplayName else {
+            preconditionFailure("Local display name must be resolved before loading the identity")
+        }
         do {
             return try RemoteIdentityStore().loadOrCreate(displayName: displayName)
         } catch {
@@ -73,8 +78,10 @@ final class RemoteControlService {
     private var reconnectingControllerPeerID: String?
     private var reconnectingControllerPeerName: String?
     private var reconnectingDisconnectPendingID: String?
+    private var receiverStartupTask: Task<Void, Never>?
     private var reconnectionTask: Task<Void, Never>?
     private var isApplicationInBackground = false
+    private var isBrowsingRequested = false
     private var pairingFailureCount = 0
     private var snapshotTask: Task<Void, Never>?
     private var lastSentSnapshots: [RemotePlayerSnapshot] = []
@@ -94,12 +101,14 @@ final class RemoteControlService {
         dispatcher.configure(appModel: appModel)
     }
 
-    func restoreReceiverIfEnabled() {
+    func restoreReceiverIfEnabled() async {
         guard isReceiverEnabled, operationMode != .receiver else { return }
-        startReceiver()
+        await startReceiver()
     }
 
-    func prepare() {
+    func prepare() async {
+        await prepareIdentityIfNeeded()
+        guard !Task.isCancelled else { return }
         _ = loadTrustedPeersIfNeeded()
     }
 
@@ -107,9 +116,14 @@ final class RemoteControlService {
         guard enabled != isReceiverEnabled else { return }
         isReceiverEnabled = enabled
         defaults.set(enabled, forKey: Self.receiverEnabledKey)
+        receiverStartupTask?.cancel()
         if enabled {
-            startReceiver()
+            receiverStartupTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.startReceiver()
+            }
         } else {
+            receiverStartupTask = nil
             stopReceiver()
         }
     }
@@ -150,14 +164,16 @@ final class RemoteControlService {
         }
     }
 
-    func startBrowsing() {
+    func startBrowsing() async {
         guard
             operationMode != .controller
                 || currentConnectionID == nil
         else {
             return
         }
-        _ = identity
+        isBrowsingRequested = true
+        await prepareIdentityIfNeeded()
+        guard !Task.isCancelled, isBrowsingRequested else { return }
         guard identityIsPersistent else {
             connectionStatus = .failed("端末情報をKeychainに保存できませんでした")
             return
@@ -182,6 +198,8 @@ final class RemoteControlService {
     }
 
     func stopBrowsing() {
+        isBrowsingRequested = false
+        guard hasPreparedIdentity, identityIsPersistent else { return }
         transport.stopBrowsing()
         guard !isAuthenticated, !isApplicationInBackground else { return }
 
@@ -322,9 +340,10 @@ final class RemoteControlService {
         dispatcher.unregisterWindowEndpoint(forPlayerID: playerID)
     }
 
-    private func startReceiver() {
-        guard operationMode != .receiver else { return }
-        _ = identity
+    private func startReceiver() async {
+        guard isReceiverEnabled, operationMode != .receiver else { return }
+        await prepareIdentityIfNeeded()
+        guard !Task.isCancelled, isReceiverEnabled, operationMode != .receiver else { return }
         guard identityIsPersistent else {
             connectionStatus = .failed("端末情報をKeychainに保存できませんでした")
             return
@@ -342,6 +361,11 @@ final class RemoteControlService {
     }
 
     private func stopReceiver() {
+        guard hasPreparedIdentity, identityIsPersistent else {
+            operationMode = .idle
+            connectionStatus = .idle
+            return
+        }
         transport.stopAdvertising()
         transport.disconnect()
         operationMode = .idle
@@ -1036,9 +1060,30 @@ final class RemoteControlService {
         }
     }
 
-    private static func localDisplayName() -> String {
+    private func prepareIdentityIfNeeded() async {
+        guard !hasPreparedIdentity else { return }
+
+        let resolutionTask: Task<String, Never>
+        if let displayNameResolutionTask {
+            resolutionTask = displayNameResolutionTask
+        } else {
+            let newTask = Task {
+                await Self.resolveLocalDisplayName()
+            }
+            displayNameResolutionTask = newTask
+            resolutionTask = newTask
+        }
+
+        let displayName = await resolutionTask.value
+        guard !hasPreparedIdentity else { return }
+        resolvedLocalDisplayName = displayName
+        _ = identity
+        hasPreparedIdentity = true
+        displayNameResolutionTask = nil
+    }
+
+    @concurrent nonisolated private static func resolveLocalDisplayName() async -> String {
         let name = ProcessInfo.processInfo.hostName
-            .replacingOccurrences(of: ".local", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty ? "kiririn" : name
     }
