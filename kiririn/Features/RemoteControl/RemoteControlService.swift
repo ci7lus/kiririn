@@ -185,7 +185,9 @@ final class RemoteControlService {
         let preservesRemotePlayers = reconnectingControllerPeerID != nil
         operationMode = .controller
         resetConnectionState(preservingRemotePlayers: preservesRemotePlayers)
-        discoveredPeers = []
+        if !discoveredPeers.isEmpty {
+            discoveredPeers.removeAll(keepingCapacity: true)
+        }
         if preservesRemotePlayers {
             connectionStatus = .reconnecting(reconnectingControllerPeerName ?? "接続先")
         } else {
@@ -378,15 +380,20 @@ final class RemoteControlService {
         switch event {
         case .discovered(let peer):
             if let index = discoveredPeers.firstIndex(where: { $0.id == peer.id }) {
+                guard discoveredPeers[index] != peer else {
+                    reconnect(to: peer)
+                    return
+                }
                 discoveredPeers[index] = peer
             } else {
                 discoveredPeers.append(peer)
-                discoveredPeers.sort {
-                    $0.displayName.localizedCompare($1.displayName) == .orderedAscending
-                }
+            }
+            discoveredPeers.sort {
+                $0.displayName.localizedCompare($1.displayName) == .orderedAscending
             }
             reconnect(to: peer)
         case .lost(let connectionID):
+            guard discoveredPeers.contains(where: { $0.id == connectionID }) else { return }
             discoveredPeers.removeAll { $0.id == connectionID }
         case .connecting(let connectionID):
             guard currentConnectionID == nil || currentConnectionID == connectionID else {
