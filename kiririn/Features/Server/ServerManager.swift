@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import Logging
 import Network
 
@@ -107,6 +108,7 @@ class ServerManager {
     private var serviceListVariantsByAggregatedServiceId: [String: [TVService]] = [:]
     private var servicesByUniqueId: [String: TVService] = [:]
     private var cachedServicesByServer: [String: [TVService]] = [:]
+    private var serverPriorityByID: [String: Int] = [:]
     private var favoriteStatesByUnifiedKey: [String: FavoriteServiceState] = [:]
     @ObservationIgnored
     private var lastProgramFullFetchDatesByServer: [String: Date] = [:]
@@ -136,6 +138,7 @@ class ServerManager {
     var isCacheReady = false
     var serviceListServices: [TVService] = []
     var services: [TVService] = []
+    private(set) var playbackCandidatesRevision = 0
     var logos: [TVServiceLogo] = [] {
         didSet {
             rebuildLogoCache()
@@ -143,6 +146,10 @@ class ServerManager {
     }
     private var logosByServiceKey: [String: Data] = [:]
     private var logoImagesByServiceKey: [String: PlatformImage] = [:]
+    @ObservationIgnored
+    private var logoDecodeTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var logoCacheGeneration = 0
     var loadingTaskCount = 0
     var isDataLoading: Bool { loadingTaskCount > 0 }
     private(set) var communicationFailureCount = 0
@@ -161,6 +168,7 @@ class ServerManager {
             task.cancel()
         }
         periodicProgramRefreshTask?.cancel()
+        logoDecodeTask?.cancel()
         #if !os(macOS)
             networkMonitor?.cancel()
         #endif
@@ -201,6 +209,9 @@ class ServerManager {
     }
 
     func setupProviders() {
+        serverPriorityByID = Dictionary(
+            uniqueKeysWithValues: configStore.configurations.enumerated().map { ($1.id, $0) })
+
         for config in configStore.configurations {
             if providers[config.id] != nil {
                 if providerConfigurations[config.id] != config {
@@ -401,6 +412,7 @@ class ServerManager {
         }
 
         state.status = .connecting
+        rebuildAggregatedData()
         clearLastError(for: state)
         state.version = nil
         loadingTaskCount += 1
@@ -412,6 +424,7 @@ class ServerManager {
                 return .skipped
             }
             state.status = .connected
+            rebuildAggregatedData()
             state.lastConnectedAt = Date()
             state.version = version
             return await refreshData(
@@ -781,6 +794,7 @@ class ServerManager {
         servicesByUniqueId = playbackData.resolvedServicesByUniqueId
         services = playbackData.services
         serviceListServices = serviceListData.services
+        playbackCandidatesRevision &+= 1
     }
 
     private struct AggregatedServiceData {
@@ -832,23 +846,54 @@ class ServerManager {
 
     private func rebuildLogoCache() {
         var dataCache: [String: Data] = [:]
-        var imageCache: [String: PlatformImage] = [:]
         for logo in logos {
             let key = "\(logo.networkId)-\(logo.serviceId)"
             dataCache[key] = logo.data
-
-            #if canImport(UIKit)
-                if let image = UIImage(data: logo.data) {
-                    imageCache[key] = image
-                }
-            #elseif canImport(AppKit)
-                if let image = NSImage(data: logo.data) {
-                    imageCache[key] = image
-                }
-            #endif
         }
         logosByServiceKey = dataCache
-        logoImagesByServiceKey = imageCache
+
+        logoCacheGeneration &+= 1
+        let generation = logoCacheGeneration
+        logoDecodeTask?.cancel()
+
+        let logosToDecode = logos
+        guard !logosToDecode.isEmpty else {
+            logoImagesByServiceKey = [:]
+            return
+        }
+        logoDecodeTask = Task { [weak self] in
+            let imageCache = await Self.decodeLogoImages(logosToDecode)
+            guard !Task.isCancelled, let self,
+                self.logoCacheGeneration == generation
+            else { return }
+            self.logoImagesByServiceKey = imageCache
+        }
+    }
+
+    @concurrent
+    private nonisolated static func decodeLogoImages(
+        _ logos: [TVServiceLogo]
+    ) async -> [String: PlatformImage] {
+        var imageCache: [String: PlatformImage] = [:]
+        let sourceOptions = [kCGImageSourceShouldCache: true] as CFDictionary
+        let imageOptions = [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
+        for logo in logos {
+            guard !Task.isCancelled,
+                let source = CGImageSourceCreateWithData(logo.data as CFData, sourceOptions),
+                let cgImage = CGImageSourceCreateImageAtIndex(source, 0, imageOptions)
+            else { continue }
+
+            let key = "\(logo.networkId)-\(logo.serviceId)"
+            #if canImport(UIKit)
+                imageCache[key] = UIImage(cgImage: cgImage)
+            #elseif canImport(AppKit)
+                imageCache[key] = NSImage(
+                    cgImage: cgImage,
+                    size: NSSize(width: cgImage.width, height: cgImage.height)
+                )
+            #endif
+        }
+        return imageCache
     }
 
     func updateLogo(_ logo: TVServiceLogo) {
@@ -884,15 +929,14 @@ class ServerManager {
     }
 
     private func sortServicesByServerPriority(_ services: [TVService]) -> [TVService] {
-        let order = Dictionary(
-            uniqueKeysWithValues: configStore.configurations.enumerated().map { ($1.id, $0) })
         return services.sorted { lhs, rhs in
             let lConnected = connectionStates[lhs.serverId]?.status == .connected
             let rConnected = connectionStates[rhs.serverId]?.status == .connected
             if lConnected != rConnected {
                 return lConnected
             }
-            return (order[lhs.serverId] ?? Int.max) < (order[rhs.serverId] ?? Int.max)
+            return (serverPriorityByID[lhs.serverId] ?? Int.max)
+                < (serverPriorityByID[rhs.serverId] ?? Int.max)
         }
     }
 
@@ -1104,9 +1148,7 @@ class ServerManager {
 
     private func candidateServices(for service: TVService) -> [TVService] {
         if let variants = serviceVariantsByAggregatedServiceId[service.id] {
-            return sortServicesByServerPriority(variants).filter {
-                isServerEnabled($0.serverId) && serverSupports(.live, serverId: $0.serverId)
-            }
+            return variants
         }
         guard isServerEnabled(service.serverId),
             serverSupports(.live, serverId: service.serverId)
@@ -1116,9 +1158,7 @@ class ServerManager {
 
     private func serviceListCandidateServices(for service: TVService) -> [TVService] {
         if let variants = serviceListVariantsByAggregatedServiceId[service.id] {
-            return sortServicesByServerPriority(variants).filter {
-                isServerEnabled($0.serverId) && serverSupports(.live, serverId: $0.serverId)
-            }
+            return variants
         }
         return candidateServices(for: service)
     }

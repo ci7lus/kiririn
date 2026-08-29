@@ -12,7 +12,7 @@ struct RemoteControlSettingsView: View {
             #endif
         }
         .task {
-            service.prepare()
+            await service.prepare()
         }
     }
 }

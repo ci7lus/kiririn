@@ -19,7 +19,7 @@
             }
             .navigationTitle("リモコン")
             .task {
-                service.startBrowsing()
+                await service.startBrowsing()
             }
             .onDisappear {
                 guard !service.isReconnecting else { return }

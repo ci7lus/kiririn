@@ -6,7 +6,7 @@ import Testing
 @testable import kiririn
 
 private nonisolated final class InMemoryRemoteTrustedPeerDataStore:
-    RemoteTrustedPeerDataStoring, Sendable
+    RemoteTrustedPeerDataStoring, RemoteIdentityDataStoring, Sendable
 {
     private let values = Mutex<[String: Data]>([:])
 
@@ -164,7 +164,20 @@ struct RemoteControlTests {
         #expect(!availability.isEnabled(.enter))
     }
 
-    @Test func trustedPeerStorePersistsAndRemovesPeers() throws {
+    @Test func identityStorePersistsIdentityAcrossLoads() async throws {
+        let dataStore = InMemoryRemoteTrustedPeerDataStore()
+        let store = RemoteIdentityStore(store: dataStore)
+
+        let first = try await store.loadOrCreate(displayName: "iPhone")
+        let second = try await store.loadOrCreate(displayName: "Mac")
+
+        #expect(first.id == second.id)
+        #expect(first.privateKey.rawRepresentation == second.privateKey.rawRepresentation)
+        #expect(first.displayName == "iPhone")
+        #expect(second.displayName == "Mac")
+    }
+
+    @Test func trustedPeerStorePersistsAndRemovesPeers() async throws {
         let store = RemoteTrustedPeerStore(store: InMemoryRemoteTrustedPeerDataStore())
         let peer = RemoteTrustedPeer(
             id: "peer",
@@ -174,9 +187,9 @@ struct RemoteControlTests {
         )
 
         try store.save([peer])
-        #expect(try store.load() == [peer])
+        #expect(try await store.load() == [peer])
 
         try store.removeAll()
-        #expect(try store.load().isEmpty)
+        #expect(try await store.load().isEmpty)
     }
 }

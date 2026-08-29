@@ -1,3 +1,4 @@
+import ARIBStandardKit
 import CoreText
 import Foundation
 import SwiftUI
@@ -45,10 +46,32 @@ extension Font {
     }
 
     @MainActor static func systemWithARIBFallback(
+        for text: String,
+        _ style: Font.TextStyle,
+        weight: Font.Weight = .regular
+    ) -> Font {
+        guard containsARIBFallbackCharacters(in: text) else {
+            return Font.system(style).weight(weight)
+        }
+        return systemWithARIBFallback(style, weight: weight)
+    }
+
+    @MainActor static func systemWithARIBFallback(
         size: CGFloat,
         weight: Font.Weight = .regular
     ) -> Font {
         cachedARIBFont(size: size, weight: weight)
+    }
+
+    @MainActor static func systemWithARIBFallback(
+        for text: String,
+        size: CGFloat,
+        weight: Font.Weight = .regular
+    ) -> Font {
+        guard containsARIBFallbackCharacters(in: text) else {
+            return Font.system(size: size, weight: weight)
+        }
+        return systemWithARIBFallback(size: size, weight: weight)
     }
 
     @MainActor private static func cachedARIBFont(
@@ -87,6 +110,23 @@ extension Font {
                 as CFDictionary
         )
         return Font(CTFontCreateWithFontDescriptor(descriptor, size, nil))
+    }
+
+    private static func containsARIBFallbackCharacters(in text: String) -> Bool {
+        text.contains { character in
+            if String.aribEnclosedGlyphLabels[character] != nil {
+                return true
+            }
+
+            return character.unicodeScalars.contains { scalar in
+                switch scalar.value {
+                case 0xE000...0xF8FF, 0xF0000...0xFFFFD, 0x100000...0x10FFFD:
+                    true
+                default:
+                    false
+                }
+            }
+        }
     }
 
     private static func platformTextStyle(for style: Font.TextStyle) -> PlatformFont.TextStyle {

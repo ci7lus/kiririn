@@ -212,6 +212,47 @@ private final class VLCLogForwarder: NSObject, VLCLogging {
     }
 }
 
+private actor VLCMediaPlayerTeardown {
+    private var player: VLCMediaPlayer?
+
+    init(player: VLCMediaPlayer) {
+        self.player = player
+    }
+
+    func stopAndRelease(wasRecording: Bool) {
+        player?.stop()
+        if wasRecording {
+            player?.stopRecording()
+        }
+        player?.delegate = nil
+        player = nil
+    }
+}
+
+private actor SecurityScopedResourceAccess {
+    private var activeURL: URL?
+
+    func startAccessing(_ url: URL) -> Bool {
+        if activeURL == url {
+            return true
+        }
+        if let activeURL {
+            self.activeURL = nil
+            activeURL.stopAccessingSecurityScopedResource()
+        }
+
+        guard url.startAccessingSecurityScopedResource() else { return false }
+        activeURL = url
+        return true
+    }
+
+    func stopAccessing() {
+        guard let activeURL else { return }
+        self.activeURL = nil
+        activeURL.stopAccessingSecurityScopedResource()
+    }
+}
+
 @MainActor
 @Observable
 final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
@@ -330,7 +371,8 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     private var selectedVideoTrackID: String?
     private var aribSubtitleTrackID: String?
     private var selectedTextTrackID: String?
-    private var securityScopedPlaybackURL: URL?
+    private let securityScopedResourceAccess = SecurityScopedResourceAccess()
+    private var securityScopeTask: Task<Bool, Never>?
     private var playbackPositionBuffers: (Float, Float) = (-1, -1)
     private var playbackPositionLastRotationTime: Double?
     private var playbackPositionActiveBuffer: Int = 0
@@ -406,6 +448,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     private var pendingDataBroadcastCapture = false
     private var pendingOverlayManifestIDs: [String] = []
     private let vlcLogForwarder = VLCLogForwarder()
+    private var playerTeardownTask: Task<Void, Never>?
 
     var displayProgram: Program? {
         currentPlayable?.displayProgram
@@ -414,6 +457,8 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     func play(playable: Playable) {
         let previousPlayableID = currentPlayable?.id
         cleanup(releasePlayer: true)
+        let previousPlayerTeardownTask = playerTeardownTask
+        let previousSecurityScopeTask = securityScopeTask
         clearPlaybackError()
         isPlaybackLoading = true
         var playableForPlayback = playable
@@ -421,6 +466,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         if let previousPlayableID, previousPlayableID != playableForPlayback.id {
             resetPlaybackRateToDefault()
         }
+        var securityScopeStartTask: Task<Bool, Never>?
         switch playableForPlayback.source {
         case .fileURL(let url, let bookmarkData):
             var actualURL = url
@@ -432,9 +478,14 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             {
                 actualURL = resolvedURL
             }
-            if actualURL.startAccessingSecurityScopedResource() {
-                securityScopedPlaybackURL = actualURL
+            let securityScopeAccess = securityScopedResourceAccess
+            let startTask = Task<Bool, Never> {
+                _ = await previousSecurityScopeTask?.value
+                guard !Task.isCancelled else { return false }
+                return await securityScopeAccess.startAccessing(actualURL)
             }
+            securityScopeTask = startTask
+            securityScopeStartTask = startTask
             playableForPlayback.streamURL = actualURL
         case .liveService, .recordedFile, .directURL:
             break
@@ -465,14 +516,30 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         restoreAfterPlayingTaskID = nil
         mode = .expanded
 
-        if player == nil {
-            player = makePlayer()
-        }
-
         let headerProvider = playableForPlayback.serverId.flatMap { manager?.providers[$0] }
         let playbackStartID = UUID()
         self.playbackStartID = playbackStartID
-        playbackStartTask = Task { @MainActor [weak self] in
+        playbackStartTask = Task {
+            @MainActor [weak self, previousPlayerTeardownTask, securityScopeStartTask] in
+            if let securityScopeStartTask {
+                _ = await securityScopeStartTask.value
+                guard !Task.isCancelled else { return }
+            }
+            if let previousPlayerTeardownTask {
+                await previousPlayerTeardownTask.value
+                guard !Task.isCancelled else { return }
+            }
+
+            guard let currentSelf = self,
+                currentSelf.currentPlayable?.id == expectedPlayableID,
+                currentSelf.playbackStartID == playbackStartID
+            else {
+                return
+            }
+            if currentSelf.player == nil {
+                currentSelf.player = currentSelf.makePlayer()
+            }
+
             // Fetch fresh auth headers before starting playback.
             // Not gated by isCacheReady; token refresh can happen anytime.
             if let provider = headerProvider {
@@ -1593,12 +1660,26 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         controlsTimer = nil
 
         if releasePlayer {
+            let playerToRelease = player
+            let wasRecording = isRecording
             player?.media?.delegate = nil
-        }
-        player?.stop()
-        if isRecording {
-            player?.stopRecording()
+            player?.delegate = nil
+            player?.drawable = nil
+            player = nil
             isRecording = false
+
+            if let playerToRelease {
+                let teardown = VLCMediaPlayerTeardown(player: playerToRelease)
+                playerTeardownTask = Task {
+                    await teardown.stopAndRelease(wasRecording: wasRecording)
+                }
+            }
+        } else {
+            player?.stop()
+            if isRecording {
+                player?.stopRecording()
+                isRecording = false
+            }
         }
 
         isPlaying = false
@@ -1614,12 +1695,6 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         selectedVideoTrackID = nil
         aribSubtitleTrackID = nil
         selectedTextTrackID = nil
-
-        if releasePlayer {
-            player?.delegate = nil
-            player?.drawable = nil
-            player = nil
-        }
 
         releaseSecurityScopedPlaybackURL()
     }
@@ -1976,9 +2051,15 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     }
 
     private func releaseSecurityScopedPlaybackURL() {
-        guard let url = securityScopedPlaybackURL else { return }
-        securityScopedPlaybackURL = nil
-        url.stopAccessingSecurityScopedResource()
+        let previousSecurityScopeTask = securityScopeTask
+        let playerTeardown = playerTeardownTask
+        let securityScopeAccess = securityScopedResourceAccess
+        securityScopeTask = Task<Bool, Never> {
+            _ = await previousSecurityScopeTask?.value
+            _ = await playerTeardown?.value
+            await securityScopeAccess.stopAccessing()
+            return true
+        }
     }
 
     private func scheduleCaptionUpdate(_ text: String) {

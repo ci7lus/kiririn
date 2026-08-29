@@ -1,10 +1,39 @@
 import OrderedCollections
 import SwiftUI
 
+nonisolated enum ProgramGuideTimelineDateCalculator {
+    static func anchorTime(for referenceDate: Date, calendar: Calendar) -> Date {
+        var components = calendar.dateComponents([.year, .month, .day, .hour], from: referenceDate)
+        if let hour = components.hour, hour < 4 {
+            let yesterday =
+                calendar.date(byAdding: .day, value: -1, to: referenceDate) ?? referenceDate
+            components = calendar.dateComponents([.year, .month, .day], from: yesterday)
+        }
+        components.hour = 4
+        components.minute = 0
+        components.second = 0
+        return calendar.date(from: components) ?? referenceDate
+    }
+
+    static func timelineBounds(
+        anchorTime: Date,
+        offsetHours: Int,
+        timelineHours: Int,
+        calendar: Calendar
+    ) -> (start: Date, end: Date) {
+        let start =
+            calendar.date(byAdding: .hour, value: offsetHours, to: anchorTime) ?? anchorTime
+        let end = calendar.date(byAdding: .hour, value: timelineHours, to: start) ?? start
+        return (start, end)
+    }
+}
+
 struct ProgramGuideView: View {
     let manager: ServerManager
     @State var playerState: PlayerState
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.calendar) private var calendar
+    @Environment(\.isTabActive) private var isTabActive
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
     #endif
@@ -31,6 +60,10 @@ struct ProgramGuideView: View {
     @State private var viewportWidth: CGFloat = 0
     @State private var viewportModel: ProgramGuideViewportModel
     @State private var minuteHeight: CGFloat
+    @State private var anchorTimeValue: Date
+    @State private var timelineStartValue: Date
+    @State private var timelineEndValue: Date
+    @State private var dateChipLabels: [Int: String]
     @State private var offsetTracker = HorizontalOffsetTracker()
     @State private var horizontalScrollResetToken = 0
     @State private var horizontalScrollController = ProgramGuideHorizontalScrollController()
@@ -70,31 +103,15 @@ struct ProgramGuideView: View {
     }
 
     private var anchorTime: Date {
-        Self.anchorTime(for: nowLineDate)
-    }
-
-    private static func anchorTime(for referenceDate: Date) -> Date {
-        let calendar = Calendar.current
-        var components = calendar.dateComponents([.year, .month, .day, .hour], from: referenceDate)
-        if let hour = components.hour, hour < 4 {
-            let yesterday =
-                calendar.date(byAdding: .day, value: -1, to: referenceDate) ?? referenceDate
-            components = calendar.dateComponents([.year, .month, .day], from: yesterday)
-        }
-        components.hour = 4
-        components.minute = 0
-        components.second = 0
-        return calendar.date(from: components) ?? referenceDate
+        anchorTimeValue
     }
 
     private var timelineStart: Date {
-        Calendar.current.date(byAdding: .hour, value: timelineOffsetHours, to: anchorTime)
-            ?? anchorTime
+        timelineStartValue
     }
 
     private var timelineEnd: Date {
-        Calendar.current.date(byAdding: .hour, value: timelineHours, to: timelineStart)
-            ?? timelineStart
+        timelineEndValue
     }
 
     private var timelineHeight: CGFloat {
@@ -119,13 +136,26 @@ struct ProgramGuideView: View {
         self.manager = manager
         self._playerState = State(initialValue: playerState)
         self._minuteHeight = State(initialValue: defaultMinuteHeight)
-        let initialTimelineStart = Self.anchorTime(for: Date())
-        let initialTimelineEnd =
-            Calendar.current.date(
-                byAdding: .hour,
-                value: timelineHours,
-                to: initialTimelineStart
-            ) ?? initialTimelineStart
+        let initialAnchorTime =
+            ProgramGuideTimelineDateCalculator.anchorTime(for: Date(), calendar: .current)
+        self._anchorTimeValue = State(initialValue: initialAnchorTime)
+        let initialBounds = ProgramGuideTimelineDateCalculator.timelineBounds(
+            anchorTime: initialAnchorTime,
+            offsetHours: 0,
+            timelineHours: timelineHours,
+            calendar: .current
+        )
+        let initialTimelineStart = initialBounds.start
+        let initialTimelineEnd = initialBounds.end
+        self._timelineStartValue = State(initialValue: initialTimelineStart)
+        self._timelineEndValue = State(initialValue: initialTimelineEnd)
+        self._dateChipLabels = State(
+            initialValue: Self.makeDateChipLabels(
+                anchorTime: initialAnchorTime,
+                calendar: .current,
+                offsets: Array(stride(from: -24, through: 7 * 24, by: 24))
+            )
+        )
         self._viewportModel = State(
             initialValue: ProgramGuideViewportModel(
                 visibleRange: ProgramGuideVisibleRange.make(
@@ -155,7 +185,7 @@ struct ProgramGuideView: View {
                 .onAppear {
                     let currentDate = Date()
                     nowLineDate = currentDate
-                    lastAnchorTime = Self.anchorTime(for: currentDate)
+                    updateTimelineDates(for: currentDate)
                     updateVisibleRange()
                     if manager.hasFavoriteServices {
                         selectedBroadcastType = favoriteBroadcastType
@@ -190,6 +220,7 @@ struct ProgramGuideView: View {
                     }
                 }
                 .onChange(of: timelineOffsetHours) { _, _ in
+                    updateTimelineDates()
                     updateVisibleRange()
                     Task {
                         await reloadPrograms()
@@ -199,6 +230,14 @@ struct ProgramGuideView: View {
                 .onChange(of: selectedBroadcastType) { _, _ in
                     updateDisplayChannels()
                     horizontalScrollResetToken &+= 1
+                }
+                .onChange(of: calendar) { _, _ in
+                    updateTimelineDates(for: nowLineDate, refreshDateChipLabels: true)
+                    updateVisibleRange()
+                    Task {
+                        await reloadPrograms()
+                        updateDisplayChannels()
+                    }
                 }
                 .task {
                     await runCurrentTimeUpdates()
@@ -439,7 +478,13 @@ struct ProgramGuideView: View {
             #endif
         }
         .frame(height: sectionHeaderHeight)
-        .background(.ultraThinMaterial)
+        .background {
+            if isTabActive {
+                Rectangle().fill(.ultraThinMaterial)
+            } else {
+                Color.clear
+            }
+        }
     }
 
     @ViewBuilder
@@ -466,16 +511,7 @@ struct ProgramGuideView: View {
     }
 
     private func dateChipLabel(for offset: Int) -> String {
-        let date =
-            Calendar.current.date(byAdding: .hour, value: offset, to: anchorTime) ?? anchorTime
-        switch offset / timelineHours {
-        case -1: return "昨日 \(Self.monthDayFormatter.string(from: date))"
-        case 0: return "今日 \(Self.monthDayFormatter.string(from: date))"
-        case 1: return "明日 \(Self.monthDayFormatter.string(from: date))"
-        default:
-            return
-                "\(Self.monthDayFormatter.string(from: date))"
-        }
+        dateChipLabels[offset] ?? ""
     }
 
     @MainActor
@@ -502,24 +538,84 @@ struct ProgramGuideView: View {
     private func refreshCurrentTime(at date: Date = Date()) async {
         nowLineDate = date
 
-        let currentAnchorTime = Self.anchorTime(for: date)
+        let currentAnchorTime =
+            ProgramGuideTimelineDateCalculator.anchorTime(for: date, calendar: calendar)
         if let lastAnchorTime, currentAnchorTime != lastAnchorTime {
+            anchorTimeValue = currentAnchorTime
             self.lastAnchorTime = currentAnchorTime
+            updateTimelineDates(refreshDateChipLabels: true)
             updateVisibleRange()
             await reloadPrograms()
             updateDisplayChannels()
         } else if lastAnchorTime == nil {
+            anchorTimeValue = currentAnchorTime
             lastAnchorTime = currentAnchorTime
         }
     }
 
+    private func updateTimelineDates(
+        for referenceDate: Date? = nil,
+        refreshDateChipLabels: Bool = false
+    ) {
+        if let referenceDate {
+            anchorTimeValue =
+                ProgramGuideTimelineDateCalculator.anchorTime(
+                    for: referenceDate,
+                    calendar: calendar
+                )
+        }
+        let bounds = ProgramGuideTimelineDateCalculator.timelineBounds(
+            anchorTime: anchorTimeValue,
+            offsetHours: timelineOffsetHours,
+            timelineHours: timelineHours,
+            calendar: calendar
+        )
+        let start = bounds.start
+        timelineStartValue = start
+        timelineEndValue = bounds.end
+        if referenceDate != nil || refreshDateChipLabels {
+            dateChipLabels = Self.makeDateChipLabels(
+                anchorTime: anchorTimeValue,
+                calendar: calendar,
+                offsets: dateOffsets
+            )
+        }
+        lastAnchorTime = anchorTimeValue
+    }
+
+    private static func makeDateChipLabels(
+        anchorTime: Date,
+        calendar: Calendar,
+        offsets: [Int]
+    ) -> [Int: String] {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ja_JP")
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "M/d (EEE)"
+        return Dictionary(
+            uniqueKeysWithValues: offsets.map { offset in
+                let date =
+                    calendar.date(byAdding: .hour, value: offset, to: anchorTime) ?? anchorTime
+                let dateText = formatter.string(from: date)
+                let label: String
+                switch offset / 24 {
+                case -1: label = "昨日 \(dateText)"
+                case 0: label = "今日 \(dateText)"
+                case 1: label = "明日 \(dateText)"
+                default: label = dateText
+                }
+                return (offset, label)
+            })
+    }
+
     private func nextMinuteBoundary(after date: Date) -> Date {
-        Calendar.current.dateInterval(of: .minute, for: date)?.end ?? date.addingTimeInterval(60)
+        calendar.dateInterval(of: .minute, for: date)?.end ?? date.addingTimeInterval(60)
     }
 
     private func scrollToNow(animated: Bool) {
         let now = Date()
-        let hourStart = Calendar.current.dateInterval(of: .hour, for: now)?.start ?? now
+        let hourStart = calendar.dateInterval(of: .hour, for: now)?.start ?? now
 
         if hourStart >= timelineStart && hourStart < timelineEnd {
             let requestedY = yOffset(for: hourStart) - sectionHeaderHeight - 12
@@ -775,7 +871,7 @@ struct ProgramGuideView: View {
         // 48行だけなので、拡大縮小後に古い行高を保持するLazy Stackを使わない。
         return VStack(spacing: 0) {
             ForEach(markers, id: \.self) { mark in
-                let isHour = Calendar.current.component(.minute, from: mark) == 0
+                let isHour = calendar.component(.minute, from: mark) == 0
 
                 ZStack(alignment: .topLeading) {
                     Rectangle()
@@ -1062,10 +1158,4 @@ struct ProgramGuideView: View {
         return formatter
     }()
 
-    private static let monthDayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ja_JP")
-        formatter.dateFormat = "M/d (EEE)"
-        return formatter
-    }()
 }

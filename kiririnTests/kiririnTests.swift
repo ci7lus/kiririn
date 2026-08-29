@@ -86,6 +86,36 @@ struct KiririnTests {
         #expect(segments.map(\.isEnclosed) == [false, true, false, true])
     }
 
+    @Test func broadcastTextCoalescesBadgeSpacingIntoPlainRuns() {
+        let source = "番組🈑タイトル🆞"
+        let segments = source.aribBroadcastDisplaySegments()
+
+        let renderedSegments = BroadcastText.displaySegmentsForRendering(segments)
+
+        #expect(renderedSegments.map(\.text) == ["番組\u{2005}", "字", "\u{2005}タイトル\u{2005}", "4K"])
+        #expect(renderedSegments.map(\.isEnclosed) == [false, true, false, true])
+    }
+
+    @Test func broadcastTextKeepsBadgeSpacingBoundariesStable() {
+        let adjacentBadges = BroadcastText.displaySegmentsForRendering(
+            "🈑🆞".aribBroadcastDisplaySegments()
+        )
+        #expect(adjacentBadges.map(\.text) == ["字", "\u{2005}", "4K"])
+        #expect(adjacentBadges.map(\.isEnclosed) == [true, false, true])
+
+        let existingSpacing = BroadcastText.displaySegmentsForRendering(
+            "前 🈑 後".aribBroadcastDisplaySegments()
+        )
+        #expect(existingSpacing.map(\.text) == ["前 ", "字", " 後"])
+
+        let edgeBadges = BroadcastText.displaySegmentsForRendering(
+            "🈑本文🆞".aribBroadcastDisplaySegments()
+        )
+        #expect(edgeBadges.first?.text == "字")
+        #expect(edgeBadges.last?.text == "4K")
+        #expect(edgeBadges.map(\.text) == ["字", "\u{2005}本文\u{2005}", "4K"])
+    }
+
     @Test func programAndRecordedKeepRawValuesForBroadcastTextRendering() {
         let program = Program(
             id: "program",
