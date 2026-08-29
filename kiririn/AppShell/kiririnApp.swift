@@ -255,8 +255,13 @@ struct KiririnApp: App {
 
         static func initializeIfAvailable() {
             let buildInfo = AppBuildInfo.current
+            guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
+                return
+            }
+
             SentrySDK.start { options in
                 options.dsn = dsn
+                options.releaseName = "\(bundleIdentifier)@\(buildInfo.version)"
                 options.enableNetworkBreadcrumbs = false
                 options.enableCaptureFailedRequests = false
                 options.enableNetworkTracking = false
