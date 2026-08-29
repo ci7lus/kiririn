@@ -33,6 +33,7 @@ struct ProgramGuideView: View {
     @State var playerState: PlayerState
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.calendar) private var calendar
+    @Environment(\.isTabActive) private var isTabActive
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
     #endif
@@ -477,7 +478,13 @@ struct ProgramGuideView: View {
             #endif
         }
         .frame(height: sectionHeaderHeight)
-        .background(.ultraThinMaterial)
+        .background {
+            if isTabActive {
+                Rectangle().fill(.ultraThinMaterial)
+            } else {
+                Color.clear
+            }
+        }
     }
 
     @ViewBuilder
