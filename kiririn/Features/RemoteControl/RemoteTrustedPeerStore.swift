@@ -24,9 +24,13 @@ nonisolated struct RemoteTrustedPeerStore {
         self.store = store
     }
 
-    func load() throws -> [RemoteTrustedPeer] {
+    @concurrent
+    func load() async throws -> [RemoteTrustedPeer] {
+        try Task.checkCancellation()
         guard let data = try store.load(account: account) else { return [] }
+        try Task.checkCancellation()
         let peers = try JSONDecoder().decode([RemoteTrustedPeer].self, from: data)
+        try Task.checkCancellation()
         return peers.sorted { $0.pairedAt < $1.pairedAt }
     }
 

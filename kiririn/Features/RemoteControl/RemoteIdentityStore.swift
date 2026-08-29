@@ -24,16 +24,34 @@ private nonisolated struct StoredRemoteIdentity: Codable {
     let privateKey: Data
 }
 
+nonisolated protocol RemoteIdentityDataStoring: Sendable {
+    func load(account: String) throws -> Data?
+    func save(_ data: Data, account: String) throws
+}
+
+extension KeychainDataStore: RemoteIdentityDataStoring {}
+
 nonisolated struct RemoteIdentityStore: Sendable {
     private let account = "local-device"
-    private let store = KeychainDataStore(
-        service: "jp.pronama.kiririn.remote.identity",
-        label: "kiririn Remote Control Identity",
-        accessibility: .afterFirstUnlockThisDeviceOnly
-    )
+    private let store: any RemoteIdentityDataStoring
 
-    func loadOrCreate(displayName: String) throws -> RemoteLocalIdentity {
+    init() {
+        store = KeychainDataStore(
+            service: "jp.pronama.kiririn.remote.identity",
+            label: "kiririn Remote Control Identity",
+            accessibility: .afterFirstUnlockThisDeviceOnly
+        )
+    }
+
+    init(store: any RemoteIdentityDataStoring) {
+        self.store = store
+    }
+
+    @concurrent
+    func loadOrCreate(displayName: String) async throws -> RemoteLocalIdentity {
+        try Task.checkCancellation()
         if let stored = try load() {
+            try Task.checkCancellation()
             let privateKey = try Curve25519.Signing.PrivateKey(
                 rawRepresentation: stored.privateKey
             )
@@ -44,12 +62,14 @@ nonisolated struct RemoteIdentityStore: Sendable {
             )
         }
 
+        try Task.checkCancellation()
         let privateKey = Curve25519.Signing.PrivateKey()
         let stored = StoredRemoteIdentity(
             id: UUID().uuidString,
             privateKey: privateKey.rawRepresentation
         )
         try save(stored)
+        try Task.checkCancellation()
         return RemoteLocalIdentity(
             id: stored.id,
             displayName: displayName,

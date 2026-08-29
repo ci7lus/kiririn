@@ -36,25 +36,26 @@ final class RemoteControlService {
     private let trustedPeerStore: RemoteTrustedPeerStore
     private let dispatcher = RemotePlayerCommandDispatcher()
     private var identityIsPersistent = true
-    @ObservationIgnored private var resolvedLocalDisplayName: String?
+    private struct IdentityPreparation: Sendable {
+        let identity: RemoteLocalIdentity
+        let isPersistent: Bool
+    }
+
+    private enum TrustedPeerLoadResult: Sendable {
+        case success([RemoteTrustedPeer])
+        case failure
+    }
+
+    @ObservationIgnored private var preparedIdentity: RemoteLocalIdentity?
+    @ObservationIgnored private var identityPreparationTask: Task<IdentityPreparation, Never>?
+    @ObservationIgnored private var trustedPeersLoadTask: Task<TrustedPeerLoadResult, Never>?
     @ObservationIgnored private var hasPreparedIdentity = false
-    @ObservationIgnored private var displayNameResolutionTask: Task<String, Never>?
-    @ObservationIgnored private lazy var identity: RemoteLocalIdentity = {
-        guard let displayName = resolvedLocalDisplayName else {
-            preconditionFailure("Local display name must be resolved before loading the identity")
+    private var identity: RemoteLocalIdentity {
+        guard let preparedIdentity else {
+            preconditionFailure("Remote identity must be prepared before use")
         }
-        do {
-            return try RemoteIdentityStore().loadOrCreate(displayName: displayName)
-        } catch {
-            identityIsPersistent = false
-            lastErrorMessage = "端末情報をKeychainに保存できませんでした"
-            return RemoteLocalIdentity(
-                id: UUID().uuidString,
-                displayName: displayName,
-                privateKey: .init()
-            )
-        }
-    }()
+        return preparedIdentity
+    }
     @ObservationIgnored private lazy var transport: MultipeerRemoteTransport = {
         let transport = MultipeerRemoteTransport(
             displayName: identity.displayName,
@@ -109,7 +110,7 @@ final class RemoteControlService {
     func prepare() async {
         await prepareIdentityIfNeeded()
         guard !Task.isCancelled else { return }
-        _ = loadTrustedPeersIfNeeded()
+        _ = await loadTrustedPeersIfNeeded()
     }
 
     func setReceiverEnabled(_ enabled: Bool) {
@@ -178,7 +179,8 @@ final class RemoteControlService {
             connectionStatus = .failed("端末情報をKeychainに保存できませんでした")
             return
         }
-        guard loadTrustedPeersIfNeeded() else {
+        guard await loadTrustedPeersIfNeeded() else {
+            guard !Task.isCancelled else { return }
             connectionStatus = .failed("登録済み端末をKeychainから読み込めませんでした")
             return
         }
@@ -350,7 +352,8 @@ final class RemoteControlService {
             connectionStatus = .failed("端末情報をKeychainに保存できませんでした")
             return
         }
-        guard loadTrustedPeersIfNeeded() else {
+        guard await loadTrustedPeersIfNeeded() else {
+            guard !Task.isCancelled else { return }
             connectionStatus = .failed("登録済み端末をKeychainから読み込めませんでした")
             return
         }
@@ -936,13 +939,38 @@ final class RemoteControlService {
         trustedPeers.first { $0.id == id }
     }
 
-    private func loadTrustedPeersIfNeeded() -> Bool {
+    private func loadTrustedPeersIfNeeded() async -> Bool {
         guard !hasLoadedTrustedPeers else { return true }
-        do {
-            trustedPeers = try trustedPeerStore.load()
-            hasLoadedTrustedPeers = true
+        let task: Task<TrustedPeerLoadResult, Never>
+        if let trustedPeersLoadTask {
+            task = trustedPeersLoadTask
+        } else {
+            let newTask = Task { @MainActor [trustedPeerStore] in
+                do {
+                    return TrustedPeerLoadResult.success(try await trustedPeerStore.load())
+                } catch {
+                    return TrustedPeerLoadResult.failure
+                }
+            }
+            trustedPeersLoadTask = newTask
+            task = newTask
+        }
+
+        let result = await task.value
+        guard !Task.isCancelled else { return false }
+        guard !hasLoadedTrustedPeers else {
+            trustedPeersLoadTask = nil
             return true
-        } catch {
+        }
+
+        switch result {
+        case .success(let peers):
+            trustedPeers = peers
+            hasLoadedTrustedPeers = true
+            trustedPeersLoadTask = nil
+            return true
+        case .failure:
+            trustedPeersLoadTask = nil
             lastErrorMessage = "登録済み端末をKeychainから読み込めませんでした"
             return false
         }
@@ -1070,26 +1098,48 @@ final class RemoteControlService {
     private func prepareIdentityIfNeeded() async {
         guard !hasPreparedIdentity else { return }
 
-        let resolutionTask: Task<String, Never>
-        if let displayNameResolutionTask {
-            resolutionTask = displayNameResolutionTask
+        let task: Task<IdentityPreparation, Never>
+        if let identityPreparationTask {
+            task = identityPreparationTask
         } else {
-            let newTask = Task {
-                await Self.resolveLocalDisplayName()
+            let newTask = Task { @MainActor in
+                await Self.prepareIdentity()
             }
-            displayNameResolutionTask = newTask
-            resolutionTask = newTask
+            identityPreparationTask = newTask
+            task = newTask
         }
 
-        let displayName = await resolutionTask.value
-        guard !hasPreparedIdentity else { return }
-        resolvedLocalDisplayName = displayName
-        _ = identity
+        let preparation = await task.value
+        guard !Task.isCancelled, !hasPreparedIdentity else { return }
+        preparedIdentity = preparation.identity
+        identityIsPersistent = preparation.isPersistent
+        if !preparation.isPersistent {
+            lastErrorMessage = "端末情報をKeychainに保存できませんでした"
+        }
         hasPreparedIdentity = true
-        displayNameResolutionTask = nil
+        identityPreparationTask = nil
     }
 
-    @concurrent nonisolated private static func resolveLocalDisplayName() async -> String {
+    @concurrent
+    nonisolated private static func prepareIdentity() async -> IdentityPreparation {
+        let displayName = await resolveLocalDisplayName()
+        do {
+            let identity = try await RemoteIdentityStore().loadOrCreate(displayName: displayName)
+            return IdentityPreparation(identity: identity, isPersistent: true)
+        } catch {
+            return IdentityPreparation(
+                identity: RemoteLocalIdentity(
+                    id: UUID().uuidString,
+                    displayName: displayName,
+                    privateKey: .init()
+                ),
+                isPersistent: false
+            )
+        }
+    }
+
+    @concurrent
+    nonisolated private static func resolveLocalDisplayName() async -> String {
         let name = ProcessInfo.processInfo.hostName
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty ? "kiririn" : name
