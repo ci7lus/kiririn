@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import Logging
 import Network
 
@@ -145,6 +146,10 @@ class ServerManager {
     }
     private var logosByServiceKey: [String: Data] = [:]
     private var logoImagesByServiceKey: [String: PlatformImage] = [:]
+    @ObservationIgnored
+    private var logoDecodeTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var logoCacheGeneration = 0
     var loadingTaskCount = 0
     var isDataLoading: Bool { loadingTaskCount > 0 }
     private(set) var communicationFailureCount = 0
@@ -163,6 +168,7 @@ class ServerManager {
             task.cancel()
         }
         periodicProgramRefreshTask?.cancel()
+        logoDecodeTask?.cancel()
         #if !os(macOS)
             networkMonitor?.cancel()
         #endif
@@ -840,23 +846,54 @@ class ServerManager {
 
     private func rebuildLogoCache() {
         var dataCache: [String: Data] = [:]
-        var imageCache: [String: PlatformImage] = [:]
         for logo in logos {
             let key = "\(logo.networkId)-\(logo.serviceId)"
             dataCache[key] = logo.data
-
-            #if canImport(UIKit)
-                if let image = UIImage(data: logo.data) {
-                    imageCache[key] = image
-                }
-            #elseif canImport(AppKit)
-                if let image = NSImage(data: logo.data) {
-                    imageCache[key] = image
-                }
-            #endif
         }
         logosByServiceKey = dataCache
-        logoImagesByServiceKey = imageCache
+
+        logoCacheGeneration &+= 1
+        let generation = logoCacheGeneration
+        logoDecodeTask?.cancel()
+
+        let logosToDecode = logos
+        guard !logosToDecode.isEmpty else {
+            logoImagesByServiceKey = [:]
+            return
+        }
+        logoDecodeTask = Task { [weak self] in
+            let imageCache = await Self.decodeLogoImages(logosToDecode)
+            guard !Task.isCancelled, let self,
+                self.logoCacheGeneration == generation
+            else { return }
+            self.logoImagesByServiceKey = imageCache
+        }
+    }
+
+    @concurrent
+    private nonisolated static func decodeLogoImages(
+        _ logos: [TVServiceLogo]
+    ) async -> [String: PlatformImage] {
+        var imageCache: [String: PlatformImage] = [:]
+        let sourceOptions = [kCGImageSourceShouldCache: true] as CFDictionary
+        let imageOptions = [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
+        for logo in logos {
+            guard !Task.isCancelled,
+                let source = CGImageSourceCreateWithData(logo.data as CFData, sourceOptions),
+                let cgImage = CGImageSourceCreateImageAtIndex(source, 0, imageOptions)
+            else { continue }
+
+            let key = "\(logo.networkId)-\(logo.serviceId)"
+            #if canImport(UIKit)
+                imageCache[key] = UIImage(cgImage: cgImage)
+            #elseif canImport(AppKit)
+                imageCache[key] = NSImage(
+                    cgImage: cgImage,
+                    size: NSSize(width: cgImage.width, height: cgImage.height)
+                )
+            #endif
+        }
+        return imageCache
     }
 
     func updateLogo(_ logo: TVServiceLogo) {

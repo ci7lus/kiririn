@@ -1,5 +1,12 @@
 import SwiftUI
 
+private struct RecordDateFormatKey: Equatable {
+    let date: Date?
+    let localeIdentifier: String
+    let calendarIdentifier: String
+    let timeZoneIdentifier: String
+}
+
 struct RecordRowView: View {
     let record: Recorded
     let thumbnailData: Data?
@@ -11,9 +18,17 @@ struct RecordRowView: View {
     let onTap: () -> Void
 
     @State private var decodedThumbnail: Image?
+    @State private var formattedDate: String?
+    @Environment(\.calendar) private var calendar
+    @Environment(\.locale) private var locale
 
-    private var formattedDate: String? {
-        record.displayDate.map { $0.formatted(.displayDateTimeFull) }
+    private var dateFormatKey: RecordDateFormatKey {
+        RecordDateFormatKey(
+            date: record.displayDate,
+            localeIdentifier: locale.identifier,
+            calendarIdentifier: String(describing: calendar.identifier),
+            timeZoneIdentifier: calendar.timeZone.identifier
+        )
     }
 
     private var formattedDuration: String? {
@@ -140,6 +155,15 @@ struct RecordRowView: View {
             }
             decodedThumbnail = await decodeRecordingsImage(from: data)
         }
+        .task(id: dateFormatKey) {
+            guard let date = record.displayDate else {
+                formattedDate = nil
+                return
+            }
+            let value = await Self.formatDate(date, locale: locale, calendar: calendar)
+            guard !Task.isCancelled else { return }
+            formattedDate = value
+        }
         .contextMenu {
             if isLocalSaveInProgress, let onCancelDownload {
                 Button(role: .destructive, action: onCancelDownload) {
@@ -161,6 +185,19 @@ struct RecordRowView: View {
                 }
             }
         }
+    }
+
+    @concurrent
+    private nonisolated static func formatDate(
+        _ date: Date,
+        locale: Locale,
+        calendar: Calendar
+    ) async -> String {
+        var style = Date.FormatStyle.dateTime.year().month().day().weekday(.abbreviated)
+            .hour().minute()
+        style.locale = locale
+        style.calendar = calendar
+        return style.format(date)
     }
 }
 

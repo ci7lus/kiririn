@@ -7,6 +7,49 @@ import Testing
 
 struct ModelBehaviorTests {
 
+    @Test func programGuideTimelineAnchorsBeforeFourAMToPreviousBroadcastDay() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "Asia/Tokyo"))
+        let referenceDate = try #require(
+            calendar.date(from: DateComponents(year: 2026, month: 8, day: 29, hour: 2, minute: 30))
+        )
+
+        let anchor = ProgramGuideTimelineDateCalculator.anchorTime(
+            for: referenceDate,
+            calendar: calendar
+        )
+        let components = calendar.dateComponents(
+            [.year, .month, .day, .hour, .minute], from: anchor)
+
+        #expect(components.year == 2026)
+        #expect(components.month == 8)
+        #expect(components.day == 28)
+        #expect(components.hour == 4)
+        #expect(components.minute == 0)
+    }
+
+    @Test func programGuideTimelineBoundsUseCalendarForOffsetAndEnd() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "Asia/Tokyo"))
+        let anchor = try #require(
+            calendar.date(from: DateComponents(year: 2026, month: 8, day: 28, hour: 4))
+        )
+
+        let bounds = ProgramGuideTimelineDateCalculator.timelineBounds(
+            anchorTime: anchor,
+            offsetHours: 24,
+            timelineHours: 24,
+            calendar: calendar
+        )
+        let start = calendar.dateComponents([.day, .hour], from: bounds.start)
+        let end = calendar.dateComponents([.day, .hour], from: bounds.end)
+
+        #expect(start.day == 29)
+        #expect(start.hour == 4)
+        #expect(end.day == 30)
+        #expect(end.hour == 4)
+    }
+
     @Test func serverTypeFlagsReflectSupportedFeatures() {
         #expect(ServerType.mirakurun.requiresBaseURL)
         #expect(ServerType.mirakurun.supportsLive)
