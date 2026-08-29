@@ -1,5 +1,6 @@
 import ARIBStandardKit
 import Foundation
+import GRDB
 import Testing
 
 @testable import kiririn
@@ -180,6 +181,112 @@ struct ModelBehaviorTests {
         #expect(state.lastError == nil)
         #expect(state.lastErrorDetail == nil)
         #expect(state.lastConnectedAt == nil)
+    }
+
+    @Test @MainActor func playbackCandidatesUseStableManagerSnapshot() {
+        guard let defaults = UserDefaults(suiteName: "kiririn.tests.\(UUID().uuidString)") else {
+            return
+        }
+        let configuration = ServerConfiguration(
+            id: "server",
+            name: "Main",
+            type: .mirakurun,
+            baseURL: "https://example.com"
+        )
+        let configStore = ServerConfigStore(localDefaults: defaults)
+        configStore.configurations = [configuration]
+        configStore.enabledStates[configuration.id] = true
+        let manager = ServerManager(configStore: configStore)
+        let service = TVService(
+            id: "service",
+            serviceId: 10,
+            networkId: 20,
+            transportStreamId: nil,
+            name: "サービス",
+            type: .digitalTelevision,
+            remoteControlKeyId: nil,
+            hasLogoData: false,
+            channel: nil,
+            serverId: configuration.id
+        )
+
+        #expect(manager.playbackCandidates(for: service).map(\.id) == [service.id])
+        let revision = manager.playbackCandidatesRevision
+
+        manager.serverAvailabilityDidChange()
+
+        #expect(manager.playbackCandidatesRevision > revision)
+        #expect(manager.playbackCandidates(for: service).map(\.id) == [service.id])
+    }
+
+    @Test @MainActor func connectedTransitionRefreshesPlaybackCandidateOrder() async throws {
+        guard let defaults = UserDefaults(suiteName: "kiririn.tests.\(UUID().uuidString)") else {
+            return
+        }
+        let configurations = [
+            ServerConfiguration(
+                id: "server-a",
+                name: "A",
+                type: .mirakurun,
+                baseURL: "https://a.example.com"
+            ),
+            ServerConfiguration(
+                id: "server-b",
+                name: "B",
+                type: .mirakurun,
+                baseURL: "https://b.example.com"
+            ),
+        ]
+        let configStore = ServerConfigStore(localDefaults: defaults)
+        configStore.configurations = configurations
+        configStore.enabledStates = ["server-a": true, "server-b": true]
+        let cacheStore = CacheStore(databaseQueue: try DatabaseQueue())
+        let serviceA = TVService(
+            id: "service-a",
+            serviceId: 10,
+            networkId: 20,
+            transportStreamId: nil,
+            name: "A",
+            type: .digitalTelevision,
+            remoteControlKeyId: nil,
+            hasLogoData: false,
+            channel: nil,
+            serverId: "server-a"
+        )
+        let serviceB = TVService(
+            id: "service-b",
+            serviceId: 10,
+            networkId: 20,
+            transportStreamId: nil,
+            name: "B",
+            type: .digitalTelevision,
+            remoteControlKeyId: nil,
+            hasLogoData: false,
+            channel: nil,
+            serverId: "server-b"
+        )
+        await cacheStore.cacheServices([serviceA], serverId: "server-a")
+        await cacheStore.cacheServices([serviceB], serverId: "server-b")
+
+        let manager = ServerManager(configStore: configStore)
+        await manager.setCacheStore(cacheStore)
+        guard let aggregatedService = manager.services.first else {
+            return
+        }
+        #expect(
+            manager.playbackCandidates(for: aggregatedService).map(\.serverId)
+                == ["server-a", "server-b"]
+        )
+        manager.connectionStates["server-b"]?.status = .connected
+        manager.serverAvailabilityDidChange()
+        guard let reorderedService = manager.services.first else {
+            return
+        }
+
+        #expect(
+            manager.playbackCandidates(for: reorderedService).map(\.serverId)
+                == ["server-b", "server-a"]
+        )
     }
 
     @Test func programCatalogRefreshDecisionHonorsIntervalAndManualForce() {

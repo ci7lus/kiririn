@@ -107,6 +107,7 @@ class ServerManager {
     private var serviceListVariantsByAggregatedServiceId: [String: [TVService]] = [:]
     private var servicesByUniqueId: [String: TVService] = [:]
     private var cachedServicesByServer: [String: [TVService]] = [:]
+    private var serverPriorityByID: [String: Int] = [:]
     private var favoriteStatesByUnifiedKey: [String: FavoriteServiceState] = [:]
     @ObservationIgnored
     private var lastProgramFullFetchDatesByServer: [String: Date] = [:]
@@ -136,6 +137,7 @@ class ServerManager {
     var isCacheReady = false
     var serviceListServices: [TVService] = []
     var services: [TVService] = []
+    private(set) var playbackCandidatesRevision = 0
     var logos: [TVServiceLogo] = [] {
         didSet {
             rebuildLogoCache()
@@ -201,6 +203,9 @@ class ServerManager {
     }
 
     func setupProviders() {
+        serverPriorityByID = Dictionary(
+            uniqueKeysWithValues: configStore.configurations.enumerated().map { ($1.id, $0) })
+
         for config in configStore.configurations {
             if providers[config.id] != nil {
                 if providerConfigurations[config.id] != config {
@@ -401,6 +406,7 @@ class ServerManager {
         }
 
         state.status = .connecting
+        rebuildAggregatedData()
         clearLastError(for: state)
         state.version = nil
         loadingTaskCount += 1
@@ -412,6 +418,7 @@ class ServerManager {
                 return .skipped
             }
             state.status = .connected
+            rebuildAggregatedData()
             state.lastConnectedAt = Date()
             state.version = version
             return await refreshData(
@@ -781,6 +788,7 @@ class ServerManager {
         servicesByUniqueId = playbackData.resolvedServicesByUniqueId
         services = playbackData.services
         serviceListServices = serviceListData.services
+        playbackCandidatesRevision &+= 1
     }
 
     private struct AggregatedServiceData {
@@ -884,15 +892,14 @@ class ServerManager {
     }
 
     private func sortServicesByServerPriority(_ services: [TVService]) -> [TVService] {
-        let order = Dictionary(
-            uniqueKeysWithValues: configStore.configurations.enumerated().map { ($1.id, $0) })
         return services.sorted { lhs, rhs in
             let lConnected = connectionStates[lhs.serverId]?.status == .connected
             let rConnected = connectionStates[rhs.serverId]?.status == .connected
             if lConnected != rConnected {
                 return lConnected
             }
-            return (order[lhs.serverId] ?? Int.max) < (order[rhs.serverId] ?? Int.max)
+            return (serverPriorityByID[lhs.serverId] ?? Int.max)
+                < (serverPriorityByID[rhs.serverId] ?? Int.max)
         }
     }
 
@@ -1104,9 +1111,7 @@ class ServerManager {
 
     private func candidateServices(for service: TVService) -> [TVService] {
         if let variants = serviceVariantsByAggregatedServiceId[service.id] {
-            return sortServicesByServerPriority(variants).filter {
-                isServerEnabled($0.serverId) && serverSupports(.live, serverId: $0.serverId)
-            }
+            return variants
         }
         guard isServerEnabled(service.serverId),
             serverSupports(.live, serverId: service.serverId)
@@ -1116,9 +1121,7 @@ class ServerManager {
 
     private func serviceListCandidateServices(for service: TVService) -> [TVService] {
         if let variants = serviceListVariantsByAggregatedServiceId[service.id] {
-            return sortServicesByServerPriority(variants).filter {
-                isServerEnabled($0.serverId) && serverSupports(.live, serverId: $0.serverId)
-            }
+            return variants
         }
         return candidateServices(for: service)
     }

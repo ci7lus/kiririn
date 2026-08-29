@@ -6,35 +6,52 @@ private struct PlaybackServerSelectionDialogModifier: ViewModifier {
     let manager: ServerManager
     let showsOnlyConnectedCandidates: Bool
     let onSelect: (TVService) -> Void
+    @State private var candidates: [TVService] = []
+
+    private var candidateTaskID: String {
+        guard selectedService?.id == service.id else { return service.id }
+        return
+            "\(service.id):\(showsOnlyConnectedCandidates):\(manager.playbackCandidatesRevision)"
+    }
 
     func body(content: Content) -> some View {
-        content.confirmationDialog(
-            "再生するサーバーを選択",
-            isPresented: Binding(
-                get: { selectedService?.id == service.id },
-                set: { isPresented in
-                    guard !isPresented, selectedService?.id == service.id else { return }
-                    selectedService = nil
+        content
+            .task(id: candidateTaskID) {
+                guard selectedService?.id == service.id else {
+                    candidates = []
+                    return
                 }
-            ),
-            titleVisibility: .visible
-        ) {
-            if selectedService?.id == service.id {
-                let candidates =
+
+                let updatedCandidates =
                     showsOnlyConnectedCandidates
                     ? manager.connectedPlaybackCandidates(for: service)
                     : manager.playbackCandidates(for: service)
-                ForEach(candidates, id: \.serverId) { candidate in
-                    Button(manager.serverFullDisplayName(candidate.serverId)) {
+                guard !Task.isCancelled else { return }
+                candidates = updatedCandidates
+            }
+            .confirmationDialog(
+                "再生するサーバーを選択",
+                isPresented: Binding(
+                    get: { selectedService?.id == service.id },
+                    set: { isPresented in
+                        guard !isPresented, selectedService?.id == service.id else { return }
                         selectedService = nil
-                        onSelect(candidate)
+                    }
+                ),
+                titleVisibility: .visible
+            ) {
+                if selectedService?.id == service.id {
+                    ForEach(candidates, id: \.serverId) { candidate in
+                        Button(manager.serverFullDisplayName(candidate.serverId)) {
+                            selectedService = nil
+                            onSelect(candidate)
+                        }
                     }
                 }
+                Button("キャンセル", role: .cancel) {
+                    selectedService = nil
+                }
             }
-            Button("キャンセル", role: .cancel) {
-                selectedService = nil
-            }
-        }
     }
 }
 
@@ -43,32 +60,48 @@ private struct ReconnectionServerSelectionDialogModifier: ViewModifier {
     @Binding var selectedService: TVService?
     let manager: ServerManager
     let onSelect: (String) -> Void
+    @State private var candidates: [TVService] = []
+
+    private var candidateTaskID: String {
+        guard selectedService?.id == service.id else { return service.id }
+        return "\(service.id):\(manager.playbackCandidatesRevision)"
+    }
 
     func body(content: Content) -> some View {
-        content.confirmationDialog(
-            "再接続するサーバーを選択",
-            isPresented: Binding(
-                get: { selectedService?.id == service.id },
-                set: { isPresented in
-                    guard !isPresented, selectedService?.id == service.id else { return }
-                    selectedService = nil
+        content
+            .task(id: candidateTaskID) {
+                guard selectedService?.id == service.id else {
+                    candidates = []
+                    return
                 }
-            ),
-            titleVisibility: .visible
-        ) {
-            if selectedService?.id == service.id {
-                let candidates = manager.reconnectionCandidates(for: service)
-                ForEach(candidates, id: \.serverId) { candidate in
-                    Button(manager.serverFullDisplayName(candidate.serverId)) {
+
+                let updatedCandidates = manager.reconnectionCandidates(for: service)
+                guard !Task.isCancelled else { return }
+                candidates = updatedCandidates
+            }
+            .confirmationDialog(
+                "再接続するサーバーを選択",
+                isPresented: Binding(
+                    get: { selectedService?.id == service.id },
+                    set: { isPresented in
+                        guard !isPresented, selectedService?.id == service.id else { return }
                         selectedService = nil
-                        onSelect(candidate.serverId)
+                    }
+                ),
+                titleVisibility: .visible
+            ) {
+                if selectedService?.id == service.id {
+                    ForEach(candidates, id: \.serverId) { candidate in
+                        Button(manager.serverFullDisplayName(candidate.serverId)) {
+                            selectedService = nil
+                            onSelect(candidate.serverId)
+                        }
                     }
                 }
+                Button("キャンセル", role: .cancel) {
+                    selectedService = nil
+                }
             }
-            Button("キャンセル", role: .cancel) {
-                selectedService = nil
-            }
-        }
     }
 }
 
