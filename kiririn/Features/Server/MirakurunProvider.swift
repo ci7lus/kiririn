@@ -31,7 +31,23 @@ final class MirakurunProvider: LiveServerProvider {
 
     func fetchPrograms() async throws -> [Program] {
         let raw: [MirakurunProgram] = try await client.request(path: "api/programs")
-        return raw.map { $0.toProgram(serverId: configuration.id) }
+        return try await Self.convertPrograms(raw, serverId: configuration.id)
+    }
+
+    @concurrent
+    private nonisolated static func convertPrograms(
+        _ rawPrograms: [MirakurunProgram],
+        serverId: String
+    ) async throws -> [Program] {
+        var programs: [Program] = []
+        programs.reserveCapacity(rawPrograms.count)
+        for (index, rawProgram) in rawPrograms.enumerated() {
+            if index.isMultiple(of: 256) {
+                try Task.checkCancellation()
+            }
+            programs.append(rawProgram.toProgram(serverId: serverId))
+        }
+        return programs
     }
 
     func fetchServiceLogoData(for service: TVService) async throws -> Data? {
