@@ -8,12 +8,12 @@ kiririn は macOS/iOS 上において、デジタル放送の視聴を行うプ�
 
 アプリの主な機能は次のとおりです。
 
-- 番組情報の表示 (MPEG2-TS のみ)
+- 番組情報の表示 (MPEG2-TS または MMT/TLV のみ)
 - 番組表の表示 (Mirakurun / EPGStation 接続時)
 - 録画の再生 (EPGStation / KonomiTV / Google Drive 接続時)
 - キャプチャ画像の簡易管理
 - [プラグイン](#プラグイン)による機能拡張
-- データ放送 (web-bml・Mahiron 接続時)
+- データ放送 (Mahiron 接続時のみ)
 
 動画再生周りの機能は次のとおりです。(VLCKit 由来)
 
@@ -21,8 +21,8 @@ kiririn は macOS/iOS 上において、デジタル放送の視聴を行うプ�
 - ARIB STD-B24 形式の字幕表示 (libaribcaption)
 - デュアルモノ対応
 - 5.1ch 音声の仮想サラウンド化
-- MMT/TLV の再生 (部分的なサポート・superfashi/FFmpeg)
-- HDR 表示
+- MMT/TLV の再生 (部分的なサポート)
+- HDR 表示 / BS4K 向け SDR トーンマッピング
 - PiP (iOS のみ)
 
 ## 実行方法
@@ -71,6 +71,7 @@ VLCKit は[フォーク](https://github.com/neneka/vlckit)して改変したも�
 - [otya128/web-bml](https://github.com/otya128/web-bml)
 - [xtne6f/tsreadex](https://github.com/xtne6f/tsreadex)
 - [superfashi/FFmpeg](https://github.com/superfashi/FFmpeg)
+- [saindriches/FFmpeg](https://github.com/saindriches/FFmpeg)
 - [Chinachu/Mirakurun](https://github.com/Chinachu/Mirakurun)
 - [l3tnun/EPGStation](https://github.com/l3tnun/EPGStation)
 - [tsukumijima/KonomiTV](https://github.com/tsukumijima/KonomiTV)
