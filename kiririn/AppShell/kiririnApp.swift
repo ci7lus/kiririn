@@ -124,14 +124,6 @@ extension Notification.Name {
         ) -> UIInterfaceOrientationMask {
             PlayerOrientationController.shared.supportedOrientations
         }
-
-        func application(
-            _ application: UIApplication, didDiscardSceneSessions sceneSessions: Set<UISceneSession>
-        ) {
-            if application.connectedScenes.isEmpty {
-                exit(0)
-            }
-        }
     }
 #endif
 

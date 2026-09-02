@@ -47,6 +47,7 @@ nonisolated final class APIClient: Sendable {
         session.cancelAllTasks()
     }
 
+    @concurrent
     func request<T: Decodable & Sendable>(
         path: String,
         queryItems: [URLQueryItem]? = nil
