@@ -8,6 +8,7 @@ import SwiftUI
 extension Notification.Name {
     static let requestOpenFile = Notification.Name("requestOpenFile")
     static let requestOpenPlayable = Notification.Name("requestOpenPlayable")
+    static let requestFocusPlayerWindow = Notification.Name("requestFocusPlayerWindow")
     static let requestOpenPluginWindow = Notification.Name("requestOpenPluginWindow")
     static let requestOpenSettings = Notification.Name("requestOpenSettings")
     static let requestOpenAboutApp = Notification.Name("requestOpenAboutApp")

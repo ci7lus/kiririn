@@ -6,7 +6,7 @@ import Logging
 final class PlaybackOpenCoordinator {
     private enum Target: Hashable {
         case url(String)
-        case service(networkId: Int, serviceId: Int)
+        case service(serverId: String, networkId: Int, serviceId: Int)
     }
 
     private let logger = Logger(label: "PlaybackOpenCoordinator")
@@ -67,18 +67,36 @@ final class PlaybackOpenCoordinator {
             serviceId: request.serviceId,
             preferredServerId: preferredServerId?.isEmpty == false ? preferredServerId : nil
         )
-        let target = Target.service(
+        await managerSetupWaiter()
+        let candidates = manager.playbackCandidates(
             networkId: normalizedRequest.networkId,
-            serviceId: normalizedRequest.serviceId
+            serviceId: normalizedRequest.serviceId,
+            preferredServerId: normalizedRequest.preferredServerId
         )
+        guard let firstCandidate = candidates.first else {
+            throw KiririnOpenError.serviceNotFound
+        }
+        let target = serviceTarget(for: firstCandidate)
 
         try await executeOpenRequest(target: target) { [weak self] in
             guard let self else { throw KiririnOpenError.serviceUnavailable }
-            try await self.performOpenService(normalizedRequest, target: target)
+            try await self.performOpenService(normalizedRequest)
         }
     }
 
     #if os(macOS)
+        func openPlayable(_ playable: Playable) {
+            guard let target = openTarget(for: playable) else { return }
+
+            if let state = matchingPlayerState(for: target) {
+                focusPlayerWindow(for: state)
+                return
+            }
+
+            guard !pendingOpenTargets.contains(target) else { return }
+            dispatchOpenPlayable(playable, target: target)
+        }
+
         func markOpenRequestStarted(for playable: Playable) {
             guard let target = openTarget(for: playable) else { return }
             clearPendingOpenTarget(target)
@@ -134,6 +152,9 @@ final class PlaybackOpenCoordinator {
         operation: @escaping @MainActor () async throws -> Void
     ) async throws {
         if isAlreadyOpen(target) {
+            #if os(macOS)
+                focusExistingPlayer(for: target)
+            #endif
             return
         }
 
@@ -163,7 +184,11 @@ final class PlaybackOpenCoordinator {
             }
         #endif
 
-        for state in activePlayerStates {
+        return matchingPlayerState(for: target) != nil
+    }
+
+    private func matchingPlayerState(for target: Target) -> PlayerState? {
+        for state in activePlayerStates.reversed() {
             guard let playable = state.currentPlayable else { continue }
             switch target {
             case .url(let expectedURL):
@@ -173,19 +198,20 @@ final class PlaybackOpenCoordinator {
                 else {
                     continue
                 }
-                return true
-            case .service(let networkId, let serviceId):
+                return state
+            case .service(let expectedServerId, let networkId, let serviceId):
                 guard case .liveService = playable.source,
                     let service = playable.displayService,
+                    playable.serverId == expectedServerId,
                     service.networkId == networkId,
                     service.serviceId == serviceId
                 else {
                     continue
                 }
-                return true
+                return state
             }
         }
-        return false
+        return nil
     }
 
     private func performOpenURL(_ url: URL, target: Target) throws {
@@ -199,10 +225,7 @@ final class PlaybackOpenCoordinator {
         logger.info("open URL accepted: \(url.absoluteString)")
     }
 
-    private func performOpenService(
-        _ request: ServiceOpenRequest,
-        target: Target
-    ) async throws {
+    private func performOpenService(_ request: ServiceOpenRequest) async throws {
         await managerSetupWaiter()
 
         let candidates = manager.playbackCandidates(
@@ -216,6 +239,14 @@ final class PlaybackOpenCoordinator {
 
         for initialCandidate in candidates {
             var candidate = initialCandidate
+            let candidateTarget = serviceTarget(for: candidate)
+            if isAlreadyOpen(candidateTarget) {
+                #if os(macOS)
+                    focusExistingPlayer(for: candidateTarget)
+                #endif
+                return
+            }
+
             if manager.connectionStates[candidate.serverId]?.status != .connected {
                 _ = await manager.connect(serverId: candidate.serverId)
                 guard manager.connectionStates[candidate.serverId]?.status == .connected else {
@@ -246,11 +277,14 @@ final class PlaybackOpenCoordinator {
                 continue
             }
 
-            if isAlreadyOpen(target) {
+            if isAlreadyOpen(candidateTarget) {
+                #if os(macOS)
+                    focusExistingPlayer(for: candidateTarget)
+                #endif
                 return
             }
 
-            dispatchOpenPlayable(playable, target: target)
+            dispatchOpenPlayable(playable, target: candidateTarget)
             logger.info(
                 "open service accepted: networkId=\(request.networkId), serviceId=\(request.serviceId), serverId=\(candidate.serverId)"
             )
@@ -270,6 +304,18 @@ final class PlaybackOpenCoordinator {
     }
 
     #if os(macOS)
+        private func focusExistingPlayer(for target: Target) {
+            guard let state = matchingPlayerState(for: target) else { return }
+            focusPlayerWindow(for: state)
+        }
+
+        private func focusPlayerWindow(for state: PlayerState) {
+            NotificationCenter.default.post(
+                name: .requestFocusPlayerWindow,
+                object: state.id
+            )
+        }
+
         private func markPendingOpenTarget(_ target: Target) {
             pendingOpenTargets.insert(target)
             pendingOpenTargetExpirationTasks.removeValue(forKey: target)?.cancel()
@@ -301,12 +347,25 @@ final class PlaybackOpenCoordinator {
                 return .url(normalizedURL.absoluteString)
             case .liveService:
                 guard let service = playable.displayService else { return nil }
-                return .service(networkId: service.networkId, serviceId: service.serviceId)
+                guard let serverId = playable.serverId else { return nil }
+                return .service(
+                    serverId: serverId,
+                    networkId: service.networkId,
+                    serviceId: service.serviceId
+                )
             case .recordedFile, .fileURL:
                 return nil
             }
         }
     #endif
+
+    private func serviceTarget(for service: TVService) -> Target {
+        .service(
+            serverId: service.serverId,
+            networkId: service.networkId,
+            serviceId: service.serviceId
+        )
+    }
 
     private func parseMediaURL(from components: URLComponents) -> URL? {
         guard let rawValue = components.queryItems?.first(where: { $0.name == "url" })?.value else {
