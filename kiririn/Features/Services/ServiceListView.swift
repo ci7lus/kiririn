@@ -25,7 +25,7 @@ struct ServiceListView: View {
     let showsNavigationTitle: Bool
     let showsSearch: Bool
     #if os(macOS)
-        @Environment(\.openWindow) private var openWindow
+        @Environment(AppModel.self) private var appModel
     #endif
     @State private var serviceSelectionForPlayback: TVService?
     @State private var serviceSelectionForReconnection: TVService?
@@ -327,7 +327,7 @@ struct ServiceListView: View {
             return
         }
         #if os(macOS)
-            openWindow(id: AppWindowID.player.rawValue, value: playable)
+            appModel.openRequestCoordinator.openPlayable(playable)
         #else
             playerState.play(playable: playable)
             playerState.startPeriodicRefresh()

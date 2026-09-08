@@ -92,6 +92,12 @@
                 }
             }
             .onReceive(
+                NotificationCenter.default.publisher(for: .requestFocusPlayerWindow)
+            ) { notification in
+                guard notification.object as? String == playerState.id else { return }
+                focusWindow()
+            }
+            .onReceive(
                 NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)
             ) { notification in
                 guard let window = notification.object as? NSWindow, window === playerWindow else {
@@ -140,6 +146,16 @@
 
         private var playerWindow: NSWindow? {
             playerWindowReference.window
+        }
+
+        private func focusWindow() {
+            guard let window = playerWindow else { return }
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            appModel.focusedPlayerID = playerState.id
         }
 
         private func registerRemoteEndpointIfNeeded() {

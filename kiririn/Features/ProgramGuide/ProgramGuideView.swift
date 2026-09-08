@@ -35,7 +35,7 @@ struct ProgramGuideView: View {
     @Environment(\.calendar) private var calendar
     @Environment(\.isTabActive) private var isTabActive
     #if os(macOS)
-        @Environment(\.openWindow) private var openWindow
+        @Environment(AppModel.self) private var appModel
     #endif
 
     @State private var selectedBroadcastType = "all"
@@ -89,7 +89,7 @@ struct ProgramGuideView: View {
     #if os(macOS)
         private var openPlayerWindow: ((Playable) -> Void) {
             { playable in
-                openWindow(id: AppWindowID.player.rawValue, value: playable)
+                appModel.openRequestCoordinator.openPlayable(playable)
             }
         }
     #endif
