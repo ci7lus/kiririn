@@ -11,11 +11,13 @@ import VLCKit
         let isPlaying: Bool
         let onPipAvailableChanged: (Bool) -> Void
         let onPipEnabledChanged: (Bool) -> Void
+        let onDrawableReady: (VLCMediaPlayer) -> Void
 
         func makeNSView(context: Context) -> VLCPlayerView {
             let view = VLCPlayerView()
             view.onPipAvailableChanged = onPipAvailableChanged
             view.onPipEnabledChanged = onPipEnabledChanged
+            view.onDrawableReady = onDrawableReady
             view.bindPlayer(player)
             view.applyPipState(isEnabled: isPipEnabled)
             return view
@@ -24,6 +26,7 @@ import VLCKit
         func updateNSView(_ nsView: VLCPlayerView, context: Context) {
             nsView.onPipAvailableChanged = onPipAvailableChanged
             nsView.onPipEnabledChanged = onPipEnabledChanged
+            nsView.onDrawableReady = onDrawableReady
             nsView.bindPlayer(player)
             nsView.applyPipState(isEnabled: isPipEnabled)
         }
@@ -39,6 +42,7 @@ import VLCKit
 
         var onPipAvailableChanged: ((Bool) -> Void)?
         var onPipEnabledChanged: ((Bool) -> Void)?
+        var onDrawableReady: ((VLCMediaPlayer) -> Void)?
 
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
@@ -59,10 +63,9 @@ import VLCKit
 
         func bindPlayer(_ player: VLCMediaPlayer) {
             self.player = player
-            if let current = player.drawable as AnyObject?, current !== videoView {
+            if (player.drawable as AnyObject?) !== videoView {
                 player.drawable = videoView
-            } else if player.drawable == nil {
-                player.drawable = videoView
+                onDrawableReady?(player)
             }
             onPipAvailableChanged?(false)
             onPipEnabledChanged?(false)
@@ -78,6 +81,7 @@ import VLCKit
             player = nil
             onPipAvailableChanged = nil
             onPipEnabledChanged = nil
+            onDrawableReady = nil
         }
 
         func applyPipState(isEnabled _: Bool) {

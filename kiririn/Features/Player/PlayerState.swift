@@ -381,6 +381,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     private var didObservePlayingForRestore = false
     private var didObservePlaybackProgressForRestore = false
     private var playbackStartTask: Task<Void, Never>?
+    @ObservationIgnored private var drawableReadyContinuation: CheckedContinuation<Void, Never>?
     private var playbackStartID: UUID?
     private var playbackTransitionTask: Task<Void, Never>?
     private var trackLoadingTask: Task<Void, Never>?
@@ -565,8 +566,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
                 self.currentPlayable?.id == expectedPlayableID,
                 self.playbackStartID == playbackStartID,
                 let activePlayable = self.currentPlayable,
-                let player = self.player,
-                let media = VLCMedia(url: activePlayable.streamURL)
+                let player = self.player
             else {
                 if let self, self.playbackStartID == playbackStartID {
                     self.isPlaying = false
@@ -581,6 +581,23 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
                     self.playbackStartID = nil
                     self.playbackStartTask = nil
                 }
+            }
+            #if os(macOS)
+                // SwiftUI binds the drawable after the player becomes visible.
+                if player.drawable == nil {
+                    await withCheckedContinuation { continuation in
+                        self.drawableReadyContinuation = continuation
+                    }
+                }
+                guard !Task.isCancelled,
+                    self.playbackStartID == playbackStartID,
+                    self.player === player
+                else { return }
+            #endif
+            guard let media = VLCMedia(url: activePlayable.streamURL) else {
+                self.isPlaying = false
+                self.isPlaybackLoading = false
+                return
             }
             self.logger.debug("play(playable: \(activePlayable.streamURL))")
 
@@ -1613,8 +1630,20 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
 
     private func cancelPlaybackStartTask() {
         playbackStartTask?.cancel()
+        if let continuation = drawableReadyContinuation {
+            drawableReadyContinuation = nil
+            continuation.resume()
+        }
         playbackStartTask = nil
         playbackStartID = nil
+    }
+
+    func playerDrawableDidBind(_ boundPlayer: VLCMediaPlayer) {
+        guard player === boundPlayer,
+            let continuation = drawableReadyContinuation
+        else { return }
+        drawableReadyContinuation = nil
+        continuation.resume()
     }
 
     private func cancelPlaybackOperationTasks() {
