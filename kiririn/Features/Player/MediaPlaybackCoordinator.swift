@@ -1,3 +1,4 @@
+import ARIBStandardKit
 import Foundation
 import MediaPlayer
 import Observation
@@ -93,8 +94,9 @@ final class MediaPlaybackCoordinator {
         }
 
         var info: [String: Any] = [
-            MPMediaItemPropertyTitle: playable.title,
-            MPMediaItemPropertyArtist: playable.serviceName ?? "kiririn",
+            MPMediaItemPropertyTitle: playable.title.replacingARIBEnclosedGlyphsForDisplay(),
+            MPMediaItemPropertyArtist:
+                playable.serviceName?.replacingARIBEnclosedGlyphsForDisplay() ?? "kiririn",
             MPNowPlayingInfoPropertyExternalContentIdentifier: playable.id,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: playerState.playbackStatus.time,
             MPNowPlayingInfoPropertyPlaybackRate: playerState.isPlaying
