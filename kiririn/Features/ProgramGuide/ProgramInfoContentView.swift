@@ -73,8 +73,7 @@ struct ProgramInfoContentView: View {
             if let rawDescription = program.desc,
                 !rawDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             {
-                Text(rawDescription)
-                    .font(.systemWithARIBFallback(for: rawDescription, .subheadline))
+                BroadcastText(rawDescription, style: .subheadline)
                     .foregroundStyle(.secondary)
                     .contextMenu {
                         if showsCopyContextMenu {
