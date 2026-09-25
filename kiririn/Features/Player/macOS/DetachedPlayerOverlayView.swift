@@ -85,6 +85,9 @@
                                         if playerState?.isPipEnabled != enabled {
                                             playerState?.isPipEnabled = enabled
                                         }
+                                    },
+                                    onDrawableReady: { [weak playerState] boundPlayer in
+                                        playerState?.playerDrawableDidBind(boundPlayer)
                                     }
                                 )
                                 .frame(width: videoFrame.width, height: videoFrame.height)
