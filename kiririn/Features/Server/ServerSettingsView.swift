@@ -65,12 +65,9 @@ struct ServerSettingsView: View {
                         isEnabled: configStore.isEnabled(config.id),
                         onToggle: { enabled in
                             configStore.setEnabled(enabled, for: config.id)
-                            manager.connectionStates[config.id]?.isEnabled = enabled
+                            manager.setServerEnabled(enabled, serverId: config.id)
                             if enabled {
                                 Task { await manager.connect(serverId: config.id) }
-                            } else {
-                                manager.connectionStates[config.id]?.status = .disconnected
-                                manager.serverAvailabilityDidChange()
                             }
                         },
                         onReconnect: {
@@ -130,12 +127,9 @@ struct ServerSettingsView: View {
                             isEnabled: configStore.isEnabled(config.id),
                             onToggle: { enabled in
                                 configStore.setEnabled(enabled, for: config.id)
-                                manager.connectionStates[config.id]?.isEnabled = enabled
+                                manager.setServerEnabled(enabled, serverId: config.id)
                                 if enabled {
                                     Task { await manager.connect(serverId: config.id) }
-                                } else {
-                                    manager.connectionStates[config.id]?.status = .disconnected
-                                    manager.serverAvailabilityDidChange()
                                 }
                             },
                             onReconnect: {
