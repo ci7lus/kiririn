@@ -136,10 +136,6 @@ extension Notification.Name {
             NSWindow.allowsAutomaticWindowTabbing = false
         }
 
-        func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-            true
-        }
-
         func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
             let appModel = AppModel.shared
             for state in appModel.activePlayerStates {
