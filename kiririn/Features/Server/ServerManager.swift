@@ -119,6 +119,8 @@ class ServerManager {
     @ObservationIgnored
     private var connectionTasks: [String: Task<ProgramCatalogRefreshExecutionResult, Never>] = [:]
     @ObservationIgnored
+    private var connectionTaskIDs: [String: UUID] = [:]
+    @ObservationIgnored
     private var requestedConnectionRefreshPolicies: [String: ProgramCatalogRefreshPolicy] = [:]
     @ObservationIgnored
     private var serverOperationGenerations: [String: Int] = [:]
@@ -282,6 +284,22 @@ class ServerManager {
         operationGeneration(for: serverId) != generation
     }
 
+    func setServerEnabled(_ isEnabled: Bool, serverId: String) {
+        guard let state = connectionStates[serverId] else { return }
+        state.isEnabled = isEnabled
+        guard !isEnabled else { return }
+
+        cancelInFlightRequests(serverId: serverId)
+        connectionTasks.removeValue(forKey: serverId)?.cancel()
+        connectionTaskIDs.removeValue(forKey: serverId)
+        requestedConnectionRefreshPolicies.removeValue(forKey: serverId)
+        state.status = .disconnected
+        clearLastError(for: state)
+        state.version = nil
+        rebuildAggregatedData()
+        serverAvailabilityDidChange()
+    }
+
     private func errorFeedback(for error: Error) -> (
         brief: String, detail: ServerOperationFeedbackContent
     ) {
@@ -359,11 +377,15 @@ class ServerManager {
         }
 
         requestedConnectionRefreshPolicies[serverId] = programRefreshPolicy
+        let taskID = UUID()
         let task = Task { @MainActor [weak self] in
             guard let self else { return ProgramCatalogRefreshExecutionResult.skipped }
             defer {
-                self.connectionTasks.removeValue(forKey: serverId)
-                self.requestedConnectionRefreshPolicies.removeValue(forKey: serverId)
+                if self.connectionTaskIDs[serverId] == taskID {
+                    self.connectionTasks.removeValue(forKey: serverId)
+                    self.connectionTaskIDs.removeValue(forKey: serverId)
+                    self.requestedConnectionRefreshPolicies.removeValue(forKey: serverId)
+                }
             }
 
             let initialPolicy =
@@ -375,7 +397,8 @@ class ServerManager {
                 programRefreshPolicy: initialPolicy
             )
 
-            while let requestedPolicy = self.requestedConnectionRefreshPolicies[serverId],
+            while self.connectionTaskIDs[serverId] == taskID,
+                let requestedPolicy = self.requestedConnectionRefreshPolicies[serverId],
                 !satisfiedPolicy.satisfies(requestedPolicy),
                 self.connectionStates[serverId]?.status == .connected
             {
@@ -388,6 +411,7 @@ class ServerManager {
 
             return result
         }
+        connectionTaskIDs[serverId] = taskID
         connectionTasks[serverId] = task
         return await task.value
     }
@@ -462,6 +486,9 @@ class ServerManager {
             }
             cachedServicesByServer[serverId] = fetchedServices
             await cacheStore.cacheServices(fetchedServices, serverId: serverId)
+            guard !isStaleOperation(serverId: serverId, generation: generation) else {
+                return .skipped
+            }
             rebuildAggregatedData()
 
             let fetchedLogos = await fetchLogoData(
@@ -473,6 +500,9 @@ class ServerManager {
             }
             mergeLogos(fetchedLogos)
             await cacheStore.cacheLogos(fetchedLogos)
+            guard !isStaleOperation(serverId: serverId, generation: generation) else {
+                return .skipped
+            }
             rebuildAggregatedData()
 
             switch await programCatalogRefreshDecision(for: serverId, policy: programRefreshPolicy)
@@ -490,7 +520,13 @@ class ServerManager {
                         return .skipped
                     }
                     await cacheStore.cachePrograms(fetchedPrograms, serverId: serverId)
+                    guard !isStaleOperation(serverId: serverId, generation: generation) else {
+                        return .skipped
+                    }
                     await cacheStore.cleanupOldPrograms()
+                    guard !isStaleOperation(serverId: serverId, generation: generation) else {
+                        return .skipped
+                    }
                     clearLastError(for: state)
                     lastProgramFullFetchDatesByServer[serverId] = Date()
                     pendingProgramFullFetchServerIDs.remove(serverId)
@@ -955,6 +991,9 @@ class ServerManager {
             var result: [TVServiceLogo] = []
 
             for service in services {
+                guard let state = connectionStates[service.serverId], state.isEnabled else {
+                    break
+                }
                 if !service.hasLogoData {
                     continue
                 }
