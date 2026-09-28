@@ -86,11 +86,11 @@ extension MirakurunProvider: DataBroadcastProviding {
         // under - build them from the configured base URL instead.
         guard let providerIdentifier = service.providerIdentifier,
             let eventsURL = client.buildStreamURL(
-                path: "api/services/\(providerIdentifier)/data-broadcast/events"),
+                path: "api/services/\(providerIdentifier)/data-broadcast/bml/events"),
             let stateURL = client.buildStreamURL(
-                path: "api/services/\(providerIdentifier)/data-broadcast/state"),
+                path: "api/services/\(providerIdentifier)/data-broadcast/bml/state"),
             let baseURL = client.buildStreamURL(
-                path: "api/services/\(providerIdentifier)/data-broadcast")
+                path: "api/services/\(providerIdentifier)/data-broadcast/bml")
         else {
             return nil
         }
