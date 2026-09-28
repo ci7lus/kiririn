@@ -341,7 +341,7 @@ final class DataBroadcastSession {
 
     // MARK: - Initial state fast path
 
-    /// Fetches GET `/data-broadcast/state` once, in parallel with opening
+    /// Fetches GET `/data-broadcast/bml/state` once, in parallel with opening
     /// SSE. If Mahiron has a `cache`-origin snapshot rebuilt from persisted
     /// PMT/DII (tuner not yet acquired) or an already-`live` one, this lets
     /// module prefetch start immediately instead of waiting for the first

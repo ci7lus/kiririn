@@ -103,7 +103,7 @@ nonisolated struct MahironSnapshot: Decodable, Sendable {
     let components: [MahironComponent]?
     /// `live` (session actively tuned) or `cache` (rebuilt from persisted
     /// PMT/DII without a tuner). Present both on the SSE `snapshot` event
-    /// (always `live`) and on GET `/data-broadcast/state` (see
+    /// (always `live`) and on GET `/data-broadcast/bml/state` (see
     /// DataBroadcastSession.fetchInitialState, which decodes the flat state
     /// response body directly as a MahironSnapshot).
     let origin: String?
