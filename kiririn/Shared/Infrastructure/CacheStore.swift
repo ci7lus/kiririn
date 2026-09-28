@@ -87,7 +87,7 @@ class CacheStore {
     #if DEBUG
         func triggerDatabaseFailureFeedbackForDebug() async {
             do {
-                _ = try dbQueue.read { db in
+                _ = try await dbQueue.read { db in
                     return try Row.fetchOne(db, sql: "SELECT * FROM cache_store_failure_probe")
                 }
             } catch {
