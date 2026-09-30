@@ -114,6 +114,35 @@ struct ModelBehaviorTests {
         #expect(service.name.aribBroadcastDisplaySegments().map(\.text) == ["手", "テストサービス"])
     }
 
+    @Test func tvServiceDetectsTerrestrialNetworkBySpecAllocatedIDs() {
+        func service(networkId: Int, channelType: String?) -> TVService {
+            TVService(
+                id: "service-\(networkId)",
+                providerIdentifier: nil,
+                serviceId: 37904,
+                networkId: networkId,
+                transportStreamId: nil,
+                name: "テスト",
+                type: .digitalTelevision,
+                remoteControlKeyId: 1,
+                hasLogoData: false,
+                channel: channelType.map { .init(id: "28", type: $0) },
+                serverId: "server"
+            )
+        }
+
+        #expect(service(networkId: 32162, channelType: "SKY").isTerrestrialNetwork)
+        #expect(service(networkId: 32736, channelType: "GR").isTerrestrialNetwork)
+        #expect(service(networkId: 0x7880, channelType: nil).isTerrestrialNetwork)
+        #expect(service(networkId: 0x7FE8, channelType: nil).isTerrestrialNetwork)
+        #expect(!service(networkId: 0x787F, channelType: nil).isTerrestrialNetwork)
+        #expect(!service(networkId: 0x7FE9, channelType: nil).isTerrestrialNetwork)
+        #expect(!service(networkId: 4, channelType: "BS").isTerrestrialNetwork)
+        #expect(!service(networkId: 6, channelType: "CS").isTerrestrialNetwork)
+        #expect(!service(networkId: 7, channelType: "CS").isTerrestrialNetwork)
+        #expect(!service(networkId: 1, channelType: "SKY").isTerrestrialNetwork)
+    }
+
     @Test func recordedDisplayDateFallsBackToReferenceDateAndPlayableIDUsesFirstVariant() {
         let referenceDate = Date(timeIntervalSince1970: 1_234)
         let recorded = Recorded(

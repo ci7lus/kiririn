@@ -94,6 +94,10 @@ nonisolated struct TVService: Codable, Identifiable, Sendable, Hashable, Fetchab
         "\(networkId)-\(serviceId)"
     }
 
+    var isTerrestrialNetwork: Bool {
+        (0x7880...0x7FE8).contains(networkId)
+    }
+
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
