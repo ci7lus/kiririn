@@ -396,16 +396,15 @@ struct ServiceListView: View {
     }
 
     private func displayGroupKey(for service: TVService) -> String {
-        switch service.channel?.type {
-        case "GR":
+        if service.channel?.type == "GR" || service.isTerrestrialNetwork {
             // 区域外再放送などで別な放送局が同じリモコンキー ID を使う可能性があるので、ネットワーク ID とリモコンキー ID で纏める
             return String("\(service.networkId)\(service.remoteControlKeyId ?? -1)")
-        case "BS":
+        }
+        if service.channel?.type == "BS" || service.networkId == 4 {
             return
                 "\(service.channel?.id ?? "\(service.serviceId)")\(service.transportStreamId ?? -1)"
-        default:
-            return "\(service.serviceId)"
         }
+        return "\(service.serviceId)"
     }
 
     private func matchesSearch(
