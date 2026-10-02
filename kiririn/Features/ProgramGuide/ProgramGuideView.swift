@@ -29,6 +29,24 @@ nonisolated enum ProgramGuideTimelineDateCalculator {
 }
 
 struct ProgramGuideView: View {
+    nonisolated private struct ProgramReloadRequest: Equatable, Sendable {
+        let isCacheReady: Bool
+        let services: [TVService]
+        let servicesRevision: Int
+        let catalogRevision: Int
+        let start: Date
+        let end: Date
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.isCacheReady == rhs.isCacheReady
+                && lhs.services.map(\.contentSnapshot) == rhs.services.map(\.contentSnapshot)
+                && lhs.servicesRevision == rhs.servicesRevision
+                && lhs.catalogRevision == rhs.catalogRevision
+                && lhs.start == rhs.start
+                && lhs.end == rhs.end
+        }
+    }
+
     let manager: ServerManager
     @State var playerState: PlayerState
     @Environment(\.scenePhase) private var scenePhase
@@ -48,6 +66,7 @@ struct ProgramGuideView: View {
     @State private var hasRestoredSearchScrollInCurrentPresentation = false
     @State private var searchQueryResults: [ProgramSearchResult] = []
     @State private var isLoading = false
+    @State private var reloadGeneration = 0
     @State private var hasAttemptedLoad = false
     @State private var hasScrolledToCurrentTimeOnInitialDisplay = false
     @State private var isInitialScrollReady = false
@@ -112,6 +131,18 @@ struct ProgramGuideView: View {
 
     private var timelineEnd: Date {
         timelineEndValue
+    }
+
+    private var programReloadRequest: ProgramReloadRequest? {
+        guard isTabActive else { return nil }
+        return ProgramReloadRequest(
+            isCacheReady: manager.isCacheReady,
+            services: manager.services,
+            servicesRevision: manager.playbackCandidatesRevision,
+            catalogRevision: manager.programCatalogRevision,
+            start: timelineStart,
+            end: timelineEnd
+        )
     }
 
     private var timelineHeight: CGFloat {
@@ -196,36 +227,20 @@ struct ProgramGuideView: View {
                     }
                 }
                 .programGuideTitle()
-                .task {
+                .task(id: programReloadRequest) {
                     await reloadPrograms()
-                    updateDisplayChannels()
-                }
-                .onChange(of: channels) { _, _ in updateDisplayChannels() }
-                .onChange(of: manager.isCacheReady) { _, isReady in
-                    guard isReady else { return }
-                    Task {
-                        await reloadPrograms()
-                        updateDisplayChannels()
-                    }
                 }
                 .onChange(of: manager.services) { _, _ in
+                    guard isTabActive else { return }
                     if selectedBroadcastType == favoriteBroadcastType
                         && !manager.hasFavoriteServices
                     {
                         selectedBroadcastType = "all"
                     }
-                    Task {
-                        await reloadPrograms()
-                        updateDisplayChannels()
-                    }
                 }
                 .onChange(of: timelineOffsetHours) { _, _ in
                     updateTimelineDates()
                     updateVisibleRange()
-                    Task {
-                        await reloadPrograms()
-                        updateDisplayChannels()
-                    }
                 }
                 .onChange(of: selectedBroadcastType) { _, _ in
                     updateDisplayChannels()
@@ -234,17 +249,13 @@ struct ProgramGuideView: View {
                 .onChange(of: calendar) { _, _ in
                     updateTimelineDates(for: nowLineDate, refreshDateChipLabels: true)
                     updateVisibleRange()
-                    Task {
-                        await reloadPrograms()
-                        updateDisplayChannels()
-                    }
                 }
-                .task {
+                .task(id: isTabActive) {
+                    guard isTabActive else { return }
                     await runCurrentTimeUpdates()
                 }
                 .programGuideRefreshable {
                     await reloadPrograms()
-                    updateDisplayChannels()
                 }
         }
         .programGuidePlatformActions(
@@ -285,7 +296,7 @@ struct ProgramGuideView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .active else { return }
+            guard isTabActive, newPhase == .active else { return }
             Task { @MainActor in
                 await refreshCurrentTime()
             }
@@ -516,6 +527,7 @@ struct ProgramGuideView: View {
 
     @MainActor
     private func runCurrentTimeUpdates() async {
+        guard !Task.isCancelled else { return }
         await refreshCurrentTime()
 
         while !Task.isCancelled {
@@ -536,6 +548,7 @@ struct ProgramGuideView: View {
 
     @MainActor
     private func refreshCurrentTime(at date: Date = Date()) async {
+        guard isTabActive, !Task.isCancelled else { return }
         nowLineDate = date
 
         let currentAnchorTime =
@@ -545,8 +558,6 @@ struct ProgramGuideView: View {
             self.lastAnchorTime = currentAnchorTime
             updateTimelineDates(refreshDateChipLabels: true)
             updateVisibleRange()
-            await reloadPrograms()
-            updateDisplayChannels()
         } else if lastAnchorTime == nil {
             anchorTimeValue = currentAnchorTime
             lastAnchorTime = currentAnchorTime
@@ -757,7 +768,7 @@ struct ProgramGuideView: View {
     }
 
     private func updateDisplayChannels() {
-        displayChannels =
+        var updatedChannels: [GuideChannel] =
             channels
             .filter { channel in
                 if selectedBroadcastType == "all" {
@@ -775,15 +786,18 @@ struct ProgramGuideView: View {
             }
 
         // サーバー切断等でお気に入りチャンネルの番組が取得できない場合は「すべて」にフォールバック
-        if displayChannels.isEmpty && selectedBroadcastType == favoriteBroadcastType
+        if updatedChannels.isEmpty && selectedBroadcastType == favoriteBroadcastType
             && hasAttemptedLoad
         {
             selectedBroadcastType = "all"
-            displayChannels = channels.compactMap { channel in
+            updatedChannels = channels.compactMap { channel in
                 guard !channel.programs.isEmpty else { return nil }
                 return GuideChannel(
                     id: channel.id, service: channel.service, programs: channel.programs)
             }
+        }
+        if displayChannels != updatedChannels {
+            displayChannels = updatedChannels
         }
     }
 
@@ -918,34 +932,54 @@ struct ProgramGuideView: View {
     }
 
     private func reloadPrograms() async {
-        defer { hasAttemptedLoad = true }
-        guard manager.isCacheReady else {
-            channels = []
+        guard !Task.isCancelled else { return }
+        reloadGeneration &+= 1
+        let generation = reloadGeneration
+        guard let request = programReloadRequest else {
+            isLoading = false
+            return
+        }
+        guard request.isCacheReady else {
+            isLoading = false
+            if !channels.isEmpty { channels = [] }
+            updateDisplayChannels()
             return
         }
 
         isLoading = true
-        defer { isLoading = false }
-
-        // @MainActor 上でスナップショットを取ってから await へ進む
-        let fetchStart = timelineStart
-        let fetchEnd = timelineEnd
-        let allServices = manager.services
+        defer {
+            if generation == reloadGeneration { isLoading = false }
+        }
 
         // GRDB の async read: バックグラウンドスレッドで実行され主アクターは解放される
-        let fetchedPrograms = await manager.fetchCachedPrograms(from: fetchStart, until: fetchEnd)
+        let fetchedPrograms = await manager.fetchCachedPrograms(
+            from: request.start, until: request.end
+        )
+        guard !Task.isCancelled, generation == reloadGeneration,
+            request == programReloadRequest
+        else { return }
 
         // ソート・辞書構築・重複除去は CPU を消費するため主アクターから切り離して実行
-        let result = await Task.detached(priority: .userInitiated) {
+        let buildTask = Task.detached(priority: .userInitiated) {
             Self.buildChannels(
-                services: allServices,
+                services: request.services,
                 programs: fetchedPrograms,
-                timelineStart: fetchStart,
-                timelineEnd: fetchEnd
+                timelineStart: request.start,
+                timelineEnd: request.end
             )
-        }.value
+        }
+        let result = await withTaskCancellationHandler {
+            await buildTask.value
+        } onCancel: {
+            buildTask.cancel()
+        }
+        guard !Task.isCancelled, generation == reloadGeneration,
+            request == programReloadRequest
+        else { return }
 
-        channels = result
+        hasAttemptedLoad = true
+        if channels != result { channels = result }
+        updateDisplayChannels()
     }
 
     /// ソート・グルーピング・重複除去をメインアクター外で行うための純粋な変換関数。
@@ -981,6 +1015,7 @@ struct ProgramGuideView: View {
         var groupedPrograms: [String: [Program]] = [:]
 
         for program in programs {
+            guard !Task.isCancelled else { return [] }
             let trimmedName = program.name.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmedName.isEmpty { continue }
             let key = "\(program.networkId)-\(program.serviceId)"

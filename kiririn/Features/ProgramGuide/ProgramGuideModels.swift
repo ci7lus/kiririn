@@ -11,6 +11,12 @@ struct GuideChannel: Identifiable, Equatable {
     let id: String
     let service: TVService
     let programs: [Program]
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id
+            && lhs.service.contentSnapshot == rhs.service.contentSnapshot
+            && lhs.programs == rhs.programs
+    }
 }
 
 struct ProgramSearchResult: Identifiable {

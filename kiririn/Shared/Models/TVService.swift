@@ -106,6 +106,29 @@ nonisolated struct TVService: Codable, Identifiable, Sendable, Hashable, Fetchab
         lhs.id == rhs.id
     }
 
+    struct ContentSnapshot: Equatable, Sendable {
+        let service: TVService
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            let lhs = lhs.service
+            let rhs = rhs.service
+            return lhs.id == rhs.id
+                && lhs.providerIdentifier == rhs.providerIdentifier
+                && lhs.serviceId == rhs.serviceId
+                && lhs.networkId == rhs.networkId
+                && lhs.transportStreamId == rhs.transportStreamId
+                && lhs.name == rhs.name
+                && lhs.type == rhs.type
+                && lhs.remoteControlKeyId == rhs.remoteControlKeyId
+                && lhs.hasLogoData == rhs.hasLogoData
+                && lhs.channel == rhs.channel
+                && lhs.serverId == rhs.serverId
+                && lhs.favoritedAt == rhs.favoritedAt
+        }
+    }
+
+    var contentSnapshot: ContentSnapshot { ContentSnapshot(service: self) }
+
     static var databaseTableName: String {
         return "service"
     }
@@ -125,7 +148,7 @@ nonisolated struct TVService: Codable, Identifiable, Sendable, Hashable, Fetchab
     }
 }
 
-nonisolated struct TVServiceLogo: Codable, FetchableRecord, PersistableRecord {
+nonisolated struct TVServiceLogo: Codable, Equatable, FetchableRecord, PersistableRecord {
     var id: String
     var serviceId: Int
     var networkId: Int
