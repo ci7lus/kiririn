@@ -59,6 +59,7 @@
 		105FC57A2E9EAD3100EA8BCF /* kiririn.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = kiririn.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		105FC5892E9EAD3200EA8BCF /* kiririnTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = kiririnTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		105FC5932E9EAD3200EA8BCF /* kiririnUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = kiririnUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CE553ACC306FB3E0000C9093 /* kiririn.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = kiririn.xctestplan; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -153,6 +154,7 @@
 		105FC5712E9EAD3100EA8BCF = {
 			isa = PBXGroup;
 			children = (
+				CE553ACC306FB3E0000C9093 /* kiririn.xctestplan */,
 				105FC57C2E9EAD3100EA8BCF /* kiririn */,
 				105FC58C2E9EAD3200EA8BCF /* kiririnTests */,
 				105FC5962E9EAD3200EA8BCF /* kiririnUITests */,
