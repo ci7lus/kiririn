@@ -94,7 +94,7 @@ struct ModelBehaviorTests {
         #expect(configuration.effectiveBaseURL == nil)
     }
 
-    @Test func tvServiceKeepsRawNameForBroadcastTextRendering() {
+    @Test func tvServiceKeepsRawNameForNativeTextRendering() {
         let service = TVService(
             id: "service",
             serviceId: 10,

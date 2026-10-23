@@ -18,6 +18,11 @@ struct LicenseListView: View {
                 } label: {
                     Text("web-bml")
                 }
+                NavigationLink {
+                    SourceHanSansAboutView()
+                } label: {
+                    Text("源ノ角ゴシック (Source Han Sans)")
+                }
                 ForEach(libraries) { library in
                     NavigationLink {
                         LicenseDetailView(library: library)
@@ -75,6 +80,42 @@ private struct WebBMLAboutView: View {
         }
         .formStyle(.grouped)
         .navigationTitle("web-bml")
+        #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
+}
+
+private struct SourceHanSansAboutView: View {
+    private static let licenseNotices: String? = {
+        guard let url = Bundle.main.url(forResource: "SourceHanSans-LICENSE", withExtension: "txt")
+        else { return nil }
+        return try? String(contentsOf: url, encoding: .utf8)
+    }()
+
+    var body: some View {
+        Form {
+            Section {
+                if let url = URL(
+                    string: "https://github.com/adobe-fonts/source-han-sans/releases/tag/2.005R"
+                ) {
+                    Link("配布元", destination: url)
+                }
+            }
+
+            Section("ライセンス") {
+                if let licenseNotices = Self.licenseNotices {
+                    Text(licenseNotices)
+                        .font(.caption)
+                        .textSelection(.enabled)
+                } else {
+                    Text("ライセンス情報が見つかりません")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("源ノ角ゴシック (Source Han Sans)")
         #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
         #endif

@@ -414,6 +414,13 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
     private let logger = Logger(label: "PlayerState")
     private let fallbackPlaybackErrorMessage = "メディアの読み込みに失敗しました"
 
+    private static let captionFontFamilies = [
+        "Hiragino Maru Gothic ProN",
+        "Source Han Sans VF",
+        "Rounded M+ 1m WadaLab comp ARIB",
+        "Apple Symbols",
+    ]
+
     private static let mediaPlayerOptions: [String] = {
         var options = [
             "--hw-dec",
@@ -424,7 +431,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
             "--ts-standard=arib",
             "--no-snapshot-preview",
             "--snapshot-format=jpg",
-            "--aribcaption-font=Hiragino Maru Gothic ProN,Rounded M+ 1m WadaLab comp ARIB,Apple Symbols",
+            "--aribcaption-font=\(captionFontFamilies.joined(separator: ","))",
             "--prefetch-buffer-size=2048",
             "--verbose=1",
         ]

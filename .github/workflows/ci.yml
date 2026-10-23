@@ -75,7 +75,6 @@ jobs:
                       ./Packages/VLCKit/VLCKit.xcframework
                       ./Packages/VLCKit/VLCKitAssets/LicenseNotices/
                       ./Packages/VLCKit/VLCKitAssets/dodeca_and_7channel_3DSL_HRTF.sofa
-                      ./kiririn/rounded-mplus-1m-wadalab-comp-arib.ttf
                   key: vlckit-${{ hashFiles('setup.sh') }}
 
             - name: Setup dependencies
@@ -330,7 +329,6 @@ jobs:
                       ./Packages/VLCKit/VLCKit.xcframework
                       ./Packages/VLCKit/VLCKitAssets/LicenseNotices/
                       ./Packages/VLCKit/VLCKitAssets/dodeca_and_7channel_3DSL_HRTF.sofa
-                      ./kiririn/rounded-mplus-1m-wadalab-comp-arib.ttf
                   key: vlckit-${{ hashFiles('setup.sh') }}
 
             - name: Setup dependencies

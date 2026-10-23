@@ -19,12 +19,9 @@
                     .frame(width: 36, height: 36)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    BroadcastText(
-                        player.title,
-                        style: .headline,
-                        weight: .semibold
-                    )
-                    .lineLimit(2)
+                    Text(player.title)
+                        .broadcastFont(.headline, weight: .semibold)
+                        .lineLimit(2)
                     if let serviceName = player.serviceName {
                         Text(serviceName)
                             .font(.subheadline)

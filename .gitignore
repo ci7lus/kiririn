@@ -69,6 +69,8 @@ fastlane/test_output
 .sentryclirc
 
 /kiririn/rounded-mplus-1m-wadalab-comp-arib.ttf
+/kiririn/SourceHanSans-VF.ttf
+/kiririn/SourceHanSans-LICENSE.txt
 
 # BML web bundle (built by setup.sh, see web/bml)
 /web/bml/node_modules/

@@ -147,18 +147,17 @@ extension Notification.Name {
 #endif
 
 private func registerFonts() {
-    guard
-        let fontURL = Bundle.main.url(
-            forResource: "rounded-mplus-1m-wadalab-comp-arib", withExtension: "ttf")
-    else {
-        return
-    }
-    var error: Unmanaged<CFError>?
-    if !CTFontManagerRegisterFontsForURL(fontURL as CFURL, .process, &error) {
-        if let error = error?.takeRetainedValue() {
-            #if DEBUG
-                debugPrint("font registration failed: \(error)")
-            #endif
+    for fontName in ["rounded-mplus-1m-wadalab-comp-arib", "SourceHanSans-VF"] {
+        guard let fontURL = Bundle.main.url(forResource: fontName, withExtension: "ttf") else {
+            continue
+        }
+        var error: Unmanaged<CFError>?
+        if !CTFontManagerRegisterFontsForURL(fontURL as CFURL, .process, &error) {
+            if let error = error?.takeRetainedValue() {
+                #if DEBUG
+                    debugPrint("font registration failed: \(error)")
+                #endif
+            }
         }
     }
 }
@@ -198,7 +197,7 @@ struct KiririnApp: App {
                 DocumentGroup(viewing: KiririnMediaDocument.self) { file in
                     DocumentPlaybackView(fileURL: file.fileURL)
                 }
-                .windowStyle(.hiddenTitleBar)
+                .windowStyle(.titleBar)
                 .defaultSize(width: 1280, height: 720)
 
                 WindowGroup("プレイヤー", id: AppWindowID.player.rawValue, for: Playable.self) {

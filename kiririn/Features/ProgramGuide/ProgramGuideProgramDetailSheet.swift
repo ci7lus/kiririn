@@ -9,8 +9,7 @@ struct ProgramGuideProgramDetailSheetView: View {
             ScrollView {
                 ProgramInfoContentView(
                     program: selection.program,
-                    serviceName: selection.service.name,
-                    showsCopyContextMenu: true
+                    serviceName: selection.service.name
                 )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)

@@ -88,14 +88,16 @@ struct RecordRowView: View {
                 thumbnailView
 
                 VStack(alignment: .leading, spacing: 4) {
-                    BroadcastText(record.name, style: .subheadline, weight: .medium)
+                    Text(record.name)
+                        .broadcastFont(.subheadline, weight: .medium)
                         .foregroundStyle(.primary)
 
                     if let channelName = record.serviceName?.trimmingCharacters(
                         in: .whitespacesAndNewlines),
                         !channelName.isEmpty
                     {
-                        BroadcastText(channelName, style: .caption)
+                        Text(channelName)
+                            .broadcastFont(.caption)
                             .foregroundStyle(.secondary)
                     }
 
@@ -299,14 +301,16 @@ struct RecordDownloadRowView: View {
             .clipShape(.rect(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 4) {
-                BroadcastText(record.name, style: .subheadline, weight: .medium)
+                Text(record.name)
+                    .broadcastFont(.subheadline, weight: .medium)
                     .foregroundStyle(.primary)
 
                 if let channelName = record.serviceName?.trimmingCharacters(
                     in: .whitespacesAndNewlines),
                     !channelName.isEmpty
                 {
-                    BroadcastText(channelName, style: .caption)
+                    Text(channelName)
+                        .broadcastFont(.caption)
                         .foregroundStyle(.secondary)
                 }
 
@@ -346,7 +350,8 @@ struct RecordDownloadRowView: View {
                 .clipShape(.rect(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 4) {
-                BroadcastText(record.name, style: .subheadline, weight: .medium)
+                Text(record.name)
+                    .broadcastFont(.subheadline, weight: .medium)
                     .foregroundStyle(.primary)
 
                 HStack(spacing: 4) {

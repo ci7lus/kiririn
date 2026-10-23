@@ -30,7 +30,8 @@
                                 .foregroundStyle(player.isPlaying ? Color.accentColor : .secondary)
 
                                 VStack(alignment: .leading, spacing: 3) {
-                                    BroadcastText(player.title)
+                                    Text(player.title)
+                                        .broadcastFont()
                                         .lineLimit(2)
                                     if let serviceName = player.serviceName {
                                         Text(serviceName)

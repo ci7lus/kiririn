@@ -13,17 +13,15 @@
         let appModel: AppModel
         let pluginStore: PluginStore
         @Binding var isAlwaysOnTop: Bool
+        @Binding var isControllerVisible: Bool
+        let isPointerOverTitlebar: Bool
         let playerWindowReference: WindowReference_macOS
         var volumeFeedbackRequestID: UUID? = nil
         let onToggleFullscreen: () -> Void
-        let onControlsVisibilityChanged: (Bool) -> Void
 
         @Environment(\.openWindow) private var openWindow
-        @State private var isControllerVisible = true
         @State private var hideControllerTask: DispatchWorkItem?
-        @State private var isPointerOverTitleController = false
         @State private var isPointerOverBottomController = false
-        @State private var titleControllerFrame = CGRect.zero
         @State private var lastBackgroundTap: BackgroundTap?
         @State private var activationTapSuppressionDeadline: TimeInterval?
         @State private var isPlayerFullscreen = false
@@ -187,13 +185,16 @@
                 .contentShape(Rectangle())
                 .coordinateSpace(name: Self.overlayCoordinateSpaceName)
                 .onContinuousHover(perform: handleWindowHover)
+                .onChange(of: isPointerOverTitlebar) { _, isHovered in
+                    handleTitlebarHover(isHovered)
+                }
                 .animation(
                     .easeInOut(duration: 0.18),
                     value: playerState.showsPlaybackLoadingIndicator
                 )
                 .onAppear {
                     isPlayerFullscreen = playerWindow?.styleMask.contains(.fullScreen) ?? false
-                    onControlsVisibilityChanged(isControllerVisible)
+                    setControllerVisible(true, animated: false)
                     scheduleControllerHide()
                 }
                 .onDisappear {
@@ -206,7 +207,7 @@
                     volumeFeedbackHideTask = nil
                     captureFeedbackHideTask?.cancel()
                     captureFeedbackHideTask = nil
-                    onControlsVisibilityChanged(true)
+                    isControllerVisible = true
                 }
                 .onReceive(CaptureService.shared.didAddCapture) { (playerID, item) in
                     guard playerID == playerState.id else { return }
@@ -286,67 +287,6 @@
 
         private func controllerOverlay(scale: CGFloat) -> some View {
             VStack(spacing: 0) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        BroadcastText(
-                            playerState.currentPlayable?.title ?? "",
-                            size: 14 * scale,
-                            weight: .semibold
-                        )
-                        .lineLimit(1)
-                        HStack {
-                            if let serviceName = playerState.currentPlayable?.serviceName {
-                                Text(serviceName)
-                                    .font(.system(size: 12 * scale, weight: .regular))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            if let program = playerState.currentPlayable?.displayProgram {
-                                if program.duration == 604_065 {
-                                    Text(
-                                        "\(program.startAt.formatted(.displayDateTimeFull)) - (終了時刻未定)"
-                                    )
-                                    .font(.system(size: 12 * scale, weight: .regular))
-                                    .foregroundStyle(.secondary)
-                                } else {
-                                    Text(
-                                        "\(program.startAt.formatted(.displayDateTimeFull)) - \(program.endAt.formatted(.displayTime))"
-                                    )
-                                    .font(.system(size: 12 * scale, weight: .regular))
-                                    .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        if let subtitle = playerState.currentPlayable?.subtitle,
-                            !subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        {
-                            BroadcastText(subtitle, size: 12 * scale)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        if let nextProgramText {
-                            HStack(spacing: 4) {
-                                Image(systemName: "chevron.right")
-                                BroadcastText(nextProgramText, size: 12 * scale)
-                                    .lineLimit(1)
-                            }
-                            .font(.system(size: 12 * scale, weight: .regular))
-                            .foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 12 * scale)
-                .padding(.vertical, 8 * scale)
-                .padding(.leading, 76 * scale)
-                .background(.ultraThinMaterial)
-                .allowsHitTesting(false)
-                .onGeometryChange(for: CGRect.self) { proxy in
-                    proxy.frame(in: .named(Self.overlayCoordinateSpaceName))
-                } action: { frame in
-                    titleControllerFrame = frame
-                }
-
                 Spacer()
 
                 HStack(spacing: 12 * scale) {
@@ -734,10 +674,6 @@
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: task)
         }
 
-        private var isPointerOverController: Bool {
-            isPointerOverTitleController || isPointerOverBottomController
-        }
-
         private func handleBottomControllerHover(_ isHovering: Bool) {
             isPointerOverBottomController = isHovering
             if isHovering {
@@ -748,18 +684,35 @@
             }
         }
 
+        private var isPointerOverController: Bool {
+            isPointerOverBottomController || isPointerOverTitlebar
+        }
+
+        private func handleTitlebarHover(_ isHovered: Bool) {
+            if isHovered {
+                hideControllerTask?.cancel()
+                hideControllerTask = nil
+                setControllerVisible(true, animated: true)
+            } else if let playerWindow, !playerWindow.frame.contains(NSEvent.mouseLocation) {
+                handleWindowHover(.ended)
+            } else if isControllerVisible {
+                scheduleControllerHide()
+            }
+        }
+
         private func handleWindowHover(_ phase: HoverPhase) {
             switch phase {
-            case .active(let location):
+            case .active:
                 if !isControllerVisible {
                     setControllerVisible(true, animated: true)
                 }
-                isPointerOverTitleController = titleControllerFrame.contains(location)
                 scheduleControllerHide()
             case .ended:
+                guard !PlayerTitlebarVisibility_macOS.containsPointer(in: playerWindow) else {
+                    return
+                }
                 hideControllerTask?.cancel()
                 hideControllerTask = nil
-                isPointerOverTitleController = false
                 isPointerOverBottomController = false
                 setControllerVisible(false, animated: true, manageCursor: false)
                 setCursorHidden(false)
@@ -769,7 +722,6 @@
         private func setControllerVisible(
             _ visible: Bool, animated: Bool, manageCursor: Bool = true
         ) {
-            let didChange = isControllerVisible != visible
             if animated {
                 withAnimation(.easeInOut(duration: 0.22)) {
                     isControllerVisible = visible
@@ -783,9 +735,6 @@
             }
             if manageCursor {
                 setCursorHidden(!visible)
-            }
-            if didChange {
-                onControlsVisibilityChanged(visible)
             }
         }
 
@@ -883,19 +832,6 @@
             let message = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !message.isEmpty else { return nil }
             return message
-        }
-
-        private var nextProgramText: String? {
-            guard let program = playerState.nextProgram else { return nil }
-            let name = program.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty, !isUnknownEndTime(program) else { return nil }
-            let start = program.startAt.formatted(.dateTime.hour().minute())
-            let end = program.endAt.formatted(.dateTime.hour().minute())
-            return "\(start)-\(end) \(name)"
-        }
-
-        private func isUnknownEndTime(_ program: Program) -> Bool {
-            program.duration <= 0 || program.duration == 604_065 || program.endAt <= program.startAt
         }
 
         private var feedbackOverlayTransition: AnyTransition {
@@ -1305,9 +1241,10 @@
                 appModel: appModel,
                 pluginStore: appModel.pluginStore,
                 isAlwaysOnTop: $isAlwaysOnTop,
+                isControllerVisible: .constant(true),
+                isPointerOverTitlebar: false,
                 playerWindowReference: WindowReference_macOS(),
-                onToggleFullscreen: {},
-                onControlsVisibilityChanged: { _ in }
+                onToggleFullscreen: {}
             )
         }
 
