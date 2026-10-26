@@ -184,7 +184,9 @@
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .coordinateSpace(name: Self.overlayCoordinateSpaceName)
-                .onContinuousHover(perform: handleWindowHover)
+                .background {
+                    PlayerPointerTrackingView_macOS(onHover: handleWindowHover)
+                }
                 .onChange(of: isPointerOverTitlebar) { _, isHovered in
                     handleTitlebarHover(isHovered)
                 }
@@ -238,6 +240,13 @@
                     }
                     lastBackgroundTap = nil
                     activationTapSuppressionDeadline = nil
+                    handleWindowFocusLoss()
+                }
+                .onReceive(
+                    NotificationCenter.default.publisher(
+                        for: NSApplication.didResignActiveNotification)
+                ) { _ in
+                    handleWindowFocusLoss()
                 }
                 .onReceive(
                     NotificationCenter.default.publisher(
@@ -267,8 +276,24 @@
                 .onChange(of: playerState.dataBroadcastSession?.status) { _, _ in
                     syncBMLKeyMonitor()
                 }
-                .onChange(of: playerState.dataBroadcastSession?.inputRequest) { _, _ in
+                .onChange(of: playerState.dataBroadcastSession?.inputRequest) { _, request in
                     syncBMLKeyMonitor()
+                    if request != nil {
+                        hideControllerTask?.cancel()
+                        hideControllerTask = nil
+                        setControllerVisible(true, animated: false)
+                    } else {
+                        scheduleControllerHide()
+                    }
+                }
+                .onChange(of: playerState.operationErrorMessage) { _, message in
+                    if message != nil {
+                        hideControllerTask?.cancel()
+                        hideControllerTask = nil
+                        setControllerVisible(true, animated: false)
+                    } else {
+                        scheduleControllerHide()
+                    }
                 }
                 .onDisappear {
                     bmlKeyMonitor?.stop()
@@ -688,6 +713,14 @@
             isPointerOverBottomController || isPointerOverTitlebar
         }
 
+        private func handleWindowFocusLoss() {
+            hideControllerTask?.cancel()
+            hideControllerTask = nil
+            isPointerOverBottomController = false
+            setControllerVisible(false, animated: true, manageCursor: false)
+            setCursorHidden(false)
+        }
+
         private func handleTitlebarHover(_ isHovered: Bool) {
             if isHovered {
                 hideControllerTask?.cancel()
@@ -703,9 +736,7 @@
         private func handleWindowHover(_ phase: HoverPhase) {
             switch phase {
             case .active:
-                if !isControllerVisible {
-                    setControllerVisible(true, animated: true)
-                }
+                setControllerVisible(true, animated: true)
                 scheduleControllerHide()
             case .ended:
                 guard !PlayerTitlebarVisibility_macOS.containsPointer(in: playerWindow) else {
@@ -742,8 +773,16 @@
             guard hidden != isCursorHidden else { return }
             if hidden {
                 let mouseLocation = NSEvent.mouseLocation
-                guard let playerWindow, playerWindow.isVisible,
-                    playerWindow.frame.contains(mouseLocation)
+                guard NSApp.isActive,
+                    let playerWindow, playerWindow.isVisible, playerWindow.isKeyWindow,
+                    playerWindow.attachedSheet == nil, NSApp.modalWindow == nil,
+                    playerState.dataBroadcastSession?.inputRequest == nil,
+                    playerState.operationErrorMessage == nil,
+                    !isPointerOverController,
+                    !PlayerTitlebarVisibility_macOS.containsPointer(in: playerWindow),
+                    playerWindow.frame.contains(mouseLocation),
+                    NSWindow.windowNumber(at: mouseLocation, belowWindowWithWindowNumber: 0)
+                        == playerWindow.windowNumber
                 else { return }
 
                 NSCursor.hide()
@@ -1221,6 +1260,59 @@
                         }
                 )
             }
+        }
+    }
+
+    private struct PlayerPointerTrackingView_macOS: NSViewRepresentable {
+        let onHover: (HoverPhase) -> Void
+
+        func makeNSView(context: Context) -> PlayerPointerTrackingNSView_macOS {
+            let view = PlayerPointerTrackingNSView_macOS()
+            view.onHover = onHover
+            return view
+        }
+
+        func updateNSView(_ view: PlayerPointerTrackingNSView_macOS, context: Context) {
+            view.onHover = onHover
+        }
+
+        static func dismantleNSView(_ view: PlayerPointerTrackingNSView_macOS, coordinator: ()) {
+            view.invalidate()
+        }
+    }
+
+    private final class PlayerPointerTrackingNSView_macOS: NSView {
+        var onHover: ((HoverPhase) -> Void)?
+        private var pointerTrackingArea: NSTrackingArea?
+
+        override var isFlipped: Bool { true }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let pointerTrackingArea { removeTrackingArea(pointerTrackingArea) }
+            let area = NSTrackingArea(
+                rect: .zero,
+                options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                owner: self, userInfo: nil
+            )
+            pointerTrackingArea = area
+            addTrackingArea(area)
+        }
+
+        override func mouseEntered(with event: NSEvent) { mouseMoved(with: event) }
+
+        override func mouseMoved(with event: NSEvent) {
+            onHover?(.active(convert(event.locationInWindow, from: nil)))
+        }
+
+        override func mouseExited(with event: NSEvent) { onHover?(.ended) }
+
+        func invalidate() {
+            onHover = nil
+            if let pointerTrackingArea { removeTrackingArea(pointerTrackingArea) }
+            pointerTrackingArea = nil
         }
     }
 
