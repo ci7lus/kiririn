@@ -143,18 +143,9 @@
                                 }
                         )
                         .contextMenu {
-                            Button {
-                                isAlwaysOnTop.toggle()
-                            } label: {
-                                HStack {
-                                    if isAlwaysOnTop {
-                                        Image(systemName: "checkmark")
-                                    }
-                                    Text("最前面に固定")
-                                }
-                            }
-                            .disabled(isPlayerFullscreen)
-                            .selectionDisabled(isPlayerFullscreen)
+                            Toggle("最前面に固定", isOn: $isAlwaysOnTop)
+                                .disabled(isPlayerFullscreen)
+                                .selectionDisabled(isPlayerFullscreen)
                         }
 
                     controllerOverlay(scale: overlayScale)
@@ -477,18 +468,9 @@
                 .padding(8 * scale)
             }
             .contextMenu {
-                Button {
-                    isAlwaysOnTop.toggle()
-                } label: {
-                    HStack {
-                        if isAlwaysOnTop {
-                            Image(systemName: "checkmark")
-                        }
-                        Text("最前面に固定")
-                    }
-                }
-                .disabled(isPlayerFullscreen)
-                .selectionDisabled(isPlayerFullscreen)
+                Toggle("最前面に固定", isOn: $isAlwaysOnTop)
+                    .disabled(isPlayerFullscreen)
+                    .selectionDisabled(isPlayerFullscreen)
             }
             .ignoresSafeArea()
         }
