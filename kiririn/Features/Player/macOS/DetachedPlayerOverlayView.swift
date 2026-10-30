@@ -286,15 +286,6 @@
                         scheduleControllerHide()
                     }
                 }
-                .onChange(of: playerState.operationErrorMessage) { _, message in
-                    if message != nil {
-                        hideControllerTask?.cancel()
-                        hideControllerTask = nil
-                        setControllerVisible(true, animated: false)
-                    } else {
-                        scheduleControllerHide()
-                    }
-                }
                 .onDisappear {
                     bmlKeyMonitor?.stop()
                     bmlKeyMonitor = nil
@@ -777,7 +768,6 @@
                     let playerWindow, playerWindow.isVisible, playerWindow.isKeyWindow,
                     playerWindow.attachedSheet == nil, NSApp.modalWindow == nil,
                     playerState.dataBroadcastSession?.inputRequest == nil,
-                    playerState.operationErrorMessage == nil,
                     !isPointerOverController,
                     !PlayerTitlebarVisibility_macOS.containsPointer(in: playerWindow),
                     playerWindow.frame.contains(mouseLocation),

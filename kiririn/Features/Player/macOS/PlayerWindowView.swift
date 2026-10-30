@@ -196,12 +196,31 @@
             } else {
                 timeRange = nil
             }
+            let detail: String?
+            switch playable?.source {
+            case .liveService?:
+                detail = nextProgramText
+            case .recordedFile?, .fileURL?, .directURL?, nil:
+                detail = playable?.subtitle
+            }
             return PlayerTitlebarContent_macOS(
                 title: playable?.title,
                 serviceName: playable?.serviceName,
                 timeRange: timeRange,
-                description: playable?.subtitle
+                nextProgram: detail
             )
+        }
+
+        private var nextProgramText: String? {
+            guard let program = playerState.nextProgram,
+                program.duration > 0, program.duration != 604_065,
+                program.endAt > program.startAt
+            else { return nil }
+            let name = program.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            let start = program.startAt.formatted(.displayTime)
+            let end = program.endAt.formatted(.displayTime)
+            return "次の番組 \(start)-\(end) \(name)"
         }
 
         private func configureWindow(_ window: NSWindow) {

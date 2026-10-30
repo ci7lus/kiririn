@@ -471,6 +471,7 @@ final class PlayerState: NSObject, VLCMediaPlayerDelegate, VLCMediaDelegate {
         isPlaybackLoading = true
         var playableForPlayback = playable
         playableForPlayback.normalizeIdentity()
+        playableForPlayback.programAvailability = nil
         if let previousPlayableID, previousPlayableID != playableForPlayback.id {
             resetPlaybackRateToDefault()
         }

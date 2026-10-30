@@ -6,10 +6,10 @@
         let title: String
         let subtitle: String
 
-        init(title: String?, serviceName: String?, timeRange: String?, description: String?) {
+        init(title: String?, serviceName: String?, timeRange: String?, nextProgram: String?) {
             self.title = Self.singleLine(title) ?? "プレイヤー"
             var seen = Set([Self.comparisonKey(self.title)])
-            let candidate = [serviceName, timeRange, description]
+            let candidate = [serviceName, timeRange, nextProgram]
                 .compactMap(Self.singleLine)
                 .filter { seen.insert(Self.comparisonKey($0)).inserted }
                 .joined(separator: "｜")
@@ -43,7 +43,7 @@
 
         private weak var window: NSWindow?
         private var content = PlayerTitlebarContent_macOS(
-            title: nil, serviceName: nil, timeRange: nil, description: nil
+            title: nil, serviceName: nil, timeRange: nil, nextProgram: nil
         )
         private var notifications: [NSObjectProtocol] = []
         private var fields: [ObjectIdentifier: Field] = [:]
@@ -64,6 +64,7 @@
             if window.toolbar == nil {
                 window.toolbar = NSToolbar(identifier: "PlayerTitlebar")
             }
+            if window.toolbarStyle != .unified { window.toolbarStyle = .unified }
             visibility.attach(to: window, onHoverChange: onTitlebarHover)
             for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
                 window.standardWindowButton(type)?.isHidden = false
@@ -97,12 +98,12 @@
                     }
                 )
             }
-            applyContent()
+            scheduleRefresh()
         }
 
         func update(_ content: PlayerTitlebarContent_macOS) {
             self.content = content
-            applyContent()
+            scheduleRefresh()
         }
 
         func setControlsVisible(_ visible: Bool) {
@@ -117,15 +118,6 @@
             fields.removeAll()
             visibility.detach()
             window = nil
-        }
-
-        private func applyContent() {
-            guard let window else { return }
-            if window.title != content.title { window.title = content.title }
-            if window.subtitle != content.subtitle { window.subtitle = content.subtitle }
-            let style: NSWindow.ToolbarStyle = content.subtitle.isEmpty ? .unifiedCompact : .unified
-            if window.toolbarStyle != style { window.toolbarStyle = style }
-            scheduleRefresh()
         }
 
         private func scheduleRefresh() {
