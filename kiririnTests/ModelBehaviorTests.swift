@@ -291,6 +291,83 @@ struct ModelBehaviorTests {
         #expect(manager.playbackCandidates(for: service).map(\.id) == [service.id])
     }
 
+    @Test @MainActor func unchangedServiceRefreshKeepsSnapshotAndCandidateRevision() async throws {
+        let suiteName = "kiririn.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let configuration = ServerConfiguration(
+            id: "server", name: "Main", type: .mirakurun, baseURL: "https://example.com"
+        )
+        let configStore = ServerConfigStore(localDefaults: defaults)
+        configStore.configurations = [configuration]
+        configStore.enabledStates[configuration.id] = true
+        let cacheStore = CacheStore(databaseQueue: try DatabaseQueue())
+        let manager = ServerManager(configStore: configStore)
+        await manager.setCacheStore(cacheStore)
+        let provider = ServiceRefreshTestProvider()
+        provider.services = [3, 1, 2].map { serviceId in
+            TVService(
+                id: "service-\(serviceId)",
+                serviceId: serviceId,
+                networkId: 20,
+                transportStreamId: nil,
+                name: "サービス\(serviceId)",
+                type: .digitalTelevision,
+                remoteControlKeyId: nil,
+                hasLogoData: false,
+                channel: nil,
+                serverId: configuration.id
+            )
+        }
+        manager.providers[configuration.id] = provider
+        manager.connectionStates[configuration.id]?.status = .connected
+        #expect(await manager.refreshData(serverId: configuration.id) == .skipped)
+        let revision = manager.playbackCandidatesRevision
+        let snapshot = manager.services
+        #expect(snapshot.map(\.serviceId) == [1, 2, 3])
+
+        for _ in 0..<3 {
+            provider.services.reverse()
+            #expect(await manager.refreshData(serverId: configuration.id) == .skipped)
+            #expect(manager.services.map(\.contentSnapshot) == snapshot.map(\.contentSnapshot))
+            #expect(
+                manager.serviceListServices.map(\.contentSnapshot)
+                    == snapshot.map(\.contentSnapshot)
+            )
+            #expect(manager.playbackCandidatesRevision == revision)
+        }
+
+        let catalogRevision = manager.programCatalogRevision
+        #expect(
+            await manager.refreshData(
+                serverId: configuration.id, programRefreshPolicy: .forceIgnoringNetwork
+            )
+                == .refreshed
+        )
+        #expect(manager.programCatalogRevision == catalogRevision + 1)
+        #expect(manager.playbackCandidatesRevision == revision)
+
+        provider.services[0].name = "変更されたサービス"
+        #expect(await manager.refreshData(serverId: configuration.id) == .skipped)
+        #expect(manager.playbackCandidatesRevision > revision)
+        #expect(manager.services.contains { $0.name == "変更されたサービス" })
+
+        let renamedService = try #require(manager.services.first)
+        let renamedRevision = manager.playbackCandidatesRevision
+        await manager.setFavorite(renamedService, isFavorite: true)
+        #expect(manager.playbackCandidatesRevision > renamedRevision)
+        #expect(manager.services.first { $0.id == renamedService.id }?.favoritedAt != nil)
+        let favoriteRevision = manager.playbackCandidatesRevision
+        await manager.setFavorite(renamedService, isFavorite: false)
+        #expect(manager.playbackCandidatesRevision > favoriteRevision)
+        #expect(manager.services.first { $0.id == renamedService.id }?.favoritedAt == nil)
+
+        let connectedRevision = manager.playbackCandidatesRevision
+        manager.connectionStates[configuration.id]?.status = .disconnected
+        await manager.setCacheStore(cacheStore)
+        #expect(manager.playbackCandidatesRevision > connectedRevision)
+    }
+
     @Test @MainActor func connectedTransitionRefreshesPlaybackCandidateOrder() async throws {
         guard let defaults = UserDefaults(suiteName: "kiririn.tests.\(UUID().uuidString)") else {
             return
@@ -505,5 +582,21 @@ struct ModelBehaviorTests {
 
         #expect(fileURLPlayable.title == "clip.ts")
         #expect(remotePlayable.title == "example.com")
+    }
+}
+
+@MainActor
+private final class ServiceRefreshTestProvider: @MainActor LiveServerProvider {
+    var services: [TVService] = []
+
+    func checkConnection() async throws -> String? { nil }
+    func fetchHeaders() async throws -> [String: String] { [:] }
+    func cancelInFlightRequests() {}
+    func fetchServices() async throws -> [TVService] { services }
+    func fetchPrograms() async throws -> [Program] { [] }
+    func fetchServiceLogoData(for service: TVService) async throws -> Data? { nil }
+
+    func buildLiveStreamPlayable(service: TVService, currentProgram: Program?) throws -> Playable {
+        throw CocoaError(.featureUnsupported)
     }
 }

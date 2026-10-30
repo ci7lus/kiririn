@@ -5,6 +5,10 @@ final class HorizontalOffsetTracker {
 }
 
 struct ProgramChannelColumnView: View, Equatable {
+    #if os(macOS)
+        @Environment(\.displayScale) private var displayScale
+    #endif
+
     let channelId: String
     let programs: [Program]
     let timelineStart: Date
@@ -47,16 +51,7 @@ struct ProgramChannelColumnView: View, Equatable {
                 .frame(width: width, height: totalHeight)
                 .allowsHitTesting(false)
 
-            ForEach(renderedProgramIndices, id: \.self) { index in
-                ProgramCellWrapper(
-                    program: programs[index],
-                    timelineStart: timelineStart,
-                    timelineEnd: timelineEnd,
-                    width: width,
-                    minuteHeight: minuteHeight
-                )
-                .equatable()
-            }
+            columnContent(programIndices: renderedProgramIndices)
         }
         .frame(width: width, height: totalHeight, alignment: .topLeading)
         .clipped()
@@ -81,6 +76,53 @@ struct ProgramChannelColumnView: View, Equatable {
             }
         }
     }
+
+    @ViewBuilder
+    private func columnContent(programIndices: [Int]) -> some View {
+        #if os(macOS)
+            if let span = rasterizedSpan {
+                programCells(programIndices: programIndices)
+                    .offset(y: -span.minY)
+                    .frame(width: span.width, height: span.height, alignment: .topLeading)
+                    .clipped()
+                    .drawingGroup()
+                    .offset(y: span.minY)
+            } else {
+                programCells(programIndices: programIndices)
+            }
+        #else
+            programCells(programIndices: programIndices)
+        #endif
+    }
+
+    private func programCells(programIndices: [Int]) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(programIndices, id: \.self) { index in
+                ProgramCellWrapper(
+                    program: programs[index],
+                    timelineStart: timelineStart,
+                    timelineEnd: timelineEnd,
+                    width: width,
+                    minuteHeight: minuteHeight
+                )
+                .equatable()
+            }
+        }
+        .frame(width: width, height: totalHeight, alignment: .topLeading)
+    }
+
+    #if os(macOS)
+        private var rasterizedSpan: CGRect? {
+            let top = min(max(yOffset(for: visibleRange.start), 0), totalHeight)
+            let bottom = min(max(yOffset(for: visibleRange.end), 0), totalHeight)
+            let height = bottom - top
+            guard width > 0, height > 0, displayScale > 0,
+                ceil(width * displayScale) <= 8192,
+                ceil(height * displayScale) <= 8192
+            else { return nil }
+            return CGRect(x: 0, y: top, width: width, height: height)
+        }
+    #endif
 }
 
 struct ProgramCellWrapper: View, Equatable {

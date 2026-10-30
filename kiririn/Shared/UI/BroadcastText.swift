@@ -12,12 +12,16 @@ struct BroadcastText: View {
         weight: Font.Weight = .regular
     ) {
         segments = source.aribBroadcastDisplaySegments()
-        font = .systemWithARIBFallback(for: source, style, weight: weight)
+        font = .systemWithARIBFallback(
+            for: segments.map(\.text).joined(), style, weight: weight
+        )
     }
 
     init(_ source: String, size: CGFloat, weight: Font.Weight = .regular) {
         segments = source.aribBroadcastDisplaySegments()
-        font = .systemWithARIBFallback(for: source, size: size, weight: weight)
+        font = .systemWithARIBFallback(
+            for: segments.map(\.text).joined(), size: size, weight: weight
+        )
     }
 
     var body: some View {

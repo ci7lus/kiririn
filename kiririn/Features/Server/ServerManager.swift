@@ -91,6 +91,11 @@ nonisolated struct PlaybackReconnectionState: Sendable, Equatable {
 
 @Observable
 class ServerManager {
+    private struct PlaybackCandidateServerState: Equatable {
+        let isEnabled: Bool
+        let status: ConnectionStatus?
+    }
+
     private struct FavoriteServiceState: Sendable {
         var displayOrder: Int?
     }
@@ -107,6 +112,8 @@ class ServerManager {
     private var serviceVariantsByAggregatedServiceId: [String: [TVService]] = [:]
     private var serviceListVariantsByAggregatedServiceId: [String: [TVService]] = [:]
     private var servicesByUniqueId: [String: TVService] = [:]
+    @ObservationIgnored
+    private var playbackCandidateServerStates: [String: PlaybackCandidateServerState] = [:]
     private var cachedServicesByServer: [String: [TVService]] = [:]
     private var serverPriorityByID: [String: Int] = [:]
     private var favoriteStatesByUnifiedKey: [String: FavoriteServiceState] = [:]
@@ -141,6 +148,7 @@ class ServerManager {
     var serviceListServices: [TVService] = []
     var services: [TVService] = []
     private(set) var playbackCandidatesRevision = 0
+    private(set) var programCatalogRevision = 0
     var logos: [TVServiceLogo] = [] {
         didSet {
             rebuildLogoCache()
@@ -252,7 +260,7 @@ class ServerManager {
         }
 
         serverSyncCount += 1
-        rebuildAggregatedData()
+        rebuildAggregatedData(invalidatePlaybackCandidates: true)
     }
 
     private func isCancellationError(_ error: Error) -> Bool {
@@ -503,15 +511,11 @@ class ServerManager {
             guard !isStaleOperation(serverId: serverId, generation: generation) else {
                 return .skipped
             }
-            rebuildAggregatedData()
-
             switch await programCatalogRefreshDecision(for: serverId, policy: programRefreshPolicy)
             {
             case .skip:
-                rebuildAggregatedData()
                 return .skipped
             case .queueUntilWiFi:
-                rebuildAggregatedData()
                 return .queuedUntilWiFi
             case .fetchNow:
                 do {
@@ -530,7 +534,7 @@ class ServerManager {
                     clearLastError(for: state)
                     lastProgramFullFetchDatesByServer[serverId] = Date()
                     pendingProgramFullFetchServerIDs.remove(serverId)
-                    rebuildAggregatedData()
+                    programCatalogRevision &+= 1
                     return .refreshed
                 } catch {
                     guard !isStaleOperation(serverId: serverId, generation: generation) else {
@@ -818,19 +822,57 @@ class ServerManager {
 
     func serverAvailabilityDidChange() {
         serverSyncCount += 1
-        rebuildAggregatedData()
+        rebuildAggregatedData(invalidatePlaybackCandidates: true)
     }
 
-    private func rebuildAggregatedData() {
+    private func rebuildAggregatedData(invalidatePlaybackCandidates: Bool = false) {
         let playbackData = buildAggregatedServiceData(includesConnectionErrors: false)
         let serviceListData = buildAggregatedServiceData(includesConnectionErrors: true)
+        let serverStates = Dictionary(
+            uniqueKeysWithValues: configStore.configurations.map { configuration in
+                (
+                    configuration.id,
+                    PlaybackCandidateServerState(
+                        isEnabled: isServerEnabled(configuration.id),
+                        status: connectionStates[configuration.id]?.status
+                    )
+                )
+            }
+        )
+        var candidatesChanged =
+            invalidatePlaybackCandidates
+            || playbackCandidateServerStates != serverStates
+        playbackCandidateServerStates = serverStates
 
-        serviceVariantsByAggregatedServiceId = playbackData.variantsByAggregatedServiceId
-        serviceListVariantsByAggregatedServiceId = serviceListData.variantsByAggregatedServiceId
-        servicesByUniqueId = playbackData.resolvedServicesByUniqueId
-        services = playbackData.services
-        serviceListServices = serviceListData.services
-        playbackCandidatesRevision &+= 1
+        if serviceVariantsByAggregatedServiceId.mapValues({ $0.map(\.contentSnapshot) })
+            != playbackData.variantsByAggregatedServiceId.mapValues({ $0.map(\.contentSnapshot) })
+        {
+            serviceVariantsByAggregatedServiceId = playbackData.variantsByAggregatedServiceId
+            candidatesChanged = true
+        }
+        if serviceListVariantsByAggregatedServiceId.mapValues({ $0.map(\.contentSnapshot) })
+            != serviceListData.variantsByAggregatedServiceId.mapValues({ $0.map(\.contentSnapshot) }
+            )
+        {
+            serviceListVariantsByAggregatedServiceId = serviceListData.variantsByAggregatedServiceId
+            candidatesChanged = true
+        }
+        if servicesByUniqueId.mapValues(\.contentSnapshot)
+            != playbackData.resolvedServicesByUniqueId.mapValues(\.contentSnapshot)
+        {
+            servicesByUniqueId = playbackData.resolvedServicesByUniqueId
+        }
+        if services.map(\.contentSnapshot) != playbackData.services.map(\.contentSnapshot) {
+            services = playbackData.services
+        }
+        if serviceListServices.map(\.contentSnapshot)
+            != serviceListData.services.map(\.contentSnapshot)
+        {
+            serviceListServices = serviceListData.services
+        }
+        if candidatesChanged {
+            playbackCandidatesRevision &+= 1
+        }
     }
 
     private struct AggregatedServiceData {
@@ -871,6 +913,10 @@ class ServerManager {
 
             mergedServices.append(preferred)
             variantsByAggregatedServiceId[preferred.id] = sortedVariants
+        }
+        mergedServices.sort { lhs, rhs in
+            if lhs.networkId != rhs.networkId { return lhs.networkId < rhs.networkId }
+            return lhs.serviceId < rhs.serviceId
         }
 
         return AggregatedServiceData(
@@ -949,7 +995,9 @@ class ServerManager {
                 mergedLogos.append(logo)
             }
         }
-        logos = mergedLogos
+        if logos != mergedLogos {
+            logos = mergedLogos
+        }
     }
 
     private func shouldIncludeServerInAggregation(serverId: String) -> Bool {

@@ -1,0 +1,38 @@
+{
+  "configurations" : [
+    {
+      "id" : "35F5274A-D344-4AB5-87F9-544DEC96F435",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "performanceAntipatternCheckerEnabled" : true,
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:kiririn.xcodeproj",
+      "identifier" : "105FC5792E9EAD3100EA8BCF",
+      "name" : "kiririn"
+    }
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:kiririn.xcodeproj",
+        "identifier" : "105FC5882E9EAD3200EA8BCF",
+        "name" : "kiririnTests"
+      }
+    },
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:kiririn.xcodeproj",
+        "identifier" : "105FC5922E9EAD3200EA8BCF",
+        "name" : "kiririnUITests"
+      }
+    }
+  ],
+  "version" : 1
+}

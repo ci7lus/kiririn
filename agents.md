@@ -37,6 +37,7 @@ macOS/iOS 向け日本テレビ放送規格(ARIB)用 MPEG-TS プレイヤー
   - 変更を表したコミットメッセージを日本語で考え、出力する。
     - フォーマットは `chore/feat: XXX` 形式
 - UI に表示するメッセージにおいて、ascii と非 ascii の間に半角アキを入れない。
+- Computer Use で kiririn.app を触る時、`/Applications/kiririn.app` を見ない。
 
 ## 禁止事項
 
