@@ -302,6 +302,45 @@ class CacheStore {
         }
     }
 
+    func loadPlayerSchedulePrograms(
+        for service: TVService, at now: Date, until date: Date
+    ) async -> [Program] {
+        do {
+            return try await dbQueue.read { db in
+                try Program.fetchAll(
+                    db,
+                    sql: """
+                        SELECT * FROM (
+                            SELECT *, ROW_NUMBER() OVER (
+                                PARTITION BY serviceId, networkId, startAt
+                                ORDER BY updatedAt DESC, id ASC
+                            ) AS rn
+                            FROM program
+                            WHERE serviceId = :serviceId AND networkId = :networkId
+                              AND startAt >= COALESCE((
+                                  SELECT MIN(startAt) FROM (
+                                      SELECT DISTINCT startAt FROM program
+                                      WHERE serviceId = :serviceId AND networkId = :networkId
+                                        AND startAt <= :now
+                                      ORDER BY startAt DESC LIMIT 2
+                                  )
+                              ), :now)
+                              AND startAt < :until
+                        ) WHERE rn = 1
+                        ORDER BY startAt
+                        """,
+                    arguments: [
+                        "serviceId": service.serviceId, "networkId": service.networkId,
+                        "now": now, "until": date,
+                    ]
+                )
+            }
+        } catch {
+            reportDatabaseFailureIfNeeded(operation: "load player schedule", error: error)
+            return []
+        }
+    }
+
     func loadCachedPrograms(from: Date? = nil, until date: Date) async -> [Program] {
         do {
             return try await dbQueue.read { db in

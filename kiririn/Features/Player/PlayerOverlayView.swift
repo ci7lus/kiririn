@@ -220,7 +220,10 @@ struct PlayerOverlayView_iOS: View {
             withAnimation(.easeOut(duration: 0.22)) {
                 isInfoSheetVisible = true
             }
-
+            ensureLowerTabSelection()
+        }
+        .onChange(of: playerState.currentPlayable?.source) {
+            ensureLowerTabSelection()
         }
         .onChange(of: playerState.availablePanelPlugins.map(\.id)) {
             ensureLowerTabSelection()
@@ -514,7 +517,7 @@ struct PlayerOverlayView_iOS: View {
 
                 if isSeekActionAvailable && playerState.showControls && dragOffset == 0 {
                     expandedSeekThumbHitArea(width: geo.size.width)
-                        .position(x: geo.size.width / 2, y: videoHeight)
+                        .position(x: geo.size.width / 2, y: videoHeight - 8)
                         .zIndex(3)
                 }
             }
@@ -524,7 +527,7 @@ struct PlayerOverlayView_iOS: View {
     private func expandedSeekThumbHitArea(width: CGFloat) -> some View {
         GeometryReader { geo in
             let hitWidth: CGFloat = 96
-            let hitHeight: CGFloat = 64
+            let hitHeight: CGFloat = 44
             let availableWidth = max(geo.size.width, 1)
             let progress = min(max(CGFloat(displayProgress), 0), 1)
             let thumbCenterX = min(
@@ -535,7 +538,6 @@ struct PlayerOverlayView_iOS: View {
             Rectangle()
                 .fill(Color.clear)
                 .frame(width: hitWidth, height: hitHeight)
-                .position(x: thumbCenterX, y: hitHeight / 2)
                 .contentShape(Rectangle())
                 .gesture(
                     DragGesture(minimumDistance: 0)
@@ -549,8 +551,9 @@ struct PlayerOverlayView_iOS: View {
                             finishScrub()
                         }
                 )
+                .position(x: thumbCenterX, y: hitHeight / 2)
         }
-        .frame(width: width, height: 64)
+        .frame(width: width, height: 44)
     }
 
     @ViewBuilder
@@ -1115,6 +1118,20 @@ struct PlayerOverlayView_iOS: View {
     @ViewBuilder
     private var lowerContextView: some View {
         TabView(selection: $lowerTabSelection) {
+            if isLivePlayback {
+                NavigationStack {
+                    PlayerProgramScheduleView(
+                        service: livePlaybackService,
+                        manager: manager,
+                        reservedBottomHeight: collapsedBarReservedBottomHeight
+                    )
+                }
+                .tag("programSchedule")
+                .tabItem {
+                    Label("番組表", systemImage: "calendar")
+                }
+            }
+
             NavigationStack {
                 CaptionHistoryView(playerState: playerState)
             }
@@ -1178,10 +1195,13 @@ struct PlayerOverlayView_iOS: View {
     }
 
     private func ensureLowerTabSelection() {
-        let validTags =
+        var validTags =
             isDataBroadcastEnabled
             ? ["caption", "dataBroadcast", "plugin"]
             : ["caption", "plugin"]
+        if isLivePlayback {
+            validTags.append("programSchedule")
+        }
         if !validTags.contains(lowerTabSelection) {
             lowerTabSelection = "caption"
         }
@@ -1194,6 +1214,19 @@ struct PlayerOverlayView_iOS: View {
         } else {
             selectedPluginID = enabledPlugins.first?.id
         }
+    }
+
+    private var isLivePlayback: Bool {
+        guard let playable = playerState.currentPlayable else { return false }
+        if case .liveService = playable.source { return true }
+        return false
+    }
+
+    private var livePlaybackService: TVService? {
+        guard let playable = playerState.currentPlayable,
+            case .liveService(let serviceUniqueId) = playable.source
+        else { return nil }
+        return playable.displayService ?? manager.service(serviceUniqueId: serviceUniqueId)
     }
 
     private var programInfoTransitionKey: String {
@@ -1350,9 +1383,11 @@ struct PlayerOverlayView_iOS: View {
                                     .broadcastFont(.caption, weight: .semibold)
                                     .foregroundStyle(.white)
                                     .lineLimit(1)
-                                if let sub = playerState.currentPlayable?.serviceName {
+                                if let sub = playerState.currentPlayable?.serviceName,
+                                    sub != playerState.currentPlayable?.title
+                                {
                                     Text(sub)
-                                        .font(.caption2)
+                                        .broadcastFont(.caption2)
                                         .foregroundStyle(.white.opacity(0.85))
                                         .lineLimit(1)
                                 }
