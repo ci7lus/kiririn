@@ -514,7 +514,7 @@ struct PlayerOverlayView_iOS: View {
 
                 if isSeekActionAvailable && playerState.showControls && dragOffset == 0 {
                     expandedSeekThumbHitArea(width: geo.size.width)
-                        .position(x: geo.size.width / 2, y: videoHeight)
+                        .position(x: geo.size.width / 2, y: videoHeight - 8)
                         .zIndex(3)
                 }
             }
@@ -524,7 +524,7 @@ struct PlayerOverlayView_iOS: View {
     private func expandedSeekThumbHitArea(width: CGFloat) -> some View {
         GeometryReader { geo in
             let hitWidth: CGFloat = 96
-            let hitHeight: CGFloat = 64
+            let hitHeight: CGFloat = 44
             let availableWidth = max(geo.size.width, 1)
             let progress = min(max(CGFloat(displayProgress), 0), 1)
             let thumbCenterX = min(
@@ -535,7 +535,6 @@ struct PlayerOverlayView_iOS: View {
             Rectangle()
                 .fill(Color.clear)
                 .frame(width: hitWidth, height: hitHeight)
-                .position(x: thumbCenterX, y: hitHeight / 2)
                 .contentShape(Rectangle())
                 .gesture(
                     DragGesture(minimumDistance: 0)
@@ -549,8 +548,9 @@ struct PlayerOverlayView_iOS: View {
                             finishScrub()
                         }
                 )
+                .position(x: thumbCenterX, y: hitHeight / 2)
         }
-        .frame(width: width, height: 64)
+        .frame(width: width, height: 44)
     }
 
     @ViewBuilder
@@ -1350,9 +1350,11 @@ struct PlayerOverlayView_iOS: View {
                                     .broadcastFont(.caption, weight: .semibold)
                                     .foregroundStyle(.white)
                                     .lineLimit(1)
-                                if let sub = playerState.currentPlayable?.serviceName {
+                                if let sub = playerState.currentPlayable?.serviceName,
+                                    sub != playerState.currentPlayable?.title
+                                {
                                     Text(sub)
-                                        .font(.caption2)
+                                        .broadcastFont(.caption2)
                                         .foregroundStyle(.white.opacity(0.85))
                                         .lineLimit(1)
                                 }
