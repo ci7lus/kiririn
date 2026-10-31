@@ -224,7 +224,7 @@ class CacheStore {
         let twoDaysAgo = now.addingTimeInterval(-2 * 24 * 60 * 60)
         do {
             let didChange = try await self.dbQueue.write { db in
-                let previousCatalog = try Self.programCatalogSnapshot(in: db)
+                let previousCatalog = try Self.programCatalogSnapshot(serverId: serverId, in: db)
                 try db.execute(
                     sql:
                         "DELETE FROM program WHERE serverId = :serverId AND (endAt > :now OR startAt < :twoDaysAgo)",
@@ -237,7 +237,8 @@ class CacheStore {
                 }
 
                 try Self.upsertLastProgramFullFetchDate(now, serverId: serverId, in: db)
-                return try Self.programCatalogSnapshot(in: db) != previousCatalog
+                return try Self.programCatalogSnapshot(serverId: serverId, in: db)
+                    != previousCatalog
             }
             if didChange {
                 programCatalogRevision &+= 1
@@ -248,13 +249,17 @@ class CacheStore {
         }
     }
 
-    private nonisolated static func programCatalogSnapshot(in db: Database) throws -> [Program] {
+    private nonisolated static func programCatalogSnapshot(serverId: String, in db: Database) throws
+        -> [Program]
+    {
         try Program.fetchAll(
             db,
             sql: """
                 SELECT * FROM program
-                ORDER BY networkId ASC, serviceId ASC, startAt ASC, updatedAt DESC, id ASC
-                """
+                WHERE serverId = ?
+                ORDER BY id ASC
+                """,
+            arguments: [serverId]
         ).map { program in
             var program = program
             program.updatedAt = nil

@@ -211,7 +211,7 @@ struct CaptureListView: View {
         .onReceive(service.didAddCapture) { (_, newItem) in
             historyRevision &+= 1
             guard let loadedSearchText else { return }
-            if loadedSearchText.isEmpty {
+            if loadedSearchText == searchText, loadedSearchText.isEmpty {
                 withAnimation {
                     items.insert(newItem, at: 0)
                     offset += 1
