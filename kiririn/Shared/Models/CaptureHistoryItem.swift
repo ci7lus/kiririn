@@ -71,12 +71,12 @@ struct CaptureHistoryItem: Identifiable, Codable, Equatable, FetchableRecord, Pe
         )
     }
 
+    private static let documentsURL = URL.documentsDirectory
+
     private static func resolveURL(path: String) -> URL {
         if path.hasPrefix("/") {
             return URL(fileURLWithPath: path)
         } else {
-            let documentsURL = FileManager.default.urls(
-                for: .documentDirectory, in: .userDomainMask)[0]
             return documentsURL.appendingPathComponent(path)
         }
     }

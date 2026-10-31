@@ -67,6 +67,7 @@ struct CaptureListView: View {
                                 ForEach(items) { item in
                                     CaptureHistoryItemView(
                                         item: item,
+                                        fileURLs: item.allFileURLs,
                                         previewURL: $previewURL,
                                         isSelectionMode: isSelectionMode,
                                         isSelected: selectedIDs.contains(item.id),
@@ -404,6 +405,7 @@ struct CaptureListView: View {
 
 private struct CaptureHistoryItemView: View {
     let item: CaptureHistoryItem
+    let fileURLs: [URL]
     @Binding var previewURL: URL?
     let isSelectionMode: Bool
     let isSelected: Bool
@@ -414,11 +416,11 @@ private struct CaptureHistoryItemView: View {
     @State private var selectedVariantIndex = 0
 
     private var selectedURL: URL {
-        item.variantFileURL(at: selectedVariantIndex)
+        fileURLs[fileURLs.indices.contains(selectedVariantIndex) ? selectedVariantIndex : 0]
     }
 
     private var variantCount: Int {
-        item.variantPaths.count + 1
+        fileURLs.count
     }
 
     var body: some View {
@@ -524,7 +526,7 @@ private struct CaptureHistoryItemView: View {
         if item.type == .image {
             CaptureImageThumbnailView(url: selectedURL)
         } else {
-            VideoThumbnailView(url: item.fileURL)
+            VideoThumbnailView(url: fileURLs[0])
         }
     }
 
