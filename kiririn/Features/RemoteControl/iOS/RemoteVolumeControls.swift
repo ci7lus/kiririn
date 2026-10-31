@@ -6,6 +6,7 @@
         let send: (RemoteControlCommand) -> Void
         @State private var volume = 100.0
         @State private var isAdjustingVolume = false
+        @State private var isSnappedToNormalVolume = false
 
         static func == (lhs: Self, rhs: Self) -> Bool {
             lhs.player.id == rhs.player.id
@@ -21,12 +22,22 @@
                     .frame(minWidth: 44, minHeight: 44)
 
                 Slider(
-                    value: $volume,
+                    value: Binding(
+                        get: { volume },
+                        set: { newValue in
+                            let isSnapped = (98...102).contains(newValue)
+                            volume = isSnapped ? 100 : newValue
+                            isSnappedToNormalVolume = isSnapped
+                        }
+                    ),
                     in: 0...200,
                     onEditingChanged: volumeEditingChanged
                 )
                 .accessibilityLabel("音量")
                 .accessibilityValue("\(Int(volume.rounded()))パーセント")
+                .sensoryFeedback(.selection, trigger: isSnappedToNormalVolume) { _, isSnapped in
+                    isSnapped && isAdjustingVolume
+                }
 
                 Button("音量を上げる", systemImage: "plus", action: increaseVolume)
                     .labelStyle(.iconOnly)
@@ -74,6 +85,7 @@
             isAdjustingVolume = editing
             if !editing {
                 send(.setVolume(Float(volume)))
+                isSnappedToNormalVolume = false
             }
         }
     }

@@ -385,7 +385,8 @@
                             }
                         ),
                         range: 0...200,
-                        scale: scale
+                        scale: scale,
+                        snapsToMidpoint: true
                     )
                     .frame(width: 120 * scale, height: 24 * scale)
                     .opacity(playerState.isMuted ? 0.45 : 1)
@@ -1185,7 +1186,9 @@
         @Binding var value: Double
         var range: ClosedRange<Double> = 0...1
         let scale: CGFloat
+        var snapsToMidpoint = false
         var onEditingChanged: (Bool) -> Void = { _ in }
+        @State private var alignmentFeedback = NSAlignmentFeedbackFilter()
 
         var body: some View {
             GeometryReader { geometry in
@@ -1223,8 +1226,30 @@
                             onEditingChanged(true)
                             let rawProgress = gesture.location.x / width
                             let clampedProgress = min(max(rawProgress, 0), 1)
+                            var snappedProgress = clampedProgress
+                            if snapsToMidpoint, let event = NSApp.currentEvent,
+                                event.type == .leftMouseDown || event.type == .leftMouseDragged
+                            {
+                                alignmentFeedback.update(with: event)
+                                let midpointX =
+                                    event.locationInWindow.x + width / 2 - gesture.location.x
+                                let previousX = midpointX + (progress - 0.5) * width
+                                let defaultX = midpointX + (clampedProgress - 0.5) * width
+                                if let token =
+                                    alignmentFeedback.alignmentFeedbackTokenForHorizontalMovement(
+                                        in: nil,
+                                        previousX: previousX,
+                                        alignedX: midpointX,
+                                        defaultX: defaultX
+                                    )
+                                {
+                                    alignmentFeedback.performFeedback(
+                                        [token], performanceTime: .now)
+                                    snappedProgress = 0.5
+                                }
+                            }
                             value =
-                                range.lowerBound + Double(clampedProgress)
+                                range.lowerBound + Double(snappedProgress)
                                 * (range.upperBound - range.lowerBound)
                         }
                         .onEnded { _ in
