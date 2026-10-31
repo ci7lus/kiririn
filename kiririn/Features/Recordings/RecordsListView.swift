@@ -14,7 +14,7 @@ struct RecordsListView: View {
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
     #endif
-    @Environment(\.isTabActive) private var isTabActive
+    @Environment(\.showsTabNavigation) private var showsTabNavigation
 
     private var recordingServerIds: [String] {
         let _ = manager.serverSyncCount
@@ -35,7 +35,7 @@ struct RecordsListView: View {
 
     var body: some View {
         recordsContent
-            .navigationTitle(showsNavigationTitle && isTabActive ? "録画" : "")
+            .navigationTitle(showsNavigationTitle && showsTabNavigation ? "録画" : "")
             .task {
                 ensureSelectedServer()
             }
@@ -43,7 +43,7 @@ struct RecordsListView: View {
                 ensureSelectedServer()
             }
             .toolbar {
-                if isTabActive {
+                if showsTabNavigation {
                     if !recordingServerIds.isEmpty {
                         ToolbarItem(placement: .principal) {
                             HStack(spacing: 2) {

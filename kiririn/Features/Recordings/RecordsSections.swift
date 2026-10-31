@@ -140,17 +140,19 @@ struct ServerRecordsView: View {
             guard isTabActive else {
                 searchDebounceTask?.cancel()
                 searchDebounceTask = nil
-                viewModel.releaseTransientData()
+                viewModel.cancelPendingThumbnailLoads()
                 return
             }
             viewModel.searchText = searchText
             guard !hasCompletedInitialLoad else { return }
-            await loadRecords(reset: true)
+            await viewModel.loadRecords(
+                manager: manager, serverId: serverId, reset: true, force: true)
+            guard !Task.isCancelled else { return }
+            hasCompletedInitialLoad = true
             if !viewModel.records.isEmpty, let cacheStore = AppModel.shared.cacheStore {
                 await viewModel.loadPlaybackPositions(
                     for: viewModel.records, cacheStore: cacheStore)
             }
-            hasCompletedInitialLoad = true
         }
         .onDisappear {
             searchDebounceTask?.cancel()
@@ -206,6 +208,7 @@ struct ServerRecordsView: View {
             serverId: serverId,
             reset: reset
         )
+        guard !Task.isCancelled else { return }
         if let cacheStore = AppModel.shared.cacheStore {
             await viewModel.loadPlaybackPositions(for: viewModel.records, cacheStore: cacheStore)
         }
@@ -227,11 +230,11 @@ struct ServerRecordsView: View {
 private struct RecordsSearchableModifier: ViewModifier {
     let isEnabled: Bool
     @Binding var searchText: String
-    @Environment(\.isTabActive) private var isTabActive
+    @Environment(\.showsTabNavigation) private var showsTabNavigation
 
     func body(content: Content) -> some View {
         ZStack {
-            if isEnabled && isTabActive {
+            if isEnabled && showsTabNavigation {
                 Color.clear
                     .allowsHitTesting(false)
                     .searchable(text: $searchText, prompt: "検索")

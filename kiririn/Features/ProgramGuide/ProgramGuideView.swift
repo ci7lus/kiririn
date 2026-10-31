@@ -52,6 +52,7 @@ struct ProgramGuideView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.calendar) private var calendar
     @Environment(\.isTabActive) private var isTabActive
+    @Environment(\.showsTabNavigation) private var showsTabNavigation
     #if os(macOS)
         @Environment(AppModel.self) private var appModel
     #endif
@@ -68,6 +69,7 @@ struct ProgramGuideView: View {
     @State private var isLoading = false
     @State private var reloadGeneration = 0
     @State private var hasAttemptedLoad = false
+    @State private var hasConfiguredInitialAppearance = false
     @State private var hasScrolledToCurrentTimeOnInitialDisplay = false
     @State private var isInitialScrollReady = false
     @State private var channels: [GuideChannel] = []
@@ -214,6 +216,8 @@ struct ProgramGuideView: View {
                     viewportWidth = newValue
                 }
                 .onAppear {
+                    guard !hasConfiguredInitialAppearance else { return }
+                    hasConfiguredInitialAppearance = true
                     let currentDate = Date()
                     nowLineDate = currentDate
                     updateTimelineDates(for: currentDate)
@@ -222,9 +226,6 @@ struct ProgramGuideView: View {
                         selectedBroadcastType = favoriteBroadcastType
                     }
                     updateDisplayChannels()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        scrollToNow(animated: false)
-                    }
                 }
                 .programGuideTitle()
                 .task(id: programReloadRequest) {
@@ -490,7 +491,7 @@ struct ProgramGuideView: View {
         }
         .frame(height: sectionHeaderHeight)
         .background {
-            if isTabActive {
+            if showsTabNavigation {
                 Rectangle().fill(.ultraThinMaterial)
             } else {
                 Color.clear
@@ -990,10 +991,11 @@ struct ProgramGuideView: View {
         timelineStart: Date,
         timelineEnd: Date
     ) -> [GuideChannel] {
+        guard !Task.isCancelled else { return [] }
         let typeOrder = ["GR", "BS", "CS", "SKY"]
-        let sorted =
-            services
-            .sorted { lhs, rhs in
+        guard
+            let sorted = try? services.sorted(by: { lhs, rhs in
+                try Task.checkCancellation()
                 let lhsFavorite = lhs.favoritedAt != nil
                 let rhsFavorite = rhs.favoritedAt != nil
                 if lhsFavorite != rhsFavorite { return lhsFavorite }
@@ -1008,10 +1010,16 @@ struct ProgramGuideView: View {
                 }
                 if lhs.serviceId != rhs.serviceId { return lhs.serviceId < rhs.serviceId }
                 return lhs.name < rhs.name
-            }
+            })
+        else { return [] }
 
-        let serviceByKey = Dictionary(
-            uniqueKeysWithValues: sorted.map { ("\($0.networkId)-\($0.serviceId)", $0) })
+        guard
+            let servicePairs = try? sorted.map({ service in
+                try Task.checkCancellation()
+                return ("\(service.networkId)-\(service.serviceId)", service)
+            })
+        else { return [] }
+        let serviceByKey = Dictionary(uniqueKeysWithValues: servicePairs)
         var groupedPrograms: [String: [Program]] = [:]
 
         for program in programs {
@@ -1046,6 +1054,7 @@ struct ProgramGuideView: View {
 
         var mainServiceIDByGroup: [MainServiceGroupKey: Int] = [:]
         for service in sorted {
+            guard !Task.isCancelled else { return [] }
             let groupKey = MainServiceGroupKey(
                 networkId: service.networkId,
                 remoteControlKeyId: service.remoteControlKeyId
@@ -1061,6 +1070,7 @@ struct ProgramGuideView: View {
         // 各物理放送局のメインサービス番組を収集（サブチャンネル重複フィルタ用）
         var mainProgramKeysByBroadcaster: [BroadcasterKey: Set<ProgramOverlapKey>] = [:]
         for service in sorted {
+            guard !Task.isCancelled else { return [] }
             let groupKey = MainServiceGroupKey(
                 networkId: service.networkId,
                 remoteControlKeyId: service.remoteControlKeyId
@@ -1074,13 +1084,19 @@ struct ProgramGuideView: View {
                 broadcasterId: service.remoteControlKeyId ?? service.serviceId
             )
             let serviceKey = "\(service.networkId)-\(service.serviceId)"
-            let keys = groupedPrograms[serviceKey, default: []].map {
-                ProgramOverlapKey(startAt: $0.startAt, endAt: $0.endAt, name: $0.name)
+            var keys: Set<ProgramOverlapKey> = []
+            for program in groupedPrograms[serviceKey, default: []] {
+                guard !Task.isCancelled else { return [] }
+                keys.insert(
+                    ProgramOverlapKey(
+                        startAt: program.startAt, endAt: program.endAt, name: program.name))
             }
-            mainProgramKeysByBroadcaster[broadcasterKey] = Set(keys)
+            mainProgramKeysByBroadcaster[broadcasterKey] = keys
         }
 
-        return sorted.compactMap { service in
+        var result: [GuideChannel] = []
+        for service in sorted {
+            guard !Task.isCancelled else { return [] }
             let key = "\(service.networkId)-\(service.serviceId)"
             let groupKey = MainServiceGroupKey(
                 networkId: service.networkId,
@@ -1092,19 +1108,31 @@ struct ProgramGuideView: View {
             )
             let isMain = mainServiceIDByGroup[groupKey] == service.serviceId
 
-            var grouped = groupedPrograms[key, default: []]
-                .sorted { $0.startAt != $1.startAt ? $0.startAt < $1.startAt : $0.name < $1.name }
+            guard
+                var grouped = try? groupedPrograms[key, default: []].sorted(by: {
+                    try Task.checkCancellation()
+                    return $0.startAt != $1.startAt ? $0.startAt < $1.startAt : $0.name < $1.name
+                })
+            else { return [] }
 
             if !isMain, let mainProgramKeys = mainProgramKeysByBroadcaster[broadcasterKey] {
-                grouped = grouped.filter { sub in
-                    !mainProgramKeys.contains(
+                var uniquePrograms: [Program] = []
+                for sub in grouped {
+                    guard !Task.isCancelled else { return [] }
+                    if !mainProgramKeys.contains(
                         ProgramOverlapKey(startAt: sub.startAt, endAt: sub.endAt, name: sub.name))
+                    {
+                        uniquePrograms.append(sub)
+                    }
                 }
+                grouped = uniquePrograms
             }
 
-            guard !grouped.isEmpty else { return nil }
-            return GuideChannel(id: key, service: service, programs: grouped)
+            guard !grouped.isEmpty else { continue }
+            result.append(GuideChannel(id: key, service: service, programs: grouped))
         }
+        guard !Task.isCancelled else { return [] }
+        return result
     }
 
     private func yOffset(for date: Date) -> CGFloat {

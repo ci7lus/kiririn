@@ -101,7 +101,7 @@ struct PluginsSettingsView: View {
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
     #endif
-    @Environment(\.isTabActive) private var isTabActive
+    @Environment(\.showsTabNavigation) private var showsTabNavigation
 
     var body: some View {
         Group {
@@ -248,7 +248,7 @@ struct PluginsSettingsView: View {
 
     @ToolbarContentBuilder
     private var settingsToolbar: some ToolbarContent {
-        if isTabActive {
+        if showsTabNavigation {
             ToolbarItem(placement: .automatic) {
                 #if os(macOS)
                     Menu {

@@ -44,11 +44,9 @@ class RecordsViewModel {
         failedThumbnailKeys.contains(thumbnailKey(for: record))
     }
 
-    func releaseTransientData() {
+    func cancelPendingThumbnailLoads() {
         thumbnailLoadGeneration &+= 1
-        thumbnailDataByRecordKey.removeAll(keepingCapacity: false)
         loadingThumbnailKeys.removeAll(keepingCapacity: false)
-        failedThumbnailKeys.removeAll(keepingCapacity: false)
     }
 
     func playbackPosition(for record: Recorded) -> Float? {
@@ -127,12 +125,9 @@ class RecordsViewModel {
             }
             if Task.isCancelled { return }
         }
-        let previousRecords = records
-        let previousThumbnailDataByRecordKey = thumbnailDataByRecordKey
-        let previousLoadingThumbnailKeys = loadingThumbnailKeys
-        let previousFailedThumbnailKeys = failedThumbnailKeys
         let previousPageToken = pageToken
         let previousHasMore = hasMore
+        let previousScrolledRecordID = scrolledRecordId
         let previousErrorTitle = errorTitle
         let previousErrorMessage = errorMessage
 
@@ -161,6 +156,7 @@ class RecordsViewModel {
                 limit: limit,
                 keyword: searchText.isEmpty ? nil : searchText
             )
+            try Task.checkCancellation()
             if reset {
                 records = result.records
                 let validKeys = Set(result.records.map { thumbnailKey(for: $0) })
@@ -181,12 +177,9 @@ class RecordsViewModel {
         } catch {
             if Task.isCancelled || isCancellationError(error) {
                 if reset {
-                    records = previousRecords
-                    thumbnailDataByRecordKey = previousThumbnailDataByRecordKey
-                    loadingThumbnailKeys = previousLoadingThumbnailKeys
-                    failedThumbnailKeys = previousFailedThumbnailKeys
                     pageToken = previousPageToken
                     hasMore = previousHasMore
+                    scrolledRecordId = previousScrolledRecordID
                     errorTitle = previousErrorTitle
                     errorMessage = previousErrorMessage
                 }

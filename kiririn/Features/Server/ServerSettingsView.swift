@@ -8,7 +8,7 @@ struct ServerSettingsView: View {
     @State private var selectedServerID: String?
     @State private var showingDeleteConfirmation = false
     @State private var serverIDsToDelete: [String] = []
-    @Environment(\.isTabActive) private var isTabActive
+    @Environment(\.showsTabNavigation) private var showsTabNavigation
 
     var body: some View {
         listView
@@ -152,7 +152,7 @@ struct ServerSettingsView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        if isTabActive {
+        if showsTabNavigation {
             ToolbarItem(placement: addButtonPlacement) {
                 Button {
                     showingAddSheet = true

@@ -947,21 +947,21 @@ private struct FavoriteServiceOrderingRow: View {
 
 private struct ServiceListTitleModifier: ViewModifier {
     let isEnabled: Bool
-    @Environment(\.isTabActive) private var isTabActive
+    @Environment(\.showsTabNavigation) private var showsTabNavigation
 
     func body(content: Content) -> some View {
-        content.navigationTitle(isEnabled && isTabActive ? "放送中" : "")
+        content.navigationTitle(isEnabled && showsTabNavigation ? "放送中" : "")
     }
 }
 
 private struct ServiceListSearchableModifier: ViewModifier {
     let isEnabled: Bool
     @Binding var searchText: String
-    @Environment(\.isTabActive) private var isTabActive
+    @Environment(\.showsTabNavigation) private var showsTabNavigation
 
     func body(content: Content) -> some View {
         ZStack {
-            if isEnabled && isTabActive {
+            if isEnabled && showsTabNavigation {
                 Color.clear
                     .allowsHitTesting(false)
                     .searchable(text: $searchText, prompt: "検索")
@@ -1021,11 +1021,11 @@ private struct ServiceListSectionIndexVisibilityModifier: ViewModifier {
 private struct ServiceSectionJumpToolbarModifier: ViewModifier {
     let channelTypes: [String]
     let onSelect: (String) -> Void
-    @Environment(\.isTabActive) private var isTabActive
+    @Environment(\.showsTabNavigation) private var showsTabNavigation
 
     func body(content: Content) -> some View {
         content.toolbar {
-            if isTabActive && !channelTypes.isEmpty {
+            if showsTabNavigation && !channelTypes.isEmpty {
                 ToolbarItem(placement: toolbarPlacement) {
                     Menu {
                         ForEach(channelTypes, id: \.self) { channelType in

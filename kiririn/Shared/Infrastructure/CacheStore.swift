@@ -30,6 +30,7 @@ class CacheStore {
     private(set) var playbackPositionSaveToken: Int = 0
     private(set) var lastSavedPlaybackPosition: (playableID: String, position: Float?)?
     private(set) var databaseFailureFeedback: CacheDatabaseFailureFeedback?
+    private(set) var programCatalogRevision = 0
 
     @ObservationIgnored
     private var didReportDatabaseFailure = false
@@ -222,7 +223,8 @@ class CacheStore {
         let now = Date()
         let twoDaysAgo = now.addingTimeInterval(-2 * 24 * 60 * 60)
         do {
-            try await self.dbQueue.write { db in
+            let didChange = try await self.dbQueue.write { db in
+                let previousCatalog = try Self.programCatalogSnapshot(in: db)
                 try db.execute(
                     sql:
                         "DELETE FROM program WHERE serverId = :serverId AND (endAt > :now OR startAt < :twoDaysAgo)",
@@ -235,10 +237,28 @@ class CacheStore {
                 }
 
                 try Self.upsertLastProgramFullFetchDate(now, serverId: serverId, in: db)
+                return try Self.programCatalogSnapshot(in: db) != previousCatalog
+            }
+            if didChange {
+                programCatalogRevision &+= 1
             }
         } catch {
             self.logger.error("Failed to cache programs for server \(serverId): \(error)")
             reportDatabaseFailureIfNeeded(operation: "cache programs", error: error)
+        }
+    }
+
+    private nonisolated static func programCatalogSnapshot(in db: Database) throws -> [Program] {
+        try Program.fetchAll(
+            db,
+            sql: """
+                SELECT * FROM program
+                ORDER BY networkId ASC, serviceId ASC, startAt ASC, updatedAt DESC, id ASC
+                """
+        ).map { program in
+            var program = program
+            program.updatedAt = nil
+            return program
         }
     }
 
@@ -282,7 +302,7 @@ class CacheStore {
             return try await dbQueue.read { db in
                 var sql = """
                     SELECT * FROM (
-                        SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC) as rn
+                        SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC, id ASC) as rn
                         FROM program
                     ) WHERE rn = 1
                     """
@@ -290,7 +310,7 @@ class CacheStore {
                 if from != nil {
                     sql = """
                         SELECT * FROM (
-                            SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC) as rn
+                            SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC, id ASC) as rn
                             FROM program
                             WHERE (startAt >= :from AND startAt < :until)
                                OR (endAt > :from AND startAt < :from)
@@ -300,7 +320,7 @@ class CacheStore {
                 } else {
                     sql = """
                         SELECT * FROM (
-                            SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC) as rn
+                            SELECT *, ROW_NUMBER() OVER (PARTITION BY serviceId, networkId, startAt ORDER BY updatedAt DESC, id ASC) as rn
                             FROM program
                             WHERE startAt < :until OR duration = 0
                         ) WHERE rn = 1
@@ -422,7 +442,7 @@ class CacheStore {
     func cleanupOldPrograms(referenceDate: Date = Date()) async {
         let cutoffDate = referenceDate.addingTimeInterval(-24 * 60 * 60)
         do {
-            try await dbQueue.write { db in
+            let didDelete = try await dbQueue.write { db in
                 try db.execute(
                     sql: """
                         DELETE FROM program
@@ -431,6 +451,10 @@ class CacheStore {
                         """,
                     arguments: ["cutoffDate": cutoffDate]
                 )
+                return db.changesCount > 0
+            }
+            if didDelete {
+                programCatalogRevision &+= 1
             }
         } catch {
             self.logger.error("Failed to cleanup old programs: \(error)")
