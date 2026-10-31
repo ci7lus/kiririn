@@ -72,7 +72,7 @@ struct SettingsView: View {
     @State private var isFolderPickerPresented = false
     @State private var cacheDeletionAlert: CacheDeletionAlert?
     @State private var isDeletingCache = false
-    @Environment(\.isTabActive) private var isTabActive
+    @Environment(\.showsTabNavigation) private var showsTabNavigation
     private let buildInfo = AppBuildInfo.current
 
     private var shouldShowCacheRecoverySection: Bool {
@@ -164,7 +164,7 @@ struct SettingsView: View {
             #endif
         }
         .formStyle(.grouped)
-        .navigationTitle(isTabActive ? "設定" : "")
+        .navigationTitle(showsTabNavigation ? "設定" : "")
         .alert(item: $cacheDeletionAlert) { alert in
             cacheDeletionAlertContent(alert)
         }

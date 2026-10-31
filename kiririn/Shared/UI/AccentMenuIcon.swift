@@ -4,14 +4,18 @@ import SwiftUI
 
 #if canImport(UIKit) && !os(macOS)
     import UIKit
+
+    @MainActor
+    private enum AccentMenuIconResources {
+        static let accentColor = UIColor(named: "AccentColor") ?? .tintColor
+    }
 #endif
 
 @ViewBuilder
 func accentMenuIcon(systemName: String) -> some View {
     #if canImport(UIKit) && !os(macOS)
-        let accentColor = UIColor(named: "AccentColor") ?? .tintColor
         if let image = UIImage(systemName: systemName)?
-            .withTintColor(accentColor, renderingMode: .alwaysOriginal)
+            .withTintColor(AccentMenuIconResources.accentColor, renderingMode: .alwaysOriginal)
         {
             Image(uiImage: image)
                 .renderingMode(.original)

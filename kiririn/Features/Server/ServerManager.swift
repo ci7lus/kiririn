@@ -148,7 +148,7 @@ class ServerManager {
     var serviceListServices: [TVService] = []
     var services: [TVService] = []
     private(set) var playbackCandidatesRevision = 0
-    private(set) var programCatalogRevision = 0
+    var programCatalogRevision: Int { cacheStore?.programCatalogRevision ?? 0 }
     var logos: [TVServiceLogo] = [] {
         didSet {
             rebuildLogoCache()
@@ -534,7 +534,6 @@ class ServerManager {
                     clearLastError(for: state)
                     lastProgramFullFetchDatesByServer[serverId] = Date()
                     pendingProgramFullFetchServerIDs.remove(serverId)
-                    programCatalogRevision &+= 1
                     return .refreshed
                 } catch {
                     guard !isStaleOperation(serverId: serverId, generation: generation) else {

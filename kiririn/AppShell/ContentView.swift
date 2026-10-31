@@ -14,6 +14,14 @@ extension EnvironmentValues {
         get { self[IsTabActiveKey.self] }
         set { self[IsTabActiveKey.self] = newValue }
     }
+
+    var showsTabNavigation: Bool {
+        #if os(macOS)
+            isTabActive
+        #else
+            true
+        #endif
+    }
 }
 
 struct ContentView: View {
@@ -29,31 +37,31 @@ struct ContentView: View {
     @State private var droppedPluginAlertMessage: String?
     @State private var externalInstallConfirmation: PluginInstallConfirmationRequest?
     @State private var externalInstallErrorMessage: String?
-    #if os(macOS)
-        private enum AppTab: String, CaseIterable, Hashable {
-            case nowPlaying, guide, recordings, capture, settings
+    private enum AppTab: String, CaseIterable, Hashable {
+        case nowPlaying, guide, recordings, capture, settings
 
-            var title: String {
-                switch self {
-                case .nowPlaying: return "放送中"
-                case .guide: return "番組表"
-                case .recordings: return "録画"
-                case .capture: return "キャプチャ"
-                case .settings: return "設定"
-                }
-            }
-
-            var icon: String {
-                switch self {
-                case .nowPlaying: return "tv"
-                case .guide: return "calendar"
-                case .recordings: return "film.stack"
-                case .capture: return "photo.on.rectangle.angled"
-                case .settings: return "gear"
-                }
+        var title: String {
+            switch self {
+            case .nowPlaying: return "放送中"
+            case .guide: return "番組表"
+            case .recordings: return "録画"
+            case .capture: return "キャプチャ"
+            case .settings: return "設定"
             }
         }
 
+        var icon: String {
+            switch self {
+            case .nowPlaying: return "tv"
+            case .guide: return "calendar"
+            case .recordings: return "film.stack"
+            case .capture: return "photo.on.rectangle.angled"
+            case .settings: return "gear"
+            }
+        }
+    }
+
+    #if os(macOS)
         private enum SettingsNavigationDestination: Hashable {
             case about
         }
@@ -100,6 +108,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     #if !os(macOS)
         @Environment(\.verticalSizeClass) private var verticalSizeClass
+        @State private var selectedIOSTab: AppTab = .nowPlaying
         @State private var showingFilePicker = false
     #endif
 
@@ -252,20 +261,22 @@ struct ContentView: View {
                     }
                 }
             #else
-                TabView {
-                    Tab("放送中", systemImage: "tv") {
+                TabView(selection: $selectedIOSTab) {
+                    Tab("放送中", systemImage: "tv", value: AppTab.nowPlaying) {
                         NavigationStack {
                             ServiceListView(manager: manager, playerState: playerState)
                         }
+                        .environment(\.isTabActive, selectedIOSTab == .nowPlaying)
                     }
 
-                    Tab("番組表", systemImage: "calendar") {
+                    Tab("番組表", systemImage: "calendar", value: AppTab.guide) {
                         NavigationStack {
                             ProgramGuideView(manager: manager, playerState: playerState)
                         }
+                        .environment(\.isTabActive, selectedIOSTab == .guide)
                     }
 
-                    Tab("録画", systemImage: "film.stack") {
+                    Tab("録画", systemImage: "film.stack", value: AppTab.recordings) {
                         NavigationStack {
                             RecordsListView(
                                 manager: manager,
@@ -275,9 +286,10 @@ struct ContentView: View {
                                 playerState: playerState
                             )
                         }
+                        .environment(\.isTabActive, selectedIOSTab == .recordings)
                     }
 
-                    Tab("キャプチャ", systemImage: "photo.on.rectangle.angled") {
+                    Tab("キャプチャ", systemImage: "photo.on.rectangle.angled", value: AppTab.capture) {
                         NavigationStack {
                             CaptureListView(
                                 showsNavigationTitle: true,
@@ -285,9 +297,10 @@ struct ContentView: View {
                                 playerState: playerState
                             )
                         }
+                        .environment(\.isTabActive, selectedIOSTab == .capture)
                     }
 
-                    Tab("設定", systemImage: "gear") {
+                    Tab("設定", systemImage: "gear", value: AppTab.settings) {
                         NavigationStack {
                             SettingsView(
                                 configStore: configStore,
@@ -297,6 +310,7 @@ struct ContentView: View {
                                 playerState: playerState
                             )
                         }
+                        .environment(\.isTabActive, selectedIOSTab == .settings)
                     }
                 }
                 .opacity(playerState.isActive && playerState.mode == .fullscreen ? 0 : 1)

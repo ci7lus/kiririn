@@ -13,7 +13,6 @@ struct ServerRecordsView: View {
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var hasCompletedInitialLoad = false
     @State private var visibleIds: Set<String> = []
-    private let recordDownloadManager = RecordDownloadManager.shared
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
     #endif
@@ -55,21 +54,9 @@ struct ServerRecordsView: View {
                     ScrollViewReader { proxy in
                         List {
                             ForEach(visibleRecords) { record in
-                                let recordDownloadID = RecordDownloadManager.localRecordID(
-                                    serverId: record.serverId,
-                                    recordID: record.id
-                                )
-                                RecordRowView(
+                                ServerRecordRow(
                                     record: record,
-                                    thumbnailData: viewModel.thumbnailData(for: record),
-                                    isThumbnailFailed: viewModel.isThumbnailFailed(for: record),
-                                    playbackPosition: viewModel.playbackPosition(for: record),
-                                    downloadProgress:
-                                        recordDownloadManager.downloadProgressByItemId[
-                                            recordDownloadID],
-                                    onCancelDownload: {
-                                        recordDownloadManager.cancelDownload(id: recordDownloadID)
-                                    },
+                                    state: viewModel.rowState(for: record),
                                     manager: manager
                                 ) {
                                     playRecord(record)
@@ -127,10 +114,6 @@ struct ServerRecordsView: View {
         .onChange(of: searchText) { _, _ in
             scheduleSearch()
         }
-        .onChange(of: AppModel.shared.cacheStore?.playbackPositionSaveToken) { _, _ in
-            guard let entry = AppModel.shared.cacheStore?.lastSavedPlaybackPosition else { return }
-            viewModel.playbackPositionByPlayableId[entry.playableID] = entry.position
-        }
         .onChange(of: refreshTrigger) { _, _ in
             Task {
                 await refreshRecords()
@@ -140,17 +123,22 @@ struct ServerRecordsView: View {
             guard isTabActive else {
                 searchDebounceTask?.cancel()
                 searchDebounceTask = nil
-                viewModel.releaseTransientData()
+                viewModel.cancelPendingThumbnailLoads()
                 return
             }
             viewModel.searchText = searchText
             guard !hasCompletedInitialLoad else { return }
-            await loadRecords(reset: true)
-            if !viewModel.records.isEmpty, let cacheStore = AppModel.shared.cacheStore {
-                await viewModel.loadPlaybackPositions(
-                    for: viewModel.records, cacheStore: cacheStore)
-            }
+            await viewModel.loadRecords(
+                manager: manager, serverId: serverId, reset: true, force: true)
+            guard !Task.isCancelled else { return }
             hasCompletedInitialLoad = true
+        }
+        .background {
+            RecordsPositionSync(
+                viewModel: viewModel,
+                cacheStore: AppModel.shared.cacheStore,
+                isActive: isTabActive
+            )
         }
         .onDisappear {
             searchDebounceTask?.cancel()
@@ -206,9 +194,6 @@ struct ServerRecordsView: View {
             serverId: serverId,
             reset: reset
         )
-        if let cacheStore = AppModel.shared.cacheStore {
-            await viewModel.loadPlaybackPositions(for: viewModel.records, cacheStore: cacheStore)
-        }
     }
 
     private func refreshRecords() async {
@@ -224,14 +209,75 @@ struct ServerRecordsView: View {
     }
 }
 
+private struct ServerRecordRow: View {
+    let record: Recorded
+    let state: RecordRowState
+    let manager: ServerManager
+    let onTap: () -> Void
+    private let recordDownloadManager = RecordDownloadManager.shared
+
+    var body: some View {
+        let downloadID = RecordDownloadManager.localRecordID(
+            serverId: record.serverId, recordID: record.id)
+        RecordRowView(
+            record: record,
+            thumbnailData: state.thumbnailData,
+            isThumbnailFailed: state.isThumbnailFailed,
+            playbackPosition: state.playbackPosition,
+            downloadProgress: recordDownloadManager.downloadProgressByItemId[downloadID],
+            onCancelDownload: { recordDownloadManager.cancelDownload(id: downloadID) },
+            manager: manager,
+            onTap: onTap
+        )
+    }
+}
+
+private struct RecordsPositionSync: View {
+    let viewModel: RecordsViewModel
+    let cacheStore: CacheStore?
+    let isActive: Bool
+
+    private struct Query: Equatable {
+        struct Record: Equatable {
+            let serverID: String
+            let recordID: String
+            let playableID: String?
+        }
+
+        let cacheStoreID: ObjectIdentifier
+        let saveToken: Int
+        let records: [Record]
+    }
+
+    private var query: Query? {
+        guard isActive, let cacheStore else { return nil }
+        return Query(
+            cacheStoreID: ObjectIdentifier(cacheStore),
+            saveToken: cacheStore.playbackPositionSaveToken,
+            records: viewModel.records.map {
+                Query.Record(serverID: $0.serverId, recordID: $0.id, playableID: $0.playableID)
+            }
+        )
+    }
+
+    var body: some View {
+        Color.clear
+            .allowsHitTesting(false)
+            .task(id: query) {
+                guard isActive, let cacheStore else { return }
+                await viewModel.loadPlaybackPositionsIfNeeded(cacheStore: cacheStore)
+            }
+    }
+}
+
 private struct RecordsSearchableModifier: ViewModifier {
     let isEnabled: Bool
     @Binding var searchText: String
-    @Environment(\.isTabActive) private var isTabActive
+    @Environment(\.showsTabNavigation) private var showsTabNavigation
 
     func body(content: Content) -> some View {
         ZStack {
-            if isEnabled && isTabActive {
+            if isEnabled && showsTabNavigation {
                 Color.clear
                     .allowsHitTesting(false)
                     .searchable(text: $searchText, prompt: "検索")

@@ -2,11 +2,23 @@ import Foundation
 import Logging
 
 @Observable
+final class RecordRowState {
+    fileprivate(set) var thumbnailData: Data?
+    fileprivate(set) var isThumbnailFailed = false
+    fileprivate(set) var playbackPosition: Float?
+    @ObservationIgnored fileprivate var playableID: String?
+    @ObservationIgnored fileprivate weak var playbackPositionCacheStore: CacheStore?
+    @ObservationIgnored fileprivate var playbackPositionLoadToken: Int?
+
+    fileprivate init(playableID: String?) {
+        self.playableID = playableID
+    }
+}
+
+@Observable
 class RecordsViewModel {
     private let logger = Logging.Logger(label: "RecordsViewModel")
-    var records: [Recorded] = []
-    var thumbnailDataByRecordKey: [String: Data] = [:]
-    var playbackPositionByPlayableId: [String: Float] = [:]
+    private(set) var records: [Recorded] = []
     var isLoading = false
     var hasMore = true
     var searchText = ""
@@ -17,9 +29,11 @@ class RecordsViewModel {
 
     private var pageToken: String?
     private let limit = 20
-    private var loadingThumbnailKeys: Set<String> = []
-    private var failedThumbnailKeys: Set<String> = []
-    private var thumbnailLoadGeneration = 0
+    @ObservationIgnored private var rowStates: [String: RecordRowState] = [:]
+    @ObservationIgnored private var thumbnailRequestIDs: [String: UUID] = [:]
+    @ObservationIgnored private var playbackPositionRequestID: UUID?
+    @ObservationIgnored private weak var lastPositionCacheStore: CacheStore?
+    @ObservationIgnored private var lastPositionSaveToken: Int?
 
     private func isCancellationError(_ error: Error) -> Bool {
         if error is CancellationError {
@@ -32,88 +46,156 @@ class RecordsViewModel {
         return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
     }
 
-    private func thumbnailKey(for record: Recorded) -> String {
+    private func recordKey(for record: Recorded) -> String {
         "\(record.serverId)-\(record.id)"
     }
 
-    func thumbnailData(for record: Recorded) -> Data? {
-        thumbnailDataByRecordKey[thumbnailKey(for: record)]
+    func rowState(for record: Recorded) -> RecordRowState {
+        let key = recordKey(for: record)
+        if let state = rowStates[key] { return state }
+        let state = RecordRowState(playableID: record.playableID)
+        rowStates[key] = state
+        return state
     }
 
-    func isThumbnailFailed(for record: Recorded) -> Bool {
-        failedThumbnailKeys.contains(thumbnailKey(for: record))
-    }
-
-    func releaseTransientData() {
-        thumbnailLoadGeneration &+= 1
-        thumbnailDataByRecordKey.removeAll(keepingCapacity: false)
-        loadingThumbnailKeys.removeAll(keepingCapacity: false)
-        failedThumbnailKeys.removeAll(keepingCapacity: false)
-    }
-
-    func playbackPosition(for record: Recorded) -> Float? {
-        guard let playableId = record.playableID else { return nil }
-        return playbackPositionByPlayableId[playableId]
-    }
-
-    func loadPlaybackPositions(for records: [Recorded], cacheStore: CacheStore) async {
-        let playableIDs = Set(records.compactMap(\.playableID))
-        playbackPositionByPlayableId = playbackPositionByPlayableId.filter {
-            playableIDs.contains($0.key)
+    private func prepareRowStates(for records: [Recorded], reset: Bool) {
+        for record in records {
+            let key = recordKey(for: record)
+            let playableID = record.playableID
+            if let state = rowStates[key] {
+                if state.playableID != playableID {
+                    state.playableID = playableID
+                    state.playbackPositionLoadToken = nil
+                    if state.playbackPosition != nil {
+                        state.playbackPosition = nil
+                    }
+                }
+            } else {
+                rowStates[key] = RecordRowState(playableID: playableID)
+            }
         }
-        await withTaskGroup(of: (String, Float?).self) { group in
+        if reset {
+            let validKeys = Set(records.map { recordKey(for: $0) })
+            rowStates = rowStates.filter { validKeys.contains($0.key) }
+            thumbnailRequestIDs = thumbnailRequestIDs.filter { validKeys.contains($0.key) }
+        }
+    }
+
+    func cancelPendingThumbnailLoads() {
+        thumbnailRequestIDs.removeAll(keepingCapacity: false)
+    }
+
+    func loadPlaybackPositionsIfNeeded(cacheStore: CacheStore) async {
+        guard !Task.isCancelled else { return }
+        let requestID = UUID()
+        playbackPositionRequestID = requestID
+        defer {
+            if playbackPositionRequestID == requestID {
+                playbackPositionRequestID = nil
+            }
+        }
+        let saveToken = cacheStore.playbackPositionSaveToken
+        if lastPositionCacheStore === cacheStore,
+            let previousToken = lastPositionSaveToken,
+            previousToken &+ 1 == saveToken,
+            let entry = cacheStore.lastSavedPlaybackPosition
+        {
             for record in records {
-                guard let playableId = record.playableID else { continue }
-                let id = playableId
-                group.addTask {
-                    let position = await cacheStore.loadPlaybackPosition(playableID: id)
-                    return (id, position)
-                }
-            }
-            for await (playableId, position) in group {
-                if let position {
-                    playbackPositionByPlayableId[playableId] = position
-                } else {
-                    playbackPositionByPlayableId.removeValue(forKey: playableId)
+                guard let state = rowStates[recordKey(for: record)] else { continue }
+                if state.playableID == entry.playableID {
+                    state.playbackPositionCacheStore = cacheStore
+                    state.playbackPositionLoadToken = saveToken
+                    if state.playbackPosition != entry.position {
+                        state.playbackPosition = entry.position
+                    }
+                } else if state.playbackPositionCacheStore === cacheStore,
+                    state.playbackPositionLoadToken == previousToken
+                {
+                    state.playbackPositionLoadToken = saveToken
                 }
             }
         }
+        var pendingStates: [String: RecordRowState] = [:]
+        for record in records {
+            let key = recordKey(for: record)
+            guard let state = rowStates[key], state.playableID != nil,
+                state.playbackPositionCacheStore !== cacheStore
+                    || state.playbackPositionLoadToken != saveToken
+            else { continue }
+            pendingStates[key] = state
+        }
+        await withTaskGroup(of: (String, String, Float?).self) { group in
+            for (key, state) in pendingStates {
+                guard let playableID = state.playableID else { continue }
+                group.addTask {
+                    let position = await cacheStore.loadPlaybackPosition(playableID: playableID)
+                    return (key, playableID, position)
+                }
+            }
+            for await (key, playableID, position) in group {
+                guard !Task.isCancelled, playbackPositionRequestID == requestID,
+                    cacheStore.playbackPositionSaveToken == saveToken
+                else {
+                    group.cancelAll()
+                    return
+                }
+                guard let state = pendingStates[key], rowStates[key] === state,
+                    state.playableID == playableID
+                else { continue }
+                state.playbackPositionCacheStore = cacheStore
+                state.playbackPositionLoadToken = saveToken
+                if state.playbackPosition != position {
+                    state.playbackPosition = position
+                }
+            }
+        }
+        guard !Task.isCancelled, playbackPositionRequestID == requestID,
+            cacheStore.playbackPositionSaveToken == saveToken
+        else { return }
+        lastPositionCacheStore = cacheStore
+        lastPositionSaveToken = saveToken
     }
 
     func loadThumbnailIfNeeded(for record: Recorded, manager: ServerManager) async {
-        let generation = thumbnailLoadGeneration
-        guard record.hasThumbnail else { return }
-        let key = thumbnailKey(for: record)
-        guard thumbnailDataByRecordKey[key] == nil else { return }
-        guard !failedThumbnailKeys.contains(key) else { return }
-        guard !loadingThumbnailKeys.contains(key) else { return }
+        guard !Task.isCancelled, record.hasThumbnail else { return }
+        let key = recordKey(for: record)
+        guard let state = rowStates[key], state.thumbnailData == nil,
+            !state.isThumbnailFailed, thumbnailRequestIDs[key] == nil
+        else { return }
         guard manager.recordingProvider(for: record.serverId) != nil else {
-            failedThumbnailKeys.insert(key)
+            state.isThumbnailFailed = true
             return
         }
 
-        loadingThumbnailKeys.insert(key)
+        let requestID = UUID()
+        thumbnailRequestIDs[key] = requestID
         defer {
-            if thumbnailLoadGeneration == generation {
-                loadingThumbnailKeys.remove(key)
+            if thumbnailRequestIDs[key] == requestID {
+                thumbnailRequestIDs.removeValue(forKey: key)
             }
         }
 
         do {
             let data = try await manager.fetchRecordThumbnail(
                 serverId: record.serverId, id: record.id)
-            guard !Task.isCancelled, thumbnailLoadGeneration == generation else { return }
+            guard !Task.isCancelled, thumbnailRequestIDs[key] == requestID,
+                rowStates[key] === state
+            else { return }
             if let data, !data.isEmpty {
-                thumbnailDataByRecordKey[key] = data
-            } else {
-                failedThumbnailKeys.insert(key)
+                if state.thumbnailData != data {
+                    state.thumbnailData = data
+                }
+            } else if !state.isThumbnailFailed {
+                state.isThumbnailFailed = true
             }
         } catch {
-            guard !Task.isCancelled, thumbnailLoadGeneration == generation,
-                !isCancellationError(error)
+            guard !Task.isCancelled, thumbnailRequestIDs[key] == requestID,
+                rowStates[key] === state, !isCancellationError(error)
             else { return }
             logger.error("failed to get thumbnail: \(error)")
-            failedThumbnailKeys.insert(key)
+            if !state.isThumbnailFailed {
+                state.isThumbnailFailed = true
+            }
         }
     }
 
@@ -127,12 +209,9 @@ class RecordsViewModel {
             }
             if Task.isCancelled { return }
         }
-        let previousRecords = records
-        let previousThumbnailDataByRecordKey = thumbnailDataByRecordKey
-        let previousLoadingThumbnailKeys = loadingThumbnailKeys
-        let previousFailedThumbnailKeys = failedThumbnailKeys
         let previousPageToken = pageToken
         let previousHasMore = hasMore
+        let previousScrolledRecordID = scrolledRecordId
         let previousErrorTitle = errorTitle
         let previousErrorMessage = errorMessage
 
@@ -161,18 +240,10 @@ class RecordsViewModel {
                 limit: limit,
                 keyword: searchText.isEmpty ? nil : searchText
             )
+            try Task.checkCancellation()
+            prepareRowStates(for: result.records, reset: reset)
             if reset {
                 records = result.records
-                let validKeys = Set(result.records.map { thumbnailKey(for: $0) })
-                thumbnailDataByRecordKey = thumbnailDataByRecordKey.filter {
-                    validKeys.contains($0.key)
-                }
-                loadingThumbnailKeys = loadingThumbnailKeys.filter { validKeys.contains($0) }
-                failedThumbnailKeys = failedThumbnailKeys.filter { validKeys.contains($0) }
-                let validPlayableIDs = Set(result.records.compactMap(\.playableID))
-                playbackPositionByPlayableId = playbackPositionByPlayableId.filter {
-                    validPlayableIDs.contains($0.key)
-                }
             } else {
                 records.append(contentsOf: result.records)
             }
@@ -181,12 +252,9 @@ class RecordsViewModel {
         } catch {
             if Task.isCancelled || isCancellationError(error) {
                 if reset {
-                    records = previousRecords
-                    thumbnailDataByRecordKey = previousThumbnailDataByRecordKey
-                    loadingThumbnailKeys = previousLoadingThumbnailKeys
-                    failedThumbnailKeys = previousFailedThumbnailKeys
                     pageToken = previousPageToken
                     hasMore = previousHasMore
+                    scrolledRecordId = previousScrolledRecordID
                     errorTitle = previousErrorTitle
                     errorMessage = previousErrorMessage
                 }
@@ -195,10 +263,8 @@ class RecordsViewModel {
             }
             if reset {
                 records = []
-                thumbnailDataByRecordKey = [:]
-                loadingThumbnailKeys = []
-                failedThumbnailKeys = []
-                playbackPositionByPlayableId = [:]
+                rowStates = [:]
+                thumbnailRequestIDs = [:]
                 pageToken = nil
             }
             hasMore = false

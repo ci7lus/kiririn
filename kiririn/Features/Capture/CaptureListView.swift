@@ -11,6 +11,11 @@ struct CaptureListView: View {
     @State private var isLoading = false
     @State private var hasMore = true
     @State private var offset = 0
+    @State private var loadedSearchText: String?
+    @State private var loadRequestID: UUID?
+    @State private var historyRevision = 0
+    @State private var needsHistoryRefresh = false
+    @State private var pendingCaptureCount = 0
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var previewURL: URL?
     @State private var isSelectionMode = false
@@ -22,6 +27,7 @@ struct CaptureListView: View {
         @Environment(\.openWindow) private var openWindow
     #endif
     @Environment(\.isTabActive) private var isTabActive
+    @Environment(\.showsTabNavigation) private var showsTabNavigation
 
     private let limit = 20
 
@@ -61,6 +67,7 @@ struct CaptureListView: View {
                                 ForEach(items) { item in
                                     CaptureHistoryItemView(
                                         item: item,
+                                        fileURLs: item.allFileURLs,
                                         previewURL: $previewURL,
                                         isSelectionMode: isSelectionMode,
                                         isSelected: selectedIDs.contains(item.id),
@@ -68,10 +75,12 @@ struct CaptureListView: View {
                                         onPlay: { playItem(item) },
                                         onDelete: {
                                             await service.deleteHistoryItem(item)
+                                            historyRevision &+= 1
                                             if let index = items.firstIndex(where: {
                                                 $0.id == item.id
                                             }) {
                                                 items.remove(at: index)
+                                                offset = max(0, offset - 1)
                                             }
                                         }
                                     )
@@ -129,9 +138,9 @@ struct CaptureListView: View {
                 #endif
             }
         }
-        .navigationTitle(showsNavigationTitle && isTabActive ? "キャプチャ履歴" : "")
+        .navigationTitle(showsNavigationTitle && showsTabNavigation ? "キャプチャ履歴" : "")
         .toolbar {
-            if isTabActive {
+            if showsTabNavigation {
                 if !items.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
                         if #available(iOS 26, macOS 26, *) {
@@ -200,18 +209,24 @@ struct CaptureListView: View {
             }
         }
         .onReceive(service.didAddCapture) { (_, newItem) in
-            guard isTabActive else { return }
-            if searchText.isEmpty
-                || (newItem.programName?.lowercased().contains(searchText.lowercased()) == true)
-                || (newItem.serviceName?.lowercased().contains(searchText.lowercased()) == true)
-            {
+            historyRevision &+= 1
+            guard let loadedSearchText else { return }
+            if loadedSearchText == searchText, loadedSearchText.isEmpty {
                 withAnimation {
                     items.insert(newItem, at: 0)
                     offset += 1
                 }
+            } else {
+                pendingCaptureCount += 1
+                needsHistoryRefresh = true
+                guard isTabActive, loadedSearchText == searchText else { return }
+                Task {
+                    await loadHistory(reset: false)
+                }
             }
         }
         .onReceive(service.didFinishClearingHistory) { result in
+            historyRevision &+= 1
             switch result {
             case .cleared:
                 withAnimation {
@@ -220,18 +235,30 @@ struct CaptureListView: View {
                     hasMore = false
                     selectedIDs.removeAll()
                     isSelectionMode = false
+                    loadedSearchText = searchText
+                    needsHistoryRefresh = false
+                    pendingCaptureCount = 0
                 }
             case .failed, .cancelled:
+                needsHistoryRefresh = true
                 guard isTabActive else { return }
                 Task {
-                    await loadInitial()
+                    await loadHistory(reset: false)
                 }
             }
         }
         .onReceive(service.didUpdateCapture) { updatedItem in
-            guard isTabActive else { return }
-            if let index = items.firstIndex(where: { $0.id == updatedItem.id }) {
+            historyRevision &+= 1
+            let index = items.firstIndex(where: { $0.id == updatedItem.id })
+            if let index {
                 items[index] = updatedItem
+            }
+            guard let loadedSearchText, !loadedSearchText.isEmpty else { return }
+            if index == nil { pendingCaptureCount += 1 }
+            needsHistoryRefresh = true
+            guard isTabActive, loadedSearchText == searchText else { return }
+            Task {
+                await loadHistory(reset: false)
             }
         }
         .onChange(of: items) {
@@ -243,15 +270,13 @@ struct CaptureListView: View {
             guard isTabActive else {
                 searchDebounceTask?.cancel()
                 searchDebounceTask = nil
-                items.removeAll(keepingCapacity: false)
-                selectedIDs.removeAll()
-                previewURL = nil
-                offset = 0
-                hasMore = true
-                isLoading = false
                 return
             }
-            await loadInitial()
+            if loadedSearchText != searchText {
+                await loadInitial()
+            } else if needsHistoryRefresh {
+                await loadHistory(reset: false)
+            }
         }
         .onDisappear {
             searchDebounceTask?.cancel()
@@ -301,6 +326,7 @@ struct CaptureListView: View {
             await service.deleteHistoryItem(item)
         }
 
+        historyRevision &+= 1
         withAnimation {
             items.removeAll { targetIDs.contains($0.id) }
             selectedIDs.removeAll()
@@ -310,30 +336,76 @@ struct CaptureListView: View {
     }
 
     private func loadInitial() async {
+        await loadHistory(reset: true)
+    }
+
+    private func loadHistory(reset: Bool) async {
+        guard isTabActive, !Task.isCancelled else { return }
+        if !reset, loadedSearchText != searchText { return }
+        let requestID = UUID()
+        let query = searchText
+        loadRequestID = requestID
         isLoading = true
-        isAtScrollTop = true
-        offset = 0
-        let results = await service.loadHistory(searchText: searchText, limit: limit, offset: 0)
-        items = results
-        hasMore = results.count == limit
-        offset = results.count
-        isLoading = false
+        defer {
+            if loadRequestID == requestID {
+                isLoading = false
+                loadRequestID = nil
+            }
+        }
+
+        while !Task.isCancelled {
+            let revision = historyRevision
+            let fetchLimit = reset ? limit : max(offset + pendingCaptureCount, limit)
+            let results = await service.loadHistory(searchText: query, limit: fetchLimit, offset: 0)
+            guard !Task.isCancelled, isTabActive, loadRequestID == requestID,
+                query == searchText
+            else { return }
+            guard revision == historyRevision else { continue }
+            items = results
+            hasMore = results.count == fetchLimit
+            offset = results.count
+            loadedSearchText = query
+            needsHistoryRefresh = false
+            pendingCaptureCount = 0
+            if reset { isAtScrollTop = true }
+            return
+        }
     }
 
     private func loadMore() async {
-        guard !isLoading && hasMore else { return }
+        guard isTabActive, !Task.isCancelled, !isLoading, hasMore,
+            loadedSearchText == searchText, !needsHistoryRefresh
+        else { return }
+        let requestID = UUID()
+        let query = searchText
+        loadRequestID = requestID
         isLoading = true
-        let results = await service.loadHistory(
-            searchText: searchText, limit: limit, offset: offset)
-        items.append(contentsOf: results)
-        hasMore = results.count == limit
-        offset += results.count
-        isLoading = false
+        defer {
+            if loadRequestID == requestID {
+                isLoading = false
+                loadRequestID = nil
+            }
+        }
+
+        while !Task.isCancelled && hasMore {
+            let revision = historyRevision
+            let results = await service.loadHistory(
+                searchText: query, limit: limit, offset: offset)
+            guard !Task.isCancelled, isTabActive, loadRequestID == requestID,
+                loadedSearchText == query, query == searchText
+            else { return }
+            guard revision == historyRevision else { continue }
+            items.append(contentsOf: results)
+            hasMore = results.count == limit
+            offset += results.count
+            return
+        }
     }
 }
 
 private struct CaptureHistoryItemView: View {
     let item: CaptureHistoryItem
+    let fileURLs: [URL]
     @Binding var previewURL: URL?
     let isSelectionMode: Bool
     let isSelected: Bool
@@ -344,11 +416,11 @@ private struct CaptureHistoryItemView: View {
     @State private var selectedVariantIndex = 0
 
     private var selectedURL: URL {
-        item.variantFileURL(at: selectedVariantIndex)
+        fileURLs[fileURLs.indices.contains(selectedVariantIndex) ? selectedVariantIndex : 0]
     }
 
     private var variantCount: Int {
-        item.variantPaths.count + 1
+        fileURLs.count
     }
 
     var body: some View {
@@ -454,7 +526,7 @@ private struct CaptureHistoryItemView: View {
         if item.type == .image {
             CaptureImageThumbnailView(url: selectedURL)
         } else {
-            VideoThumbnailView(url: item.fileURL)
+            VideoThumbnailView(url: fileURLs[0])
         }
     }
 
@@ -604,11 +676,11 @@ private struct VideoThumbnailView: View {
 private struct CaptureSearchableModifier: ViewModifier {
     let isEnabled: Bool
     @Binding var searchText: String
-    @Environment(\.isTabActive) private var isTabActive
+    @Environment(\.showsTabNavigation) private var showsTabNavigation
 
     func body(content: Content) -> some View {
         ZStack {
-            if isEnabled && isTabActive {
+            if isEnabled && showsTabNavigation {
                 Color.clear
                     .allowsHitTesting(false)
                     .searchable(text: $searchText, prompt: "検索")

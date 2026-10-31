@@ -344,7 +344,7 @@ struct ModelBehaviorTests {
             )
                 == .refreshed
         )
-        #expect(manager.programCatalogRevision == catalogRevision + 1)
+        #expect(manager.programCatalogRevision == catalogRevision)
         #expect(manager.playbackCandidatesRevision == revision)
 
         provider.services[0].name = "変更されたサービス"
