@@ -862,7 +862,7 @@
             if isVisible {
                 VStack {
                     content()
-                        .padding(.top, 34 * scale)
+                        .padding(.top, 64 * scale)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
