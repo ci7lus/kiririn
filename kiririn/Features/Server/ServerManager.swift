@@ -1389,6 +1389,13 @@ class ServerManager {
         await cacheStore.fetchProgramDisplaySnapshot(for: services, at: date)
     }
 
+    func fetchPlayerSchedulePrograms(
+        for service: TVService, at now: Date, until date: Date
+    ) async -> [Program] {
+        guard isCacheReady else { return [] }
+        return await cacheStore.loadPlayerSchedulePrograms(for: service, at: now, until: date)
+    }
+
     func fetchCachedPrograms(from: Date? = nil, until date: Date) async -> [Program] {
         await cacheStore.loadCachedPrograms(from: from, until: date)
     }

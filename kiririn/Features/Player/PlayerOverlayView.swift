@@ -220,7 +220,10 @@ struct PlayerOverlayView_iOS: View {
             withAnimation(.easeOut(duration: 0.22)) {
                 isInfoSheetVisible = true
             }
-
+            ensureLowerTabSelection()
+        }
+        .onChange(of: playerState.currentPlayable?.source) {
+            ensureLowerTabSelection()
         }
         .onChange(of: playerState.availablePanelPlugins.map(\.id)) {
             ensureLowerTabSelection()
@@ -1115,6 +1118,20 @@ struct PlayerOverlayView_iOS: View {
     @ViewBuilder
     private var lowerContextView: some View {
         TabView(selection: $lowerTabSelection) {
+            if isLivePlayback {
+                NavigationStack {
+                    PlayerProgramScheduleView(
+                        service: livePlaybackService,
+                        manager: manager,
+                        reservedBottomHeight: collapsedBarReservedBottomHeight
+                    )
+                }
+                .tag("programSchedule")
+                .tabItem {
+                    Label("番組表", systemImage: "calendar")
+                }
+            }
+
             NavigationStack {
                 CaptionHistoryView(playerState: playerState)
             }
@@ -1178,10 +1195,13 @@ struct PlayerOverlayView_iOS: View {
     }
 
     private func ensureLowerTabSelection() {
-        let validTags =
+        var validTags =
             isDataBroadcastEnabled
             ? ["caption", "dataBroadcast", "plugin"]
             : ["caption", "plugin"]
+        if isLivePlayback {
+            validTags.append("programSchedule")
+        }
         if !validTags.contains(lowerTabSelection) {
             lowerTabSelection = "caption"
         }
@@ -1194,6 +1214,19 @@ struct PlayerOverlayView_iOS: View {
         } else {
             selectedPluginID = enabledPlugins.first?.id
         }
+    }
+
+    private var isLivePlayback: Bool {
+        guard let playable = playerState.currentPlayable else { return false }
+        if case .liveService = playable.source { return true }
+        return false
+    }
+
+    private var livePlaybackService: TVService? {
+        guard let playable = playerState.currentPlayable,
+            case .liveService(let serviceUniqueId) = playable.source
+        else { return nil }
+        return playable.displayService ?? manager.service(serviceUniqueId: serviceUniqueId)
     }
 
     private var programInfoTransitionKey: String {
