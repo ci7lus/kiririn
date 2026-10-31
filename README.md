@@ -68,6 +68,7 @@ VLCKit は[フォーク](https://github.com/neneka/vlckit)して改変したも�
 - [videolan/vlc](https://github.com/videolan/vlc)
 - [videolan/vlckit](https://github.com/videolan/vlckit)
 - [xqq/libaribcaption](https://github.com/xqq/libaribcaption)
+- [adobe-fonts/source-han-sans](https://github.com/adobe-fonts/source-han-sans)
 - [otya128/web-bml](https://github.com/otya128/web-bml)
 - [xtne6f/tsreadex](https://github.com/xtne6f/tsreadex)
 - [superfashi/FFmpeg](https://github.com/superfashi/FFmpeg)

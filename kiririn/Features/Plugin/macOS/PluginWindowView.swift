@@ -38,17 +38,10 @@ struct PluginWindowView_macOS: View {
                 }
                 .navigationTitle(plugin.name)
                 .contextMenu {
-                    Button {
-                        isAlwaysOnTop.toggle()
-                        window?.level = isAlwaysOnTop ? .floating : .normal
-                    } label: {
-                        HStack {
-                            if isAlwaysOnTop {
-                                Image(systemName: "checkmark")
-                            }
-                            Text("最前面に固定")
-                        }
-                    }
+                    Toggle("最前面に固定", isOn: $isAlwaysOnTop)
+                }
+                .onChange(of: isAlwaysOnTop) { _, isEnabled in
+                    window?.level = isEnabled ? .floating : .normal
                 }
                 .onDisappear {
                     windowReference.window = nil

@@ -7,7 +7,6 @@ struct ProgramInfoContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     let program: Program
     let serviceName: String?
-    var showsCopyContextMenu: Bool = false
 
     private struct ExtendedEntry: Identifiable {
         let id: String
@@ -17,12 +16,9 @@ struct ProgramInfoContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            BroadcastText(program.name, style: .title3, weight: .bold)
-                .contextMenu {
-                    if showsCopyContextMenu {
-                        copyMenuButton("タイトルをコピー", text: program.name)
-                    }
-                }
+            Text(program.name)
+                .broadcastFont(.title3, weight: .bold)
+                .textSelection(.enabled)
 
             if let serviceName = rawServiceName {
                 Text(serviceName)
@@ -73,13 +69,10 @@ struct ProgramInfoContentView: View {
             if let rawDescription = program.desc,
                 !rawDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             {
-                BroadcastText(rawDescription, style: .subheadline)
+                Text(rawDescription)
+                    .broadcastFont(.subheadline)
                     .foregroundStyle(.secondary)
-                    .contextMenu {
-                        if showsCopyContextMenu {
-                            copyMenuButton("番組説明をコピー", text: rawDescription)
-                        }
-                    }
+                    .textSelection(.enabled)
             }
 
             let extendedEntries = Self.normalizedExtendedEntries(
@@ -94,6 +87,7 @@ struct ProgramInfoContentView: View {
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
                             Text(linkedAttributedString(for: entry.value))
+                                .broadcastFont(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
                         }
@@ -103,18 +97,6 @@ struct ProgramInfoContentView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func copyMenuButton(_ title: String, text: String) -> some View {
-        Button {
-            copyTextToClipboard(text)
-        } label: {
-            Label {
-                Text(title)
-            } icon: {
-                accentMenuIcon(systemName: "doc.on.doc")
-            }
-        }
     }
 
     private var rawServiceName: String? {
@@ -158,9 +140,7 @@ struct ProgramInfoContentView: View {
             }
         }
 
-        var attributedString = AttributedString(mutable)
-        attributedString.font = .systemWithARIBFallback(for: text, .subheadline)
-        return attributedString
+        return AttributedString(mutable)
     }
 
     private static func normalizedExtendedEntries(

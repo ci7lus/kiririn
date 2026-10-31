@@ -174,15 +174,14 @@ struct ProgramCellView: View, Equatable {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let programTitle {
-                BroadcastText(programTitle, style: .subheadline, weight: .semibold)
+                Text(programTitle)
+                    .broadcastFont(.subheadline, weight: .semibold)
                     .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text("番組名なし")
                     .font(.subheadline)
                     .fontWeight(.semibold)
                     .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if availableHeight >= minimumHeightForTimeRange {
@@ -190,16 +189,15 @@ struct ProgramCellView: View, Equatable {
                     .font(.caption2)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if availableHeight >= minimumHeightForDescription,
                 let desc = compactDescription
             {
-                BroadcastText(desc, style: .caption2)
+                Text(desc)
+                    .broadcastFont(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Spacer(minLength: 0)

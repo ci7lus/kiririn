@@ -107,12 +107,14 @@ struct ProgramGuideSearchSheetView: View {
     @ViewBuilder
     private func searchResultRow(_ result: ProgramSearchResult) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            BroadcastText(result.program.name, style: .body, weight: .semibold)
+            Text(result.program.name)
+                .broadcastFont(.body, weight: .semibold)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 8) {
-                BroadcastText(result.service.name, style: .caption)
+                Text(result.service.name)
+                    .broadcastFont(.caption)
                     .foregroundStyle(.secondary)
 
                 Text("•")

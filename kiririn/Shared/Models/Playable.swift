@@ -306,6 +306,11 @@ nonisolated struct PlayableServiceOverride: Codable, Sendable, Equatable, Hashab
     }
 }
 
+nonisolated enum PlayableProgramAvailability: String, Codable, Hashable, Sendable {
+    case available
+    case unavailable
+}
+
 nonisolated struct Playable: Codable, Hashable, Identifiable, Sendable {
     var id: String
     var streamURL: URL
@@ -313,6 +318,7 @@ nonisolated struct Playable: Codable, Hashable, Identifiable, Sendable {
     var serverId: String?
     var source: PlayableSource
     var program: Program?
+    var programAvailability: PlayableProgramAvailability?
     var service: TVService?
     var overriddenProgram: PlayableProgramOverride?
     var overriddenService: PlayableServiceOverride?
@@ -321,6 +327,10 @@ nonisolated struct Playable: Codable, Hashable, Identifiable, Sendable {
     var length: TimeInterval?
 
     var displayProgram: Program? {
+        guard programAvailability != .unavailable else { return nil }
+        if programAvailability == .available {
+            return overriddenProgram?.toProgramOrNil()
+        }
         if let program {
             if let overriddenProgram {
                 return overriddenProgram.applying(to: program)
@@ -369,7 +379,9 @@ nonisolated struct Playable: Codable, Hashable, Identifiable, Sendable {
         if let title = displayProgram?.name, !title.isEmpty {
             return title
         }
-        if let title = overriddenProgram?.name, !title.isEmpty {
+        if programAvailability != .unavailable,
+            let title = overriddenProgram?.name, !title.isEmpty
+        {
             return title
         }
         if let name = serviceName, !name.isEmpty {
@@ -388,7 +400,8 @@ nonisolated struct Playable: Codable, Hashable, Identifiable, Sendable {
     }
 
     var subtitle: String? {
-        displayProgram?.desc ?? overriddenProgram?.desc
+        guard programAvailability != .unavailable else { return nil }
+        return displayProgram?.desc ?? overriddenProgram?.desc
     }
 
     init(

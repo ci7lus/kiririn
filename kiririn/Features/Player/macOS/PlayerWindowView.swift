@@ -1,21 +1,22 @@
 #if os(macOS)
-    import ARIBStandardKit
     import AppKit
     import Logging
     import SwiftUI
 
     struct PlayerWindowView_macOS: View {
         private let logger = Logger(label: "PlayerWindowView_macOS")
-        private static let defaultWindowTitle = "プレイヤー"
         private static let minimumWindowSize = NSSize(width: 640, height: 360)
         private static let contentAspectRatio = NSSize(width: 16, height: 9)
         let initialPlayable: Playable?
         @Environment(AppModel.self) private var appModel
         @Environment(\.dismiss) private var dismiss
+        @Environment(\.openWindow) private var openWindow
         @State private var playerState = PlayerState()
         @State private var playerWindowReference = WindowReference_macOS()
         @State private var isAlwaysOnTop = false
-        @State private var isOverlayVisible = true
+        @State private var titlebarController = PlayerTitlebarController_macOS()
+        @State private var isControllerVisible = true
+        @State private var isPointerOverTitlebar = false
         @State private var volumeFeedbackRequestID: UUID?
         @State private var restorationWaitTask: Task<Void, Never>?
         @State private var remoteEndpoint: PlayerWindowRemoteEndpoint_macOS?
@@ -28,13 +29,12 @@
                         appModel: appModel,
                         pluginStore: appModel.pluginStore,
                         isAlwaysOnTop: $isAlwaysOnTop,
+                        isControllerVisible: $isControllerVisible,
+                        isPointerOverTitlebar: isPointerOverTitlebar,
                         playerWindowReference: playerWindowReference,
                         volumeFeedbackRequestID: volumeFeedbackRequestID,
                         onToggleFullscreen: {
                             playerWindow?.toggleFullScreen(nil)
-                        },
-                        onControlsVisibilityChanged: { visible in
-                            isOverlayVisible = visible
                         }
                     )
                 } else {
@@ -44,9 +44,10 @@
             .background(Color.clear)
             .frame(minWidth: 640, minHeight: 360)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationTitle(windowTitle)
-            .toolbar(removing: .title)
-            .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+            .navigationTitle(titlebarContent.title)
+            .navigationSubtitle(titlebarContent.subtitle)
+            .toolbar { playerToolbar }
+            .windowToolbarFullScreenVisibility(.onHover)
             .overlay {
                 WindowConfigurator_macOS { window in
                     configureWindow(window)
@@ -56,11 +57,11 @@
             .onChange(of: isAlwaysOnTop) { _, newValue in
                 updateAlwaysOnTop(newValue)
             }
-            .onChange(of: isOverlayVisible) { _, _ in
-                applyTrafficLightVisibility(window: playerWindow)
+            .onChange(of: titlebarContent) { _, newValue in
+                titlebarController.update(newValue)
             }
-            .onChange(of: playerState.currentPlayable?.title) { _, _ in
-                applyWindowTitle(window: playerWindow)
+            .onChange(of: isControllerVisible) { _, newValue in
+                titlebarController.setControlsVisible(newValue)
             }
             .onChange(of: playerState.currentPlayable?.id) { oldID, newID in
                 if newID == nil {
@@ -105,24 +106,6 @@
                 }
                 prepareWindowForFullscreen(window)
             }
-            .onReceive(
-                NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)
-            ) {
-                notification in
-                guard let window = notification.object as? NSWindow, window === playerWindow else {
-                    return
-                }
-                applyTrafficLightVisibility(window: window)
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)
-            ) {
-                notification in
-                guard let window = notification.object as? NSWindow, window === playerWindow else {
-                    return
-                }
-                applyTrafficLightVisibility(window: window)
-            }
             .task(id: initialPlayable?.id) {
                 appModel.configureDetachedPlayerState(playerState)
                 startPlaybackIfPossible(trigger: "task", playable: initialPlayable)
@@ -137,10 +120,34 @@
                 }
                 restorationWaitTask?.cancel()
                 restorationWaitTask = nil
+                titlebarController.detach()
                 playerWindowReference.window = nil
                 if playerState.currentPlayable != nil {
                     playerState.close()
                 }
+            }
+        }
+
+        @ToolbarContentBuilder
+        private var playerToolbar: some ToolbarContent {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    appModel.focusedPlayerID = playerState.id
+                    openWindow(id: AppWindowID.caption.rawValue)
+                } label: {
+                    Label("字幕履歴", systemImage: "captions.bubble")
+                }
+                .labelStyle(.iconOnly)
+                .help("字幕履歴を開く")
+
+                Button {
+                    appModel.focusedPlayerID = playerState.id
+                    openWindow(id: AppWindowID.programInfo.rawValue)
+                } label: {
+                    Label("番組情報", systemImage: "info.circle")
+                }
+                .labelStyle(.iconOnly)
+                .help("番組情報を開く")
             }
         }
 
@@ -174,24 +181,59 @@
             )
         }
 
-        private var windowTitle: String {
-            let title =
-                playerState.currentPlayable?.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                .replacingARIBEnclosedGlyphsForDisplay()
-            guard let title, !title.isEmpty else {
-                return Self.defaultWindowTitle
+        private var titlebarContent: PlayerTitlebarContent_macOS {
+            let playable = playerState.currentPlayable
+            let timeRange: String?
+            if let program = playable?.displayProgram {
+                let start = program.startAt.formatted(.displayDateTimeFull)
+                if program.duration <= 0 || program.duration == 604_065
+                    || program.endAt <= program.startAt
+                {
+                    timeRange = "\(start) - (終了時刻未定)"
+                } else {
+                    timeRange = "\(start) - \(program.endAt.formatted(.displayTime))"
+                }
+            } else {
+                timeRange = nil
             }
-            return title
+            let detail: String?
+            switch playable?.source {
+            case .liveService?:
+                detail = nextProgramText
+            case .recordedFile?, .fileURL?, .directURL?, nil:
+                detail = playable?.subtitle
+            }
+            return PlayerTitlebarContent_macOS(
+                title: playable?.title,
+                serviceName: playable?.serviceName,
+                timeRange: timeRange,
+                nextProgram: detail
+            )
+        }
+
+        private var nextProgramText: String? {
+            guard let program = playerState.nextProgram,
+                program.duration > 0, program.duration != 604_065,
+                program.endAt > program.startAt
+            else { return nil }
+            let name = program.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            let start = program.startAt.formatted(.displayTime)
+            let end = program.endAt.formatted(.displayTime)
+            return "次の番組 \(start)-\(end) \(name)"
         }
 
         private func configureWindow(_ window: NSWindow) {
             if playerWindow !== window {
                 playerWindowReference.window = window
             }
-            applyWindowTitle(window: window)
+            titlebarController.update(titlebarContent)
+            titlebarController.attach(to: window) { [hover = $isPointerOverTitlebar] isHovered in
+                hover.wrappedValue = isHovered
+            }
+            titlebarController.setControlsVisible(isControllerVisible)
             applyWindowSizing(window: window)
             applyWindowLevel(window: window, isAlwaysOnTop: isAlwaysOnTop)
-            applyTrafficLightVisibility(window: window)
         }
 
         private func applyWindowSizing(window: NSWindow) {
@@ -204,11 +246,6 @@
             if window.contentAspectRatio != Self.contentAspectRatio {
                 window.contentAspectRatio = Self.contentAspectRatio
             }
-        }
-
-        private func applyWindowTitle(window: NSWindow?) {
-            guard let window else { return }
-            setWindowTitle(windowTitle, window: window)
         }
 
         private func applyWindowLevel(window: NSWindow?, isAlwaysOnTop: Bool) {
@@ -232,30 +269,6 @@
                 isAlwaysOnTop = false
             }
             applyWindowLevel(window: window, isAlwaysOnTop: false)
-        }
-
-        private func applyTrafficLightVisibility(window: NSWindow?) {
-            guard let window else { return }
-            let isVisible = isOverlayVisible || window.styleMask.contains(.fullScreen)
-            let buttonTypes: [NSWindow.ButtonType] = [
-                .closeButton,
-                .miniaturizeButton,
-                .zoomButton,
-            ]
-
-            for buttonType in buttonTypes {
-                guard let button = window.standardWindowButton(buttonType) else { continue }
-                let isHidden = !isVisible
-                if button.isHidden != isHidden {
-                    button.isHidden = isHidden
-                }
-            }
-        }
-
-        private func setWindowTitle(_ title: String, window: NSWindow) {
-            if window.title != title {
-                window.title = title
-            }
         }
 
         private func startPlaybackIfPossible(trigger: String, playable: Playable?) {

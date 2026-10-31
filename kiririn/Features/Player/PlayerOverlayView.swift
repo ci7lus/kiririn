@@ -1346,13 +1346,10 @@ struct PlayerOverlayView_iOS: View {
                         VStack {
                             Spacer()
                             VStack(alignment: .leading, spacing: 2) {
-                                BroadcastText(
-                                    playerState.currentPlayable?.title ?? "",
-                                    style: .caption,
-                                    weight: .semibold
-                                )
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
+                                Text(playerState.currentPlayable?.title ?? "")
+                                    .broadcastFont(.caption, weight: .semibold)
+                                    .foregroundStyle(.white)
+                                    .lineLimit(1)
                                 if let sub = playerState.currentPlayable?.serviceName {
                                     Text(sub)
                                         .font(.caption2)
@@ -1859,17 +1856,15 @@ struct PlayerOverlayView_iOS: View {
         subtitleStyle: Font.TextStyle
     ) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            BroadcastText(
-                playerState.currentPlayable?.title ?? "",
-                style: titleStyle,
-                weight: titleWeight
-            )
-            .foregroundStyle(.white)
-            .lineLimit(1)
+            Text(playerState.currentPlayable?.title ?? "")
+                .broadcastFont(titleStyle, weight: titleWeight)
+                .foregroundStyle(.white)
+                .lineLimit(1)
             if let sub = playerState.currentPlayable?.subtitle,
                 !sub.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             {
-                BroadcastText(sub, style: subtitleStyle)
+                Text(sub)
+                    .broadcastFont(subtitleStyle)
                     .foregroundStyle(.white.opacity(0.7))
                     .lineLimit(1)
             }
@@ -3060,18 +3055,21 @@ struct PlayerInfoSheet: View {
         if let program = playable?.displayProgram {
             ProgramInfoContentView(
                 program: program,
-                serviceName: playable?.serviceName,
-                showsCopyContextMenu: true
+                serviceName: playable?.serviceName
             )
         } else {
             VStack(alignment: .leading, spacing: 12) {
-                BroadcastText(playable?.title ?? "", style: .title3, weight: .bold)
+                Text(playable?.title ?? "")
+                    .broadcastFont(.title3, weight: .bold)
+                    .textSelection(.enabled)
 
                 if let sub = playable?.subtitle,
                     !sub.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 {
-                    BroadcastText(sub, style: .subheadline)
+                    Text(sub)
+                        .broadcastFont(.subheadline)
                         .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

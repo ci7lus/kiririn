@@ -10,8 +10,7 @@ struct ProgramInfoWindowView_macOS: View {
                     ScrollView {
                         ProgramInfoContentView(
                             program: program,
-                            serviceName: playerState.currentPlayable?.serviceName,
-                            showsCopyContextMenu: true
+                            serviceName: playerState.currentPlayable?.serviceName
                         )
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
