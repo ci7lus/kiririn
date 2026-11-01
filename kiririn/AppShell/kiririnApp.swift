@@ -239,7 +239,7 @@ struct KiririnApp: App {
 #if !DEBUG
     private enum SentryBootstrap {
         static let dsn =
-            "https://f85557a0b48501e363aa402ebf5e2c74@o481625.ingest.us.sentry.io/4511399987183616"
+            "https://7363f1aa15e3dd5705c7161e60d1a897@o481625.ingest.us.sentry.io/4511399987183616"
 
         static func initializeIfAvailable() {
             let buildInfo = AppBuildInfo.current
@@ -253,6 +253,10 @@ struct KiririnApp: App {
                 options.enableNetworkBreadcrumbs = false
                 options.enableCaptureFailedRequests = false
                 options.enableNetworkTracking = false
+                options.experimental.metrickit.enabledDiagnosticReports = [.hang]
+                #if os(macOS)
+                    options.enableAppHangTracking = false
+                #endif
             }
             SentrySDK.configureScope { scope in
                 scope.setTag(value: buildInfo.gitCommitHash, key: "revision")
