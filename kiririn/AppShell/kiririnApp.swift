@@ -253,6 +253,10 @@ struct KiririnApp: App {
                 options.enableNetworkBreadcrumbs = false
                 options.enableCaptureFailedRequests = false
                 options.enableNetworkTracking = false
+                options.experimental.metrickit.enabledDiagnosticReports = [.hang]
+                #if os(macOS)
+                    options.enableAppHangTracking = false
+                #endif
             }
             SentrySDK.configureScope { scope in
                 scope.setTag(value: buildInfo.gitCommitHash, key: "revision")
