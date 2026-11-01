@@ -6,15 +6,21 @@
         let title: String
         let subtitle: String
 
-        init(title: String?, serviceName: String?, timeRange: String?, nextProgram: String?) {
+        init(
+            title: String?, serviceName: String?, timeRange: String?, nextProgram: String?,
+            subtitleTitle: String? = nil
+        ) {
             self.title = Self.singleLine(title) ?? "プレイヤー"
-            var seen = Set([Self.comparisonKey(self.title)])
-            let candidate = [serviceName, timeRange, nextProgram]
+            let subtitleTitle = Self.singleLine(subtitleTitle)
+            var seen = subtitleTitle == nil ? Set([Self.comparisonKey(self.title)]) : Set<String>()
+            let candidate = [subtitleTitle, serviceName, timeRange, nextProgram]
                 .compactMap(Self.singleLine)
                 .filter { seen.insert(Self.comparisonKey($0)).inserted }
                 .joined(separator: "｜")
             subtitle =
-                Self.comparisonKey(candidate) == Self.comparisonKey(self.title) ? "" : candidate
+                subtitleTitle == nil
+                    && Self.comparisonKey(candidate) == Self.comparisonKey(self.title)
+                ? "" : candidate
         }
 
         private static func comparisonKey(_ value: String) -> String {
