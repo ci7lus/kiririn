@@ -197,17 +197,26 @@
                 timeRange = nil
             }
             let detail: String?
+            let subtitleTitle: String?
             switch playable?.source {
             case .liveService?:
                 detail = nextProgramText
-            case .recordedFile?, .fileURL?, .directURL?, nil:
+                subtitleTitle = nil
+            case .fileURL?:
                 detail = playable?.subtitle
+                subtitleTitle =
+                    playable?.programAvailability == .unavailable
+                    ? nil : (playable?.displayProgram?.name ?? playable?.overriddenProgram?.name)
+            case .recordedFile?, .directURL?, nil:
+                detail = playable?.subtitle
+                subtitleTitle = nil
             }
             return PlayerTitlebarContent_macOS(
                 title: playable?.title,
                 serviceName: playable?.serviceName,
                 timeRange: timeRange,
-                nextProgram: detail
+                nextProgram: detail,
+                subtitleTitle: subtitleTitle
             )
         }
 

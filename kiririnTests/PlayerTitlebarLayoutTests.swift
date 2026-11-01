@@ -7,6 +7,20 @@
     #endif
 
     @Suite @MainActor struct PlayerTitlebarLayoutTests {
+        @Test func fileSubtitleShowsProgramTitleAndAvailableDetails() {
+            let content = PlayerTitlebarContent_macOS(
+                title: "番組名", serviceName: "放送局", timeRange: "10:00-10:30",
+                nextProgram: "番組説明", subtitleTitle: "番組名"
+            )
+            #expect(content.subtitle == "番組名｜放送局｜10:00-10:30｜番組説明")
+
+            let titleOnly = PlayerTitlebarContent_macOS(
+                title: "番組名", serviceName: nil, timeRange: nil, nextProgram: nil,
+                subtitleTitle: "番組名"
+            )
+            #expect(titleOnly.subtitle == "番組名")
+        }
+
         @Test func programAvailabilityPreservesWindowOwnerTextAndToolbarLayout() {
             _ = NSApplication.shared
             let window = NSWindow(
