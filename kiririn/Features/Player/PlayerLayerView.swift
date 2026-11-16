@@ -92,33 +92,46 @@ import VLCKit
 #else
     import UIKit
 
-    struct PlayerLayerView: UIViewRepresentable {
+    // The system screenshot editor can use the video view controller's bounds for crop snapping.
+    struct PlayerLayerView: UIViewControllerRepresentable {
         let player: VLCMediaPlayer
         let isPipEnabled: Bool
         let isPlaying: Bool
         let onPipAvailableChanged: (Bool) -> Void
         let onPipEnabledChanged: (Bool) -> Void
 
-        func makeUIView(context: Context) -> VLCPlayerView {
-            let view = VLCPlayerView()
+        func makeUIViewController(context: Context) -> VLCPlayerViewController {
+            let controller = VLCPlayerViewController()
+            let view = controller.playerView
             view.backgroundColor = .black
             view.onPipAvailableChanged = onPipAvailableChanged
             view.onPipEnabledChanged = onPipEnabledChanged
             view.bindPlayer(player)
             view.applyPipState(isEnabled: isPipEnabled)
-            return view
+            return controller
         }
 
-        func updateUIView(_ uiView: VLCPlayerView, context: Context) {
-            uiView.onPipAvailableChanged = onPipAvailableChanged
-            uiView.onPipEnabledChanged = onPipEnabledChanged
-            uiView.bindPlayer(player)
-            uiView.applyPipState(isEnabled: isPipEnabled)
-            uiView.invalidatePipPlaybackState()
+        func updateUIViewController(_ controller: VLCPlayerViewController, context: Context) {
+            let view = controller.playerView
+            view.onPipAvailableChanged = onPipAvailableChanged
+            view.onPipEnabledChanged = onPipEnabledChanged
+            view.bindPlayer(player)
+            view.applyPipState(isEnabled: isPipEnabled)
+            view.invalidatePipPlaybackState()
         }
 
-        static func dismantleUIView(_ uiView: VLCPlayerView, coordinator: Void) {
-            uiView.unbindPlayer()
+        static func dismantleUIViewController(
+            _ controller: VLCPlayerViewController, coordinator: Void
+        ) {
+            controller.playerView.unbindPlayer()
+        }
+
+        final class VLCPlayerViewController: UIViewController {
+            let playerView = VLCPlayerView()
+
+            override func loadView() {
+                view = playerView
+            }
         }
     }
 
