@@ -36,6 +36,7 @@ struct PlayerOverlayView_iOS: View {
     @State private var dragOffset: CGFloat = 0
     @State private var miniPlayerCenter: CGPoint = .zero
     @State private var miniPlayerDragOffset: CGSize = .zero
+    @State private var miniPlayerViewportSize: CGSize?
     @State private var miniPlayerBaseWidth: CGFloat = 280
     @State private var hasCustomMiniPlayerSize = false
     @State private var miniPlayerPinchStartWidth: CGFloat?
@@ -164,15 +165,17 @@ struct PlayerOverlayView_iOS: View {
         maxWidth: CGFloat
     ) {
         let margin: CGFloat = 12
-        let availableWidth = max(120, geo.size.width - margin * 2)
+        let viewportSize = miniPlayerViewportSize ?? geo.size
+        let availableWidth = max(120, viewportSize.width - margin * 2)
         let minWidth = min(180, availableWidth)
-        let maxWidth = min(availableWidth, max(380, geo.size.width / 2))
+        let maxWidth = min(availableWidth, max(380, viewportSize.width / 2))
         return (margin, minWidth, maxWidth)
     }
 
     private func effectiveMiniPlayerWidth(in geo: GeometryProxy) -> CGFloat {
         let bounds = miniPlayerWidthBounds(in: geo)
-        let preferredWidth = max(geo.size.width, geo.size.height) / 3
+        let viewportSize = miniPlayerViewportSize ?? geo.size
+        let preferredWidth = max(viewportSize.width, viewportSize.height) / 3
         let baseWidth = hasCustomMiniPlayerSize ? miniPlayerBaseWidth : preferredWidth
         return min(max(baseWidth, bounds.minWidth), bounds.maxWidth)
     }
@@ -207,6 +210,13 @@ struct PlayerOverlayView_iOS: View {
                         .zIndex(20)
                 }
             }
+        }
+        .background {
+            Color.clear
+                .onGeometryChange(for: CGSize.self, of: \.size) { size in
+                    miniPlayerViewportSize = size
+                }
+                .ignoresSafeArea(.keyboard, edges: .bottom)
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.86), value: playerState.mode)
         .onAppear {
@@ -1543,7 +1553,11 @@ struct PlayerOverlayView_iOS: View {
                 miniOverlayHideTask = nil
             }
             .onChange(of: geo.size) {
-                miniPlayerBaseWidth = effectiveMiniPlayerWidth(in: geo)
+                miniPlayerCenter = centerForMiniPlayerCorner(
+                    miniPlayerCorner, in: geo, miniSize: miniSize, margin: miniMargin)
+            }
+            .onChange(of: miniPlayerViewportSize) {
+                miniPlayerBaseWidth = miniWidth
                 miniPlayerCenter = centerForMiniPlayerCorner(
                     miniPlayerCorner, in: geo, miniSize: miniSize, margin: miniMargin)
             }
@@ -1551,7 +1565,7 @@ struct PlayerOverlayView_iOS: View {
                 miniPlayerCenter = centerForMiniPlayerCorner(
                     miniPlayerCorner, in: geo, miniSize: miniSize, margin: miniMargin)
             }
-            .onChange(of: geo.safeAreaInsets.bottom) {
+            .onChange(of: miniBottomClearance(in: geo)) {
                 miniPlayerCenter = centerForMiniPlayerCorner(
                     miniPlayerCorner, in: geo, miniSize: miniSize, margin: miniMargin)
             }
@@ -1576,9 +1590,7 @@ struct PlayerOverlayView_iOS: View {
         let minX = miniSize.width / 2 + margin
         let maxX = geo.size.width - miniSize.width / 2 - margin
         let minY = geo.safeAreaInsets.top + miniSize.height / 2 + margin
-        let maxY =
-            geo.size.height - miniBottomInset(in: geo) - miniBottomReservedSpace(in: geo)
-            - miniSize.height / 2 - margin
+        let maxY = geo.size.height - miniBottomClearance(in: geo) - miniSize.height / 2 - margin
 
         if maxX < minX || maxY < minY {
             return CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
@@ -1605,9 +1617,7 @@ struct PlayerOverlayView_iOS: View {
         let minX = miniSize.width / 2 + margin
         let maxX = geo.size.width - miniSize.width / 2 - margin
         let minY = geo.safeAreaInsets.top + miniSize.height / 2 + margin
-        let maxY =
-            geo.size.height - miniBottomInset(in: geo) - miniBottomReservedSpace(in: geo)
-            - miniSize.height / 2 - margin
+        let maxY = geo.size.height - miniBottomClearance(in: geo) - miniSize.height / 2 - margin
 
         if maxX < minX || maxY < minY {
             return CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
@@ -1653,19 +1663,13 @@ struct PlayerOverlayView_iOS: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: task)
     }
 
-    private func miniBottomInset(in geo: GeometryProxy) -> CGFloat {
+    private func miniBottomClearance(in geo: GeometryProxy) -> CGFloat {
         #if os(iOS)
-            min(geo.safeAreaInsets.bottom, 32)
+            let viewportSize = miniPlayerViewportSize ?? geo.size
+            let reservedSpace: CGFloat = viewportSize.width > viewportSize.height ? 64 : 16
+            return min(geo.safeAreaInsets.bottom, 32) + reservedSpace
         #else
             geo.safeAreaInsets.bottom
-        #endif
-    }
-
-    private func miniBottomReservedSpace(in geo: GeometryProxy) -> CGFloat {
-        #if os(iOS)
-            geo.size.width > geo.size.height ? 64 : 16
-        #else
-            0
         #endif
     }
 
