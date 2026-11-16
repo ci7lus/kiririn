@@ -33,13 +33,13 @@ kiririn は macOS/iOS 上において、デジタル放送の視聴を行うプ�
 ### macOS
 
 [Releases](https://github.com/ci7lus/kiririn/releases) から最新のリリースをダウンロードできます。<br>
-macOS 15.4 (Sequoia) 以上での実行に対応しているはずです。動作確認は 26.5.2 で行っています。
+macOS 15.4 (Sequoia) 以上での実行に対応しているはずです。動作確認は 27.2 で行っています。
 
 ### iOS
 
 プレリリース版を TestFlight にて配布しています。<br>
 TestFlight 参加リンクは [Releases](https://github.com/ci7lus/kiririn/releases) に記載しています。<br>
-iOS 18.4 以上での実行に対応しているはずです。動作確認は 26.5.2 で行っています。
+iOS 18.4 以上での実行に対応しているはずです。動作確認は 26.6 で行っています。
 
 ## プラグイン
 
