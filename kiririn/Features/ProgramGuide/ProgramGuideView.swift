@@ -492,7 +492,11 @@ struct ProgramGuideView: View {
         .frame(height: sectionHeaderHeight)
         .background {
             if showsTabNavigation {
-                Rectangle().fill(.ultraThinMaterial)
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    #if os(iOS)
+                        .ignoresSafeArea(.container, edges: .horizontal)
+                    #endif
             } else {
                 Color.clear
             }
