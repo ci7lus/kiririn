@@ -23,8 +23,19 @@ struct PlayerOverlayView_iOS: View {
         let spacing: CGFloat
     }
 
+    private struct ExpandedPortraitLayout {
+        let videoFrame: CGRect
+        let lowerBackgroundTop: CGFloat
+        let lowerContextTop: CGFloat
+        let isSplitAtFold: Bool
+    }
+
+    private static let expandedProgressHeight: CGFloat = 2
+    private static let expandedSeekThumbHitHeight: CGFloat = 44
+
     @State var playerState: PlayerState
     @AppStorage(DataBroadcastSettings.enabledKey) private var isDataBroadcastEnabled = false
+    @Environment(\.self) private var environment
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
@@ -36,6 +47,7 @@ struct PlayerOverlayView_iOS: View {
     @State private var dragOffset: CGFloat = 0
     @State private var miniPlayerCenter: CGPoint = .zero
     @State private var miniPlayerDragOffset: CGSize = .zero
+    @State private var miniPlayerViewportSize: CGSize?
     @State private var miniPlayerBaseWidth: CGFloat = 280
     @State private var hasCustomMiniPlayerSize = false
     @State private var miniPlayerPinchStartWidth: CGFloat?
@@ -114,35 +126,17 @@ struct PlayerOverlayView_iOS: View {
         return Double(playerState.playbackStatus.position)
     }
 
-    private var showsOrientationLockButton: Bool {
+    private func showsOrientationLockButton(inFullscreenLayout: Bool) -> Bool {
         guard playerState.mode != .mini else { return false }
         guard UIDevice.current.userInterfaceIdiom != .pad else { return false }
-        if usesFullscreenPlayerLayout {
-            return playerState.showControls
-        }
-        return playerState.showControls && dragOffset == 0
-    }
-
-    private var usesFullscreenPlayerLayout: Bool {
-        switch playerState.mode {
-        case .fullscreen:
-            return true
-        case .expanded:
-            return verticalSizeClass == .compact
-        case .mini:
-            return false
-        }
+        return playerState.showControls && (inFullscreenLayout || dragOffset == 0)
     }
 
     private func expandedModeUsesFullscreenLayout(in size: CGSize) -> Bool {
-        if verticalSizeClass == .compact { return true }
-        if UIDevice.current.userInterfaceIdiom == .pad && size.width > size.height {
-            return true
-        }
-        return false
+        verticalSizeClass == .compact || size.width > size.height
     }
 
-    private func usesGlassFullscreenControls(in size: CGSize) -> Bool {
+    private func usesFullscreenPlayerLayout(in size: CGSize) -> Bool {
         switch playerState.mode {
         case .fullscreen:
             return true
@@ -158,55 +152,79 @@ struct PlayerOverlayView_iOS: View {
         return !(UIDevice.current.userInterfaceIdiom == .phone && verticalSizeClass == .compact)
     }
 
+    private var showsFullscreenExitButton: Bool {
+        playerState.mode == .fullscreen && showsFullscreenToggleButton
+    }
+
     private func miniPlayerWidthBounds(in geo: GeometryProxy) -> (
         margin: CGFloat,
         minWidth: CGFloat,
         maxWidth: CGFloat
     ) {
         let margin: CGFloat = 12
-        let availableWidth = max(120, geo.size.width - margin * 2)
+        let viewportSize = miniPlayerViewportSize ?? geo.size
+        let availableWidth = max(120, viewportSize.width - margin * 2)
         let minWidth = min(180, availableWidth)
-        let maxWidth = min(availableWidth, max(380, geo.size.width / 2))
+        let maxWidth = min(availableWidth, max(380, viewportSize.width / 2))
         return (margin, minWidth, maxWidth)
     }
 
     private func effectiveMiniPlayerWidth(in geo: GeometryProxy) -> CGFloat {
         let bounds = miniPlayerWidthBounds(in: geo)
-        let preferredWidth = max(geo.size.width, geo.size.height) / 3
+        let viewportSize = miniPlayerViewportSize ?? geo.size
+        let preferredWidth = max(viewportSize.width, viewportSize.height) / 3
         let baseWidth = hasCustomMiniPlayerSize ? miniPlayerBaseWidth : preferredWidth
         return min(max(baseWidth, bounds.minWidth), bounds.maxWidth)
     }
 
     var body: some View {
         GeometryReader { geo in
+            let usesFullscreenLayout = usesFullscreenPlayerLayout(in: geo.size)
+            let portraitLayout = expandedPortraitLayout(in: geo)
+            let surfaceFrame = playerSurfaceFrame(
+                in: geo, expandedVideoFrame: portraitLayout.videoFrame)
             ZStack {
-                if usesFullscreenPlayerLayout || playerState.mode == .expanded {
+                if playerState.mode != .mini {
                     Color.black
                         .ignoresSafeArea()
                 }
 
-                persistentPlayerView(geo: geo)
-                switch playerState.mode {
-                case .expanded:
-                    if expandedModeUsesFullscreenLayout(in: geo.size) {
-                        fullscreenView(geo: geo)
-                    } else {
-                        expandedView(geo: geo)
-                    }
-                case .mini:
-                    miniPlayerView(geo: geo)
-                case .fullscreen:
+                persistentPlayerView(surfaceFrame: surfaceFrame)
+                if usesFullscreenLayout {
                     fullscreenView(geo: geo)
+                } else if playerState.mode == .mini {
+                    miniPlayerView(geo: geo, expandedVideoFrame: portraitLayout.videoFrame)
+                } else {
+                    expandedView(geo: geo, layout: portraitLayout)
                 }
 
-                floatingOrientationLockButton(geo: geo)
+                floatingOrientationLockButton(
+                    geo: geo, surfaceFrame: surfaceFrame, usesFullscreenLayout: usesFullscreenLayout
+                )
 
-                if isLandscapeBMLRemoteVisible {
+                if usesFullscreenLayout && isLandscapeBMLRemoteVisible {
                     landscapeBMLRemoteOverlay(geo: geo)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                         .zIndex(20)
                 }
             }
+            .onChange(of: usesFullscreenLayout) { _, isFullscreen in
+                if !isFullscreen {
+                    resetLandscapeBMLRemote()
+                }
+            }
+            .onChange(of: geo.size.height > geo.size.width) { _, isPortrait in
+                if isPortrait && playerState.mode == .fullscreen {
+                    resetLandscapeBMLRemote()
+                }
+            }
+        }
+        .background {
+            Color.clear
+                .onGeometryChange(for: CGSize.self, of: \.size) { size in
+                    miniPlayerViewportSize = size
+                }
+                .ignoresSafeArea(.keyboard, edges: .bottom)
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.86), value: playerState.mode)
         .onAppear {
@@ -230,13 +248,6 @@ struct PlayerOverlayView_iOS: View {
         }
         .onChange(of: isDataBroadcastEnabled) {
             ensureLowerTabSelection()
-        }
-        .onChange(of: verticalSizeClass) { _, newValue in
-            if newValue != .compact {
-                isLandscapeBMLRemoteVisible = false
-                landscapeBMLRemoteOffset = .zero
-                landscapeBMLRemoteDragOffset = .zero
-            }
         }
         .onChange(of: playerState.mode) { oldMode, newMode in
             isInfoSheetVisible = true
@@ -291,9 +302,8 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @ViewBuilder
-    private func persistentPlayerView(geo: GeometryProxy) -> some View {
+    private func persistentPlayerView(surfaceFrame: CGRect) -> some View {
         if let player = playerState.player {
-            let surfaceFrame = playerSurfaceFrame(in: geo)
             let frame = bmlVideoFrame(in: surfaceFrame)
             ZStack {
                 Color.black
@@ -321,19 +331,17 @@ struct PlayerOverlayView_iOS: View {
         }
 
         if let session = playerState.dataBroadcastSession {
-            let frame = playerSurfaceFrame(in: geo)
             BMLOverlayView_iOS(session: session)
                 .id(ObjectIdentifier(session.webView))
-                .frame(width: frame.width, height: frame.height)
+                .frame(width: surfaceFrame.width, height: surfaceFrame.height)
                 .clipShape(.rect(cornerRadius: playerState.mode == .mini ? 14 : 0))
-                .position(x: frame.midX, y: frame.midY)
+                .position(x: surfaceFrame.midX, y: surfaceFrame.midY)
                 .opacity(playerState.bmlContentVisible ? 1 : 0)
                 .allowsHitTesting(false)
                 .ignoresSafeArea(edges: verticalSizeClass == .compact ? .bottom : [])
         }
 
         if playerState.player != nil {
-            let frame = playerSurfaceFrame(in: geo)
             ForEach(playerState.availableOverlayPlugins) { plugin in
                 PluginOverlayView(
                     pluginDefinition: plugin,
@@ -345,9 +353,9 @@ struct PlayerOverlayView_iOS: View {
                     playerID: playerState.id
                 )
                 .id(plugin.id)
-                .frame(width: frame.width, height: frame.height)
+                .frame(width: surfaceFrame.width, height: surfaceFrame.height)
                 .clipShape(.rect(cornerRadius: playerState.mode == .mini ? 14 : 0))
-                .position(x: frame.midX, y: frame.midY)
+                .position(x: surfaceFrame.midX, y: surfaceFrame.midY)
                 .opacity(playerState.showingPluginOverlay ? 1 : 0)
                 .allowsHitTesting(false)
                 .ignoresSafeArea(edges: verticalSizeClass == .compact ? .bottom : [])
@@ -373,14 +381,45 @@ struct PlayerOverlayView_iOS: View {
         )
     }
 
-    private func playerSurfaceFrame(in geo: GeometryProxy) -> CGRect {
+    private func expandedPortraitLayout(in geo: GeometryProxy) -> ExpandedPortraitLayout {
+        let size = geo.size
+        let progressHeight = Self.expandedProgressHeight
+        guard showsLowerContext, playerState.mode != .fullscreen,
+            !expandedModeUsesFullscreenLayout(in: size), size.height > size.width,
+            #available(iOS 27.1, *),
+            let fold = geo.reservedRegions(kind: .division).map(\.frame).first(where: {
+                $0.width > $0.height && $0.minY > progressHeight && $0.maxY < size.height
+            })
+        else {
+            let height = size.width * 9 / 16
+            return ExpandedPortraitLayout(
+                videoFrame: CGRect(x: 0, y: 0, width: size.width, height: height),
+                lowerBackgroundTop: height,
+                lowerContextTop: height,
+                isSplitAtFold: false
+            )
+        }
+
+        let videoBottom = fold.minY - progressHeight
+        let width = min(size.width, videoBottom * 16 / 9)
+        let height = width * 9 / 16
+        return ExpandedPortraitLayout(
+            videoFrame: CGRect(
+                x: (size.width - width) / 2, y: max(0, videoBottom - height),
+                width: width, height: height),
+            lowerBackgroundTop: fold.midY,
+            lowerContextTop: fold.maxY,
+            isSplitAtFold: true
+        )
+    }
+
+    private func playerSurfaceFrame(in geo: GeometryProxy, expandedVideoFrame: CGRect) -> CGRect {
         switch playerState.mode {
         case .expanded:
             if expandedModeUsesFullscreenLayout(in: geo.size) {
                 return CGRect(origin: .zero, size: geo.size)
             }
-            let height = geo.size.width * 9 / 16
-            return CGRect(x: 0, y: 0, width: geo.size.width, height: height)
+            return expandedVideoFrame
         case .mini:
             let miniWidth = effectiveMiniPlayerWidth(in: geo)
             let miniHeight = miniWidth * 9 / 16
@@ -391,7 +430,8 @@ struct PlayerOverlayView_iOS: View {
                     y: miniPlayerCenter.y + miniPlayerDragOffset.height
                 )
             } else {
-                center = sourcePlayerCenterForMiniTransition(in: geo)
+                center = sourcePlayerCenterForMiniTransition(
+                    in: geo, expandedVideoFrame: expandedVideoFrame)
             }
             return CGRect(
                 x: center.x - miniWidth / 2,
@@ -404,14 +444,15 @@ struct PlayerOverlayView_iOS: View {
         }
     }
 
-    private func sourcePlayerCenterForMiniTransition(in geo: GeometryProxy) -> CGPoint {
+    private func sourcePlayerCenterForMiniTransition(
+        in geo: GeometryProxy, expandedVideoFrame: CGRect
+    ) -> CGPoint {
         switch miniEntrySourceMode {
         case .expanded:
             if expandedModeUsesFullscreenLayout(in: geo.size) {
                 return CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
             }
-            let height = geo.size.width * 9 / 16
-            return CGPoint(x: geo.size.width / 2, y: height / 2)
+            return CGPoint(x: expandedVideoFrame.midX, y: expandedVideoFrame.midY)
         case .fullscreen:
             return CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
         case .mini:
@@ -423,25 +464,29 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @ViewBuilder
-    private func expandedView(geo: GeometryProxy) -> some View {
+    private func expandedView(geo: GeometryProxy, layout: ExpandedPortraitLayout) -> some View {
         if !showsLowerContext {
             macVideoOnlyExpandedView(geo: geo)
         } else {
-            let videoHeight = geo.size.width * 9 / 16
+            let videoFrame = layout.videoFrame
+            let seekThumbBottomInset: CGFloat = 8
+            let seekBottomPadding =
+                layout.isSplitAtFold
+                ? Self.expandedSeekThumbHitHeight / 2 - seekThumbBottomInset : 0
 
             ZStack(alignment: .top) {
                 if playerState.player == nil {
                     Color.black
                 } else {
                     VStack(spacing: 0) {
-                        Color.clear.frame(height: videoHeight)
+                        Color.clear.frame(height: layout.lowerBackgroundTop)
                         Color.kiririnSystemBackground
                     }
                 }
 
                 VStack(spacing: 0) {
                     Spacer()
-                        .frame(height: videoHeight)
+                        .frame(height: layout.lowerContextTop)
 
                     ZStack(alignment: .bottom) {
                         lowerContextView
@@ -454,14 +499,21 @@ struct PlayerOverlayView_iOS: View {
                             .padding(.top, 4)
                             .id(playerState.currentPlayable?.id)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
-                            .ignoresSafeArea()
+                            .ignoresSafeArea(edges: .bottom)
                         } else {
                             infoSheetCollapsedBar
                         }
                     }
                     .mask(alignment: .top) {
                         Rectangle()
-                            .padding(.bottom, -(geo.safeAreaInsets.bottom + 80))
+                            .padding(
+                                EdgeInsets(
+                                    top: 0,
+                                    leading: isInfoSheetVisible ? 0 : -geo.safeAreaInsets.leading,
+                                    bottom: -(geo.safeAreaInsets.bottom + 80),
+                                    trailing: isInfoSheetVisible ? 0 : -geo.safeAreaInsets.trailing
+                                )
+                            )
                     }
                 }
                 .zIndex(0)
@@ -469,14 +521,18 @@ struct PlayerOverlayView_iOS: View {
                 VStack(spacing: 0) {
                     ZStack(alignment: .top) {
                         videoArea(
-                            width: geo.size.width,
-                            height: videoHeight,
+                            width: videoFrame.width,
+                            height: videoFrame.height,
                             showsControlsOverlay: false
                         )
 
-                        videoControlsOverlay(width: geo.size.width, height: videoHeight)
-                            .opacity(playerState.showControls && dragOffset == 0 ? 1 : 0)
-                            .allowsHitTesting(playerState.showControls && dragOffset == 0)
+                        videoControlsOverlay(
+                            width: videoFrame.width,
+                            height: videoFrame.height,
+                            seekBottomPadding: seekBottomPadding
+                        )
+                        .opacity(playerState.showControls && dragOffset == 0 ? 1 : 0)
+                        .allowsHitTesting(playerState.showControls && dragOffset == 0)
                     }
 
                     if isSeekActionAvailable && !(playerState.showControls && dragOffset == 0) {
@@ -487,9 +543,10 @@ struct PlayerOverlayView_iOS: View {
                                     .frame(width: pGeo.size.width * CGFloat(displayProgress))
                             }
                         }
-                        .frame(height: 2)
+                        .frame(width: videoFrame.width, height: Self.expandedProgressHeight)
                     }
                 }
+                .padding(.top, videoFrame.minY)
                 .zIndex(2)
                 .gesture(
                     DragGesture()
@@ -516,8 +573,11 @@ struct PlayerOverlayView_iOS: View {
                 )
 
                 if isSeekActionAvailable && playerState.showControls && dragOffset == 0 {
-                    expandedSeekThumbHitArea(width: geo.size.width)
-                        .position(x: geo.size.width / 2, y: videoHeight - 8)
+                    expandedSeekThumbHitArea(width: videoFrame.width)
+                        .position(
+                            x: videoFrame.midX,
+                            y: videoFrame.maxY - seekThumbBottomInset - seekBottomPadding
+                        )
                         .zIndex(3)
                 }
             }
@@ -527,7 +587,7 @@ struct PlayerOverlayView_iOS: View {
     private func expandedSeekThumbHitArea(width: CGFloat) -> some View {
         GeometryReader { geo in
             let hitWidth: CGFloat = 96
-            let hitHeight: CGFloat = 44
+            let hitHeight = Self.expandedSeekThumbHitHeight
             let availableWidth = max(geo.size.width, 1)
             let progress = min(max(CGFloat(displayProgress), 0), 1)
             let thumbCenterX = min(
@@ -553,7 +613,7 @@ struct PlayerOverlayView_iOS: View {
                 )
                 .position(x: thumbCenterX, y: hitHeight / 2)
         }
-        .frame(width: width, height: 44)
+        .frame(width: width, height: Self.expandedSeekThumbHitHeight)
     }
 
     @ViewBuilder
@@ -589,7 +649,7 @@ struct PlayerOverlayView_iOS: View {
             videoTapZonesOverlay(width: width, height: height)
                 .allowsHitTesting(!playerState.showControls)
 
-            feedbackOverlays(height: height)
+            feedbackOverlays(height: height, usesFullscreenLayout: false)
 
             Group {
                 Button {
@@ -626,20 +686,21 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @ViewBuilder
-    private func floatingOrientationLockButton(geo: GeometryProxy) -> some View {
-        if showsOrientationLockButton {
-            if #available(iOS 26, *), usesGlassFullscreenControls(in: geo.size) {
+    private func floatingOrientationLockButton(
+        geo: GeometryProxy, surfaceFrame: CGRect, usesFullscreenLayout: Bool
+    ) -> some View {
+        if showsOrientationLockButton(inFullscreenLayout: usesFullscreenLayout) {
+            if #available(iOS 26, *), usesFullscreenLayout {
                 EmptyView()
             } else {
-                let frame = playerSurfaceFrame(in: geo)
                 let centerBottomInset =
-                    usesFullscreenPlayerLayout
+                    usesFullscreenLayout
                     ? max(geo.safeAreaInsets.bottom + 104, 104)
                     : 28
                 orientationLockButton(usesGlass: false)
                     .position(
-                        x: frame.maxX - 28,
-                        y: frame.maxY - centerBottomInset
+                        x: surfaceFrame.maxX - 28,
+                        y: surfaceFrame.maxY - centerBottomInset
                     )
                     .transition(.opacity)
                     .zIndex(10)
@@ -648,6 +709,12 @@ struct PlayerOverlayView_iOS: View {
                     .animation(.easeInOut(duration: 0.2), value: playerState.showControls)
             }
         }
+    }
+
+    private func resetLandscapeBMLRemote() {
+        isLandscapeBMLRemoteVisible = false
+        landscapeBMLRemoteOffset = .zero
+        landscapeBMLRemoteDragOffset = .zero
     }
 
     private func landscapeBMLRemoteOverlay(geo: GeometryProxy) -> some View {
@@ -722,7 +789,9 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @ViewBuilder
-    private func videoControlsOverlay(width: CGFloat, height: CGFloat) -> some View {
+    private func videoControlsOverlay(
+        width: CGFloat, height: CGFloat, seekBottomPadding: CGFloat = 0
+    ) -> some View {
         ZStack {
             Color.clear
                 .contentShape(Rectangle())
@@ -733,7 +802,7 @@ struct PlayerOverlayView_iOS: View {
 
             videoTapZonesOverlay(width: width, height: height)
 
-            transportControls(width: width, height: height, isFullscreen: false, usesGlass: false)
+            transportControls(width: width, height: height, isFullscreen: false)
 
             VStack {
                 HStack(spacing: 8) {
@@ -754,7 +823,7 @@ struct PlayerOverlayView_iOS: View {
 
                 Spacer()
 
-                seekBarOverlay(horizontalPadding: 0, bottomPadding: 0)
+                seekBarOverlay(horizontalPadding: 0, bottomPadding: seekBottomPadding)
             }
 
         }
@@ -765,12 +834,11 @@ struct PlayerOverlayView_iOS: View {
     private func transportControls(
         width: CGFloat,
         height: CGFloat,
-        isFullscreen: Bool,
-        usesGlass: Bool
+        isFullscreen: Bool
     )
         -> some View
     {
-        if #available(iOS 26, *), isFullscreen, usesGlass {
+        if #available(iOS 26, *), isFullscreen {
             glassTransportControls(width: width, height: height, isFullscreen: isFullscreen)
         } else if isFullscreen {
             legacyFullscreenTransportControls()
@@ -1278,7 +1346,7 @@ struct PlayerOverlayView_iOS: View {
     }
 
     @ViewBuilder
-    private func miniPlayerView(geo: GeometryProxy) -> some View {
+    private func miniPlayerView(geo: GeometryProxy, expandedVideoFrame: CGRect) -> some View {
         let bounds = miniPlayerWidthBounds(in: geo)
         let miniMargin = bounds.margin
         let minMiniWidth = bounds.minWidth
@@ -1527,7 +1595,8 @@ struct PlayerOverlayView_iOS: View {
                 if !hasInitializedMiniPlayerPosition {
                     let targetCenter = centerForMiniPlayerCorner(
                         miniPlayerCorner, in: geo, miniSize: miniSize, margin: miniMargin)
-                    miniPlayerCenter = sourcePlayerCenterForMiniTransition(in: geo)
+                    miniPlayerCenter = sourcePlayerCenterForMiniTransition(
+                        in: geo, expandedVideoFrame: expandedVideoFrame)
                     hasInitializedMiniPlayerPosition = true
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
                         miniPlayerCenter = targetCenter
@@ -1543,7 +1612,11 @@ struct PlayerOverlayView_iOS: View {
                 miniOverlayHideTask = nil
             }
             .onChange(of: geo.size) {
-                miniPlayerBaseWidth = effectiveMiniPlayerWidth(in: geo)
+                miniPlayerCenter = centerForMiniPlayerCorner(
+                    miniPlayerCorner, in: geo, miniSize: miniSize, margin: miniMargin)
+            }
+            .onChange(of: miniPlayerViewportSize) {
+                miniPlayerBaseWidth = miniWidth
                 miniPlayerCenter = centerForMiniPlayerCorner(
                     miniPlayerCorner, in: geo, miniSize: miniSize, margin: miniMargin)
             }
@@ -1551,7 +1624,7 @@ struct PlayerOverlayView_iOS: View {
                 miniPlayerCenter = centerForMiniPlayerCorner(
                     miniPlayerCorner, in: geo, miniSize: miniSize, margin: miniMargin)
             }
-            .onChange(of: geo.safeAreaInsets.bottom) {
+            .onChange(of: miniBottomClearance(in: geo)) {
                 miniPlayerCenter = centerForMiniPlayerCorner(
                     miniPlayerCorner, in: geo, miniSize: miniSize, margin: miniMargin)
             }
@@ -1576,9 +1649,7 @@ struct PlayerOverlayView_iOS: View {
         let minX = miniSize.width / 2 + margin
         let maxX = geo.size.width - miniSize.width / 2 - margin
         let minY = geo.safeAreaInsets.top + miniSize.height / 2 + margin
-        let maxY =
-            geo.size.height - miniBottomInset(in: geo) - miniBottomReservedSpace(in: geo)
-            - miniSize.height / 2 - margin
+        let maxY = geo.size.height - miniBottomClearance(in: geo) - miniSize.height / 2 - margin
 
         if maxX < minX || maxY < minY {
             return CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
@@ -1605,9 +1676,7 @@ struct PlayerOverlayView_iOS: View {
         let minX = miniSize.width / 2 + margin
         let maxX = geo.size.width - miniSize.width / 2 - margin
         let minY = geo.safeAreaInsets.top + miniSize.height / 2 + margin
-        let maxY =
-            geo.size.height - miniBottomInset(in: geo) - miniBottomReservedSpace(in: geo)
-            - miniSize.height / 2 - margin
+        let maxY = geo.size.height - miniBottomClearance(in: geo) - miniSize.height / 2 - margin
 
         if maxX < minX || maxY < minY {
             return CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
@@ -1653,19 +1722,17 @@ struct PlayerOverlayView_iOS: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: task)
     }
 
-    private func miniBottomInset(in geo: GeometryProxy) -> CGFloat {
+    private func miniBottomClearance(in geo: GeometryProxy) -> CGFloat {
         #if os(iOS)
-            min(geo.safeAreaInsets.bottom, 32)
+            let bottomInset = min(geo.safeAreaInsets.bottom, 32)
+            if #available(iOS 27.1, *), environment.toolbarVerticalEdge != nil {
+                return bottomInset
+            }
+            let viewportSize = miniPlayerViewportSize ?? geo.size
+            let reservedSpace: CGFloat = viewportSize.width > viewportSize.height ? 64 : 16
+            return bottomInset + reservedSpace
         #else
             geo.safeAreaInsets.bottom
-        #endif
-    }
-
-    private func miniBottomReservedSpace(in geo: GeometryProxy) -> CGFloat {
-        #if os(iOS)
-            geo.size.width > geo.size.height ? 64 : 16
-        #else
-            0
         #endif
     }
 
@@ -1687,7 +1754,7 @@ struct PlayerOverlayView_iOS: View {
                     .ignoresSafeArea()
             }
 
-            feedbackOverlays(height: geo.size.height)
+            feedbackOverlays(height: geo.size.height, usesFullscreenLayout: true)
                 .ignoresSafeArea()
 
             Group {
@@ -1762,7 +1829,6 @@ struct PlayerOverlayView_iOS: View {
     @ViewBuilder
     private func fullscreenControlsOverlay(geo: GeometryProxy) -> some View {
         let isPortraitFullscreen = geo.size.height > geo.size.width
-        let usesGlassControls = usesGlassFullscreenControls(in: geo.size)
         let metadataBottomPadding: CGFloat =
             isPortraitFullscreen || isSeekActionAvailable ? 4 : 24
         ZStack {
@@ -1780,12 +1846,11 @@ struct PlayerOverlayView_iOS: View {
             transportControls(
                 width: geo.size.width,
                 height: geo.size.height,
-                isFullscreen: true,
-                usesGlass: usesGlassControls
+                isFullscreen: true
             )
 
             VStack {
-                if #available(iOS 26, *), usesGlassControls {
+                if #available(iOS 26, *) {
                     fullscreenGlassTopControls(geo: geo)
                 } else {
                     legacyFullscreenTopControls(isPortraitFullscreen: isPortraitFullscreen)
@@ -1793,7 +1858,7 @@ struct PlayerOverlayView_iOS: View {
 
                 Spacer()
 
-                if #available(iOS 26, *), usesGlassControls {
+                if #available(iOS 26, *) {
                     fullscreenGlassBottomMetadata(
                         horizontalPadding: 16,
                         bottomPadding: metadataBottomPadding
@@ -1802,8 +1867,7 @@ struct PlayerOverlayView_iOS: View {
 
                 fullscreenSeekbar(
                     horizontalPadding: 16,
-                    bottomPadding: 16,
-                    usesGlass: usesGlassControls
+                    bottomPadding: 16
                 )
             }
 
@@ -1813,7 +1877,7 @@ struct PlayerOverlayView_iOS: View {
     @available(iOS 26.0, *)
     private func fullscreenGlassTopControls(geo: GeometryProxy) -> some View {
         HStack(spacing: 12) {
-            if showsFullscreenToggleButton {
+            if showsFullscreenExitButton {
                 Button {
                     playerState.exitFullscreen()
                 } label: {
@@ -1856,7 +1920,7 @@ struct PlayerOverlayView_iOS: View {
                     Spacer()
                     topRightControlButtons(
                         isFullscreen: true,
-                        showsFullscreenToggle: showsFullscreenToggleButton
+                        showsFullscreenToggle: showsFullscreenExitButton
                     )
                 }
             }
@@ -1876,7 +1940,7 @@ struct PlayerOverlayView_iOS: View {
 
                 topRightControlButtons(
                     isFullscreen: true,
-                    showsFullscreenToggle: showsFullscreenToggleButton
+                    showsFullscreenToggle: showsFullscreenExitButton
                 )
                 .padding(.trailing, 8)
             }
@@ -1922,7 +1986,7 @@ struct PlayerOverlayView_iOS: View {
             Spacer(minLength: 4)
 
             VStack(spacing: 10) {
-                if showsOrientationLockButton {
+                if showsOrientationLockButton(inFullscreenLayout: true) {
                     orientationLockButton(usesGlass: true)
                 }
 
@@ -2373,12 +2437,11 @@ struct PlayerOverlayView_iOS: View {
     @ViewBuilder
     private func fullscreenSeekbar(
         horizontalPadding: CGFloat,
-        bottomPadding: CGFloat,
-        usesGlass: Bool
+        bottomPadding: CGFloat
     )
         -> some View
     {
-        if #available(iOS 26, *), usesGlass {
+        if #available(iOS 26, *) {
             fullscreenGlassSeekbar(
                 horizontalPadding: horizontalPadding,
                 bottomPadding: bottomPadding
@@ -2589,11 +2652,11 @@ struct PlayerOverlayView_iOS: View {
         return message
     }
 
-    private func feedbackOverlays(height: CGFloat) -> some View {
+    private func feedbackOverlays(height: CGFloat, usesFullscreenLayout: Bool) -> some View {
         PlayerFeedbackOverlays(
             height: height,
             verticalSizeClass: verticalSizeClass,
-            usesFullscreenPlayerLayout: usesFullscreenPlayerLayout,
+            usesFullscreenPlayerLayout: usesFullscreenLayout,
             showControls: playerState.showControls,
             isSeekFeedbackVisible: isSeekFeedbackVisible,
             seekFeedbackText: seekFeedbackText,
@@ -3229,11 +3292,18 @@ private struct CollapsedBarReservedHeightPreferenceKey: PreferenceKey {
 }
 
 struct PlayerInfoSheetCollapsedBar: View {
+    @Environment(\.self) private var environment
     let onTap: () -> Void
     var onReservedHeightChange: ((CGFloat) -> Void)? = nil
 
-    private static let capsuleBottomPadding: CGFloat = 64
     private static let coordinateSpaceName = "PlayerInfoSheetCollapsedBar"
+
+    private var capsuleBottomPadding: CGFloat {
+        if #available(iOS 27.1, *), environment.toolbarVerticalEdge != nil {
+            return 0
+        }
+        return 64
+    }
 
     var body: some View {
         GeometryReader { outerGeo in
@@ -3256,7 +3326,7 @@ struct PlayerInfoSheetCollapsedBar: View {
                         )
                     }
                 )
-                .padding(.bottom, Self.capsuleBottomPadding)
+                .padding(.bottom, capsuleBottomPadding)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
